@@ -118,3 +118,125 @@ it('serializes competing photo writes and rejects the response after sign-out', 
   await waitFor(() => expect(finish).toBeDefined()); expect(writes('PUT')).toHaveLength(1); expect(screen.getByRole('button',{ name:'Eliminar foto 1' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' })); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => finish?.(json(list))); expect(screen.queryByRole('heading',{ name:'Completá tu perfil' })).not.toBeInTheDocument();
 });
+it('fails closed on inconsistent legal status and recovers only after authoritative refresh', async () => {
+  let inconsistent = true;
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => inconsistent && String(input).endsWith('/legal-status') ? Promise.resolve(json({ requirementsSatisfied:false,documents:[] })) : original(input,options));
+  mount();
+  expect(await screen.findByRole('alert')).toHaveTextContent('La respuesta del servidor no es válida');
+  expect(fetcher.mock.calls.filter(x => String(x[0]).endsWith('/legal-status'))).toHaveLength(2);
+  expect(screen.queryByRole('form',{ name:'Crear perfil' })).not.toBeInTheDocument();
+  expect(writes('POST')).toHaveLength(0);
+  expect(auth.signOut).not.toHaveBeenCalled();
+  inconsistent = false;
+  fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  await screen.findByRole('form',{ name:'Crear perfil' });
+});
+it.each(['network','server','malformed'])('allows DRAFT completion and updates when auxiliary Home fails: %s', async failure => {
+  profile = { ...initialProfile };
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => {
+    if (String(input).endsWith('/home')) {
+      if (failure === 'network') return Promise.reject(new TypeError('offline'));
+      return Promise.resolve(failure === 'server' ? json({ code:'INTERNAL_ERROR' },503) : json({ invalid:true }));
+    }
+    return original(input,options);
+  });
+  mount();
+  await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  expect(screen.getByRole('heading',{ name:'Inicio no disponible' })).toBeInTheDocument();
+  expect(screen.getByText(/Su estado es desconocido/)).toBeInTheDocument();
+  expect(screen.queryByRole('heading',{ name:'Inicio: interacciones vigentes' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled();
+  fireEvent.click(screen.getByText('Datos del perfil',{ selector:'summary' }));
+  const form = screen.getByRole('form',{ name:'Datos del perfil' });
+  fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Rosario' } });
+  fireEvent.submit(form);
+  await waitFor(() => expect(profile?.city).toBe('Rosario'));
+  await waitFor(() => expect(screen.getByRole('button',{ name:'Reintentar Inicio' })).toBeEnabled());
+  expect(writes('PATCH')).toHaveLength(1);
+  expect(auth.signOut).not.toHaveBeenCalled();
+});
+it('creation reaches completion even when the new DRAFT Home read fails', async () => {
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => String(input).endsWith('/home') ? Promise.reject(new TypeError('offline')) : original(input,options));
+  mount(); const form = await createForm(); fireEvent.submit(form);
+  await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  expect(screen.getByRole('heading',{ name:'Inicio no disponible' })).toBeInTheDocument();
+  expect(profile?.status).toBe('DRAFT');
+  expect(writes('POST')).toHaveLength(1);
+  expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled();
+});
+it.each([false,true])('Home retry installs only authoritative interaction state (existing=%s)', async existing => {
+  profile = { ...initialProfile }; let unavailable = true;
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => {
+    if (String(input).endsWith('/home')) {
+      if (unavailable) return Promise.reject(new TypeError('offline'));
+      if (existing) return Promise.resolve(json({ pendingActions:[{}],nextSteps:[],passiveNotices:[],activeInteractionsSummary:{ hasPendingSchedulingConnection:false,activeInitialCount:1,activeConnectionCount:0,actionableConnectionCount:0 } }));
+    }
+    return original(input,options);
+  });
+  mount(); await screen.findByRole('heading',{ name:'Inicio no disponible' });
+  unavailable = false; fireEvent.click(screen.getByRole('button',{ name:'Reintentar Inicio' }));
+  await waitFor(() => expect(screen.queryByRole('heading',{ name:'Inicio no disponible' })).not.toBeInTheDocument());
+  expect(!!screen.queryByRole('heading',{ name:'Inicio: interacciones vigentes' })).toBe(existing);
+  expect(writes('POST')).toHaveLength(0);
+  unavailable = true; fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  await screen.findByRole('heading',{ name:'Inicio no disponible' });
+  expect(screen.queryByRole('heading',{ name:'Inicio: interacciones vigentes' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled();
+});
+it.each(['ACCOUNT_TEMPORARILY_BANNED','INVALID_TOKEN'])('does not mask session/account errors from Home: %s', async code => {
+  profile = { ...initialProfile }; let restricted = false;
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => {
+    const path = String(input);
+    if (path.endsWith('/home')) restricted = true;
+    if (restricted && (path.endsWith('/home') || path === '/api/me')) return Promise.resolve(json({ code },code === 'INVALID_TOKEN' ? 401 : 403));
+    return original(input,options);
+  });
+  mount(); await screen.findByRole('alert');
+  expect(screen.queryByRole('heading',{ name:'Inicio no disponible' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{ name:'Activar perfil' })).not.toBeInTheDocument();
+  if (code === 'INVALID_TOKEN') { await screen.findByRole('button',{ name:'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce(); }
+  else { expect(screen.getByRole('alert')).toHaveTextContent('suspendida temporalmente'); expect(auth.signOut).not.toHaveBeenCalled(); }
+});
+it('serializes Home retry and rejects its late response after sign-out', async () => {
+  profile = { ...initialProfile }; let finish: ((value: Response) => void) | undefined; let retrying = false;
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => String(input).endsWith('/home') ? retrying ? new Promise(resolve => { finish = resolve; }) : Promise.reject(new TypeError('offline')) : original(input,options));
+  mount(); await screen.findByRole('heading',{ name:'Inicio no disponible' });
+  retrying = true; const retry = screen.getByRole('button',{ name:'Reintentar Inicio' }); fireEvent.click(retry); fireEvent.click(retry);
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(fetcher.mock.calls.filter(x => String(x[0]).endsWith('/home'))).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' })); await screen.findByRole('button',{ name:'Ingresar' });
+  await act(async () => finish?.(json({ invalid:true })));
+  expect(screen.queryByRole('heading',{ name:'Completá tu perfil' })).not.toBeInTheDocument();
+});
+it.each(['DRAFT','INACTIVE'])('disables activation for an unverified email on %s', async status => {
+  profile = { ...initialProfile,status }; Object.defineProperty(user,'emailVerified',{ value:false,configurable:true });
+  mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  const activate = screen.getByRole('button',{ name:'Activar perfil' });
+  expect(activate).toBeDisabled(); expect(activate).toHaveAccessibleDescription('Verificá tu email y presioná «Ya verifiqué» antes de activar el perfil.');
+  fireEvent.click(activate); expect(writes('POST')).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button',{ name:'Reenviar correo' }));
+  await waitFor(() => expect(auth.verify).toHaveBeenCalledOnce());
+  await waitFor(() => expect(screen.getByRole('button',{ name:'Ya verifiqué' })).toBeEnabled());
+  expect(activate).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{ name:'Ya verifiqué' }));
+  await screen.findByText(/Todavía no vemos el email verificado/);
+  expect(activate).toBeDisabled(); expect(writes('POST')).toHaveLength(0);
+});
+it('enables activation after Firebase reload confirms email verification', async () => {
+  profile = { ...initialProfile }; Object.defineProperty(user,'emailVerified',{ value:false,configurable:true });
+  vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user,'emailVerified',{ value:true,configurable:true }); });
+  mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{ name:'Ya verifiqué' }));
+  await waitFor(() => expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button',{ name:'Activar perfil' }));
+  await screen.findByRole('heading',{ name:'Tu perfil está activo' });
+  expect(user.getIdToken).toHaveBeenCalledWith(true);
+  expect(fetcher.mock.calls.filter(x => String(x[0]).endsWith('/activation'))).toHaveLength(1);
+});

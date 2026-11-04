@@ -44,7 +44,8 @@ export function photos(raw: unknown): Photo[] {
 }
 export function legal(status: unknown, catalog: unknown): { satisfied: boolean; documents: LegalDocument[] } {
   if (!object(status) || typeof status.requirementsSatisfied !== 'boolean' || !Array.isArray(status.documents) || !object(catalog) || !Array.isArray(catalog.documents)) return invalid();
-  if (status.requirementsSatisfied || status.documents.length === 0) return { satisfied: true, documents: [] };
+  if (status.requirementsSatisfied) return { satisfied: true, documents: [] };
+  if (status.documents.length === 0) return invalid();
   const entries = catalog.documents;
   const documents = status.documents.map((item): LegalDocument => {
     if (!object(item) || typeof item.type !== 'string' || typeof item.version !== 'string' || (item.requiredAction !== 'ACCEPTED' && item.requiredAction !== 'ACKNOWLEDGED') || typeof item.satisfied !== 'boolean') return invalid();

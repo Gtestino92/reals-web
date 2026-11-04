@@ -12,12 +12,14 @@ describe('onboarding contracts', () => {
   it.each([{ birthDate:'2000-02-30' },{ birthDate:'2020-01-01' },{ birthDate:'1900-01-01' },{ birthDate:'invalid' },{ displayName:'x' },{ displayName:'<script>' },{ city:'' },{ countryCode:'ZZ' },{ gender:'unknown' },{ intention:'unknown' },{ lookingForGenders:[] },{ bio:'x'.repeat(1001) },{ preferredMinAge:50, preferredMaxAge:40 },{ maxDistanceKm:101 }])('rejects invalid form %j', patch => { expect(validate({ ...profile,...patch },countryList,'create').length).toBeGreaterThan(0); });
   it.each(['DRAFT','INACTIVE','ACTIVE'])('accepts backend lifecycle %s', status => expect(fullProfile({ ...profile,status },'u').status).toBe(status));
   it.each([null,{}, { ...profile,userId:'other' },{ ...profile,preferredMinAge:NaN },{ ...profile,lookingForGenders:['invalid'] }])('rejects malformed profiles', raw => expect(() => fullProfile(raw,'u')).toThrow(ApiError));
-  it('legal empty and satisfied catalogs pass; unsatisfied requires exact joined metadata', () => {
+  it('legal satisfied catalogs pass; unsatisfied requires exact joined metadata', () => {
     expect(legal({ requirementsSatisfied:true,documents:[] },{ documents:[] }).satisfied).toBe(true);
-    expect(legal({ requirementsSatisfied:false,documents:[] },{ documents:[] }).satisfied).toBe(true);
     const d = { type:'PRIVACY_NOTICE',version:'v2',requiredAction:'ACKNOWLEDGED',satisfied:false };
     expect(legal({ requirementsSatisfied:false,documents:[d] },{ documents:[{ ...d,url:'https://example.com/privacy' }] }).documents[0]?.version).toBe('v2');
     expect(() => legal({ requirementsSatisfied:false,documents:[d] },{ documents:[{ ...d,version:'v1' }] })).toThrow();
+  });
+  it.each([{ documents:[] },{ documents:[{ type:'PRIVACY_NOTICE',version:'v2',requiredAction:'ACKNOWLEDGED',url:'https://example.com/privacy' }] }])('rejects unsatisfied legal status with no documents regardless of catalog %j', ({ documents }) => {
+    expect(() => legal({ requirementsSatisfied:false,documents:[] },{ documents })).toThrow(ApiError);
   });
   it('validates photos, placements and safe URLs', () => { expect(photos([photo])).toEqual([photo]); for (const raw of [[photo,photo],[{ ...photo,position:0 }],[{ ...photo,url:'javascript:alert(1)' }],[{ ...photo,moderationStatus:'???' }]]) expect(() => photos(raw)).toThrow(); });
   it('recognizes DRAFT interaction routing without deriving transitions', () => { const home = { pendingActions:[],nextSteps:[],passiveNotices:[],activeInteractionsSummary:{ hasPendingSchedulingConnection:false,activeInitialCount:0,activeConnectionCount:0,actionableConnectionCount:0 } }; expect(hasInteractions(home)).toBe(false); expect(hasInteractions({ ...home,nextSteps:[{}] })).toBe(true); expect(() => hasInteractions({})).toThrow(); });
