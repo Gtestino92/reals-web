@@ -1,38 +1,23 @@
-# Initial architecture
+# Architecture — Stage B
 
-Vite serves a client-rendered React application. TypeScript checks application, tests and Vite configuration in strict mode. Plain CSS supplies shared design tokens with semantic light/dark roles from Android.
+Vite serves a React/strict TypeScript application with plain CSS tokens. Login layout, copy and assets remain in `auth/LoginScreen.tsx` and `auth/login.css`. The screen owns form/mode and advisory cooldown presentation; typed callbacks and external operation/error props keep integration outside rendering.
 
 | File | Responsibility |
 | --- | --- |
-| `index.html` | Spanish document metadata and root element |
-| `src/main.tsx` | Validate the root, import styles, mount React in StrictMode |
-| `src/App.tsx` | Mount login with explicit unavailable-integration errors |
-| `src/auth/LoginScreen.tsx`, `src/auth/login.css` | Login presentation, in-memory form/mode and deadline-based cooldown |
-| `src/assets/` | Unmodified Android brand seal and Google icon |
-| `src/styles/tokens.css` | Palette, semantic roles, typography and shape tokens |
-| `src/styles/global.css` | Base document and placeholder layout styles |
-| `src/auth/LoginScreen.test.tsx`, `src/App.test.tsx`, `src/test/setup.ts` | Login behavior, entry point, DOM matchers and cleanup |
-| `vite.config.ts` | React transform, development proxy and Vitest environment |
+| `src/auth/firebase.ts` | Modular App/Auth initialization, SDK local persistence, email/Google operations and auth observer; safe missing-config result |
+| `src/auth/api.ts` | Native fetch, bearer token, structured errors, one INVALID_TOKEN refresh/retry, runtime response validation and bootstrap sequence |
+| `src/auth/session.ts` | Per-App controller and atomic snapshots; operation serialization, auth restoration, verification, reset, sign-out and generation invalidation |
+| `src/auth/errors.ts` | Safe Spanish messages and terminal-session classification; server detail never displayed verbatim |
+| `src/App.tsx` | Configuration error, login, loading, restricted/recoverable states and minimal authenticated checkpoint |
+| `src/main.tsx` | StrictMode mount and global token/styles imports |
+| `vite.config.ts`, `tools/android-tunnel.mjs` | Existing IPv4 loopback proxy and automatic ADB reverse |
 
-`LoginScreenProps` exposes synchronous action callbacks and externally controlled loading, Google/reset loading, error owner, reset feedback and absolute reset deadline. A future adapter owns asynchronous execution and failure mapping and must set pending state when starting work. No Promise is launched or ignored by the UI. The current app only produces explicit unavailable messages; it does not create sessions or pretend to send email. Form values live in component memory and the remember checkbox only passes a preference to the callback. Browser password managers control their own save/autofill prompts; there is no Android autofill commit/cancel API equivalent here.
+`useSyncExternalStore` observes a controller local to App, without a global state framework. First subscription owns the Firebase observer; final unsubscribe removes it and aborts requests. Auth-state events restore persisted identities. Bootstrap scheduled in a microtask checks generation before starting, so StrictMode cleanup invalidates the first subscription's scheduled work. Synchronous operation locks prevent duplicate submissions. Every async installation checks generation; fetch/token boundaries check abort. See the [invariant and mutation-path matrix](auth-session-review.md).
 
-There is no router, API client, global store or persistence. Future HTTP integration should use relative `/api/...` URLs and explicitly handle HTTP errors, response validation, cancellation and stale results. Static TypeScript types alone cannot validate backend JSON.
+Firebase authentication alone never means backend readiness. GET `/api/me` may conditionally trigger POST `/api/me/provision` only on Android's missing-user cases. ACTIVE users load GET `/api/me/profile`; expected 404 means missing profile. Unknown/malformed account or profile states fail closed. DELETED and backend ban errors show restricted state; no deletion recovery, appeal, profile editing or activation is implemented. Authentication-method and identity-association restrictions clear Firebase and return to login. Transient failures preserve identity for explicit retry. Sign-out immediately clears backend presentation and aborts its work; a failed Firebase sign-out is visible and can be retried.
 
-## Login state and mutation review
+Optional local verification requires DEV, explicit flag and loopback hostname. After normal user/profile loading it calls the existing protected helper, reloads Firebase and forces an ID token refresh before accepting verified state. With the helper disabled, new email/password registration sends the standard Firebase verification email; failed sends retain a recoverable retry. Later profile/legal/Home flows remain out of scope.
 
-| State / invariant | Mutation paths | Verification |
-| --- | --- | --- |
-| Form values remain in memory and survive mode switches | Email/password change, checkbox change; unmount discards component state | Exact callback arguments; both remember values; mode round trip |
-| Busy is the union of all three pending props | Parent prop replacement | Both modes block all controls and form submit; Escape blocked; release restores actions |
-| Mode starts sign-in; changes never submit | Switch button or Escape from sign-up, guarded by busy | Round trip, Escape, busy tests; browser history untouched |
-| Error and owner are one conceptual value | App replaces one failure object; parent props supply presentation | Sign-in/sign-up/shared/null ownership; error removal; text-only rendering |
-| Reset feedback only appears in sign-in | Parent props + mode change | Visibility round trip; app never fabricates delivery |
-| Reset availability derives from absolute deadline, not accumulated ticks | Parent deadline change, timer render, window focus, document visibility | Rounding, expiry, deadline replacement, null/invalid values, resume; StrictMode/unmount cleanup |
+Only App/Auth SDK modules are imported. No Analytics, Messaging, App Check, cookies, custom tokens, manual credential persistence, router, PWA or deployment infrastructure is introduced. Firebase owns persistent local sessions independently of the remember checkbox. Browser save/autofill is browser-owned; the checkbox is currently presentation-only and controls neither persistence nor password-manager behavior.
 
-Cooldown timers schedule at most once per second and stop at expiry; listener/timer cleanup runs when the deadline changes or the component unmounts. No request results, backend state or resource ownership are introduced in Stage A.
-
-The backend owns domain state and transitions. Future UI state contains presentation and in-flight work, not independent copies of backend lifecycle rules. Future effects must tolerate StrictMode's development cleanup/restart and avoid obsolete responses overwriting current state.
-
-No Firebase SDK, session implementation, manifest, service worker, offline cache, install prompt or push integration is included. PWA behavior needs a separate decision about assets, updates and sensitive-data caching. No deployment infrastructure is created. Vite's proxy exists only during development; hosting must later route `/api` to the intended backend or provide an explicit API/CORS design.
-
-Reference: [Android architecture](../../reals-app/docs/architecture.md). Its separation of presentation and orchestration is useful; its platform layers are not reproduced in this small React scaffold.
+Contracts remain in [backend API](../../reals-backend/docs/commons/api.md) and [user flow](../../reals-backend/docs/commons/user-flow.md). Android references: `FirebaseAuthRepository`, `AuthRepository`, `AuthenticatedRepository`, `MeRepository`, `ProfileRepository`, `SessionCoordinator`, `LocalFirebaseEmailVerificationCoordinator`, `LoginScreen`, and [local development](../../reals-app/docs/local-development.md). References were read only. Vite proxying is development-only; production hosting/routing requires a separate design.
