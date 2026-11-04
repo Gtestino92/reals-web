@@ -83,3 +83,18 @@ Firebase uses SDK-managed local persistence until explicit sign-out, regardless 
 Google uses popup only, invoked directly from the click callback. No redirect flow is implemented. Safari/iOS OAuth and cross-origin storage/redirect compatibility require separate validation; do not switch to redirect without implementing Firebase's [redirect browser requirements](https://firebase.google.com/docs/auth/web/redirect-best-practices). SDK persistence reference: [Firebase auth state persistence](https://firebase.google.com/docs/auth/web/auth-state-persistence).
 
 Real provider configuration, authorized domains, Google OAuth, email delivery, persistent browser storage, Docker authorization and device popup behavior cannot be established by unit tests. Stage B automated validation uses no credentials. No `.env.local` was available during implementation, so the real auth/device smoke checklist remains pending.
+
+## Stage C local photo storage
+
+The `/api` Vite proxy still targets Spring Boot on port 8080, including multipart uploads. Photo read URLs come from the backend and are fetched directly without application Authorization headers. `application-local-firebase.yml` defaults the MinIO endpoint, presigned endpoint and public base to `http://localhost:9000` (public base includes `/reals-media`). Environment overrides may change the actual host.
+
+On physical Chrome Android reached through the existing Vite ADB reverse tunnel, `localhost:9000` means the phone. If returned photo URLs use that address, optionally run manually for the selected device:
+
+```powershell
+adb -s DEVICE_SERIAL reverse tcp:9000 tcp:9000
+adb -s DEVICE_SERIAL reverse --list
+```
+
+Remove only that mapping when finished with `adb -s DEVICE_SERIAL reverse --remove tcp:9000`. The existing ADB helper and Vite IPv4/LAN settings are unchanged. Never rewrite a presigned host/path/query: it may invalidate the signature. For expired URLs, use **Actualizar estado** to obtain fresh URLs. HTTPS pages cannot necessarily load an HTTP MinIO endpoint; the current target is local Chrome development. Safari/iOS and HEIC support are not claimed.
+
+Stage C environment probe: `.env.local` exists; backend `/actuator/health` and MinIO `/minio/health/live` returned HTTP 200. No configuration values, credentials or media signatures were printed. This establishes service reachability, not an authenticated end-to-end result.

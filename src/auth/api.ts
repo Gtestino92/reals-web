@@ -18,9 +18,10 @@ export class ApiClient {
         headers.Authorization = `Bearer ${token}`;
       }
       signal.throwIfAborted();
-      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      const multipart = body instanceof FormData;
+      if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
       let response: Response;
-      try { response = await this.fetcher(`/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), credentials: 'omit' }); }
+      try { response = await this.fetcher(`/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit' }); }
       catch { signal.throwIfAborted(); throw new ApiError('network'); }
       signal.throwIfAborted();
       if (!response.ok) {

@@ -1,0 +1,19 @@
+.onboarding { width: 100%; text-align: left; overflow-wrap: anywhere; }
+.onboarding fieldset { border: 0; padding: 0; margin: 12px 0; min-width: 0; }
+.onboarding label { display: grid; gap: 6px; margin: 12px 0; }
+.onboarding input, .onboarding select, .onboarding textarea, .onboarding button { font: inherit; min-height: 44px; max-width: 100%; border: 1px solid var(--color-outline); border-radius: var(--radius-button); padding: 8px; background: var(--color-surface); color: var(--color-on-surface); }
+.onboarding button { margin: 6px 6px 6px 0; cursor: pointer; }
+.onboarding button:disabled { opacity: .55; cursor: default; }
+.onboarding .check { display: flex; align-items: center; }
+.onboarding article, .onboarding section, .onboarding details, .onboarding aside { padding: 12px; margin: 14px 0; border: 1px solid var(--color-outline); border-radius: var(--radius-card); }
+.onboarding summary { cursor: pointer; padding: 8px; }
+.onboarding a { color: var(--color-primary); }
+.onboarding [role=alert] { color: var(--color-error); }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 10px; }
+.photo-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--radius-row); }
+.photo-grid p { font-size: .875rem; }
+.crop-dialog { max-width: min(480px,94vw); max-height: 92dvh; overflow: auto; background: var(--color-surface); color: var(--color-on-surface); border: 1px solid var(--color-outline); border-radius: var(--radius-card); }
+.crop-dialog::backdrop { background: #000b; }
+.crop-viewport { position: relative; width: min(280px,100%); aspect-ratio: 4 / 5; overflow: hidden; margin: auto; touch-action: none; background: #222; }
+.crop-viewport img { position: absolute; max-width: none; object-fit: fill; user-select: none; }
+.login-panel:has(.onboarding) { max-width: 820px; }

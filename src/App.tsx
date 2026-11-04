@@ -4,6 +4,7 @@ import { configureFirebase } from './auth/firebase';
 import type { FirebaseSetup } from './auth/firebase';
 import { ApiClient } from './auth/api';
 import { SessionController } from './auth/session';
+import { Onboarding } from './onboarding/Onboarding';
 
 let defaultSetup: FirebaseSetup | undefined;
 function setup() { return defaultSetup ??= configureFirebase(); }
@@ -25,7 +26,7 @@ function SessionApp({ controller }: { controller: SessionController }) {
   return <main className="login-page"><section className="login-panel" aria-labelledby="session-heading">
     <h1 id="session-heading">Reals</h1>
     <p role="status">{state.phase === 'checking' ? 'Comprobando sesión de Firebase...' : state.phase === 'signingOut' ? 'Cerrando sesión...' : state.phase === 'loading' ? 'Firebase autenticado. Cargando sesión del backend...' : state.phase === 'ready' ? 'Firebase autenticado. Sesión del backend lista.' : 'La sesión del backend no está lista.'}</p>
-    {state.phase === 'ready' && <><p>Estado de cuenta: {state.account?.status}</p><p>{state.profile ? `Perfil existente: ${state.profile.status}` : 'Sin perfil: falta completar el registro.'}</p><p>Este es un punto de integración temporal. El inicio y la edición de perfil se implementarán en otra etapa.</p></>}
+    {state.phase === 'ready' && <Onboarding controller={controller} />}
     {state.verificationMessage && <p>{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
