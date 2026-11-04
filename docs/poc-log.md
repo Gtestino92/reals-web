@@ -76,3 +76,13 @@ Validation:
 State review: all mode/form mutations, externally supplied busy/error/feedback/deadline paths, timer replacement/resume/cleanup and unavailable-adapter errors are enumerated in `architecture.md`. Tests cover both modes, all pending sources, error owners, cooldown replacement/expiry and StrictMode cleanup. No asynchronous auth response-installation path exists yet.
 
 Remaining review: execute the Chrome Android/Safari iOS checklist in `testing.md`, compare screenshots with Android, check font metrics/contrast/autofill and review the original PNG transfer cost. Human visual fidelity verdict remains pending. Next recommended action: device visual and keyboard review before Stage B authentication integration.
+
+## Stage B — real auth and backend session
+
+Implemented on `feature/auth-backend`, based on latest fetched `origin/main` at `e4019ed` (IPv4 loopback fix present); clean initial tree, no tracking of main. Inspected the requested Android repositories/coordinators/login and backend controllers/security/contracts/local-development references without editing siblings.
+
+Work includes modular Firebase App/Auth, SDK persistence, safe config errors, email signup/signin, Google popup, sign-out/restoration, typed fetch bearer calls, one INVALID_TOKEN refresh, conditional provisioning, runtime user/profile validation, separate ready/missing-profile/restricted/recoverable states, backend-only password reset and optional development-only verification. [Mutation review](auth-session-review.md) records invariants and async installation/cleanup paths. Login presentation/assets, ADB helper, proxy and CI remain unchanged.
+
+Validation: `npm run typecheck` PASS; `npm test` PASS (101 tests, 5 files); `npm run build` PASS. Initial typecheck caught readonly emailVerified assignment in fake users; corrected test fixtures using property descriptors. Dependency installation reported four high audit entries through unused Firestore/gRPC; see testing notes. Real smoke tests remain pending: no `.env.local` configuration was available. No credentials were invented, logged or committed; no backend was started or mutated. No commit/push/deploy performed.
+
+Effort: reference inspection, invariant design, integration, race regressions, automated validation and setup documentation completed in one session. Active engineering time was not measured; no estimate is presented as observed effort. Remaining effort is project-owner Firebase setup and Windows/Android Chrome smoke validation. Home/profile editor/legal/matchmaking/chat/PWA/production work stays outside this stage.
