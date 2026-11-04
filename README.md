@@ -11,8 +11,13 @@ npm run dev
 
 Open <http://localhost:5173>. The development server proxies `/api` to `http://localhost:8080` without rewriting the path. The entry point makes no API calls and works without a running backend.
 
+`npm run dev` first attempts an ADB reverse tunnel for port 5173 on every authorized Android device, then starts Vite even if ADB setup fails. This uses Node.js and works in IntelliJ IDEA's PowerShell or CMD terminal on Windows. On Android Chrome, open <http://127.0.0.1:5173/>: ADB reverse connects Android localhost to Windows localhost, with Vite still forwarding `/api` to the local backend on port 8080. No LAN exposure is required.
+
+Wireless ADB needs an existing authorized connection. After disconnecting, reconnect manually with `adb connect <phone-ip>:<connection-port>` using the phone's current Wireless debugging connection address, check `adb devices`, then run `npm run android:tunnel` without restarting Vite. Inspect mappings with `adb reverse --list` (or `adb -s <serial> reverse --list` for multiple devices). See [Android local development](docs/local-development.md#android-chrome-over-usb-or-wireless-adb) for SDK discovery, authorization and reconnection details.
+
 | Command | Purpose |
 | --- | --- |
+| `npm run android:tunnel` | Restore Android's port 5173 ADB reverse mapping without restarting Vite |
 | `npm run typecheck` | Strict TypeScript checking, including tests and configuration |
 | `npm test -- src/App.test.tsx` | Focused entry point test |
 | `npm run test:watch` | Interactive Vitest runner |

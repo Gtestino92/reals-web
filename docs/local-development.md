@@ -4,6 +4,35 @@ Use Node.js 24.15+ (24.x) and npm. This scaffold was initialized with Node 24.19
 
 Vite listens on port 5173 and fails explicitly if occupied (`strictPort`). Open <http://localhost:5173>. Requests to `/api/...` are forwarded to `http://localhost:8080/api/...` unchanged. No frontend environment variables or Firebase configuration are needed for this scaffold.
 
+## Android Chrome over USB or wireless ADB
+
+From the repository directory, run:
+
+```sh
+npm run dev
+```
+
+The npm `predev` hook runs the dependency-free Node.js helper [`tools/android-tunnel.mjs`](../tools/android-tunnel.mjs) before Vite starts. It works from IntelliJ IDEA's Windows 11 integrated terminal in PowerShell or CMD; it also handles macOS/Linux without PowerShell. It looks for ADB in this order: PATH, `ANDROID_SDK_ROOT/platform-tools`, `ANDROID_HOME/platform-tools`, then Windows `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`. It does not change PATH or system settings.
+
+For every connected device with the exact ADB state `device` (authorized USB, wireless or emulator), it runs `adb -s <serial> reverse tcp:5173 tcp:5173`. Serials containing spaces are passed as a single subprocess argument. It only configures port 5173, leaving mappings such as 8080 and 9000 alone. Missing ADB, no authorized devices, command failures and timeouts produce warnings and allow Vite to start. Each child command has a two-second timeout, with a ten-second total setup budget. A success message means ADB accepted the mapping; Vite must still start successfully.
+
+Open **<http://127.0.0.1:5173/>** in Android Chrome. Android localhost and Windows localhost are connected through ADB reverse: the phone's port 5173 reaches Vite on the computer. No LAN binding or `--host 0.0.0.0` is needed. Vite continues forwarding `/api` to the computer's local backend on port 8080; that backend must be running for API requests to work.
+
+Wireless ADB requires an existing authorized connection. The helper does not discover disconnected phones, pair devices, request pairing codes or store credentials. If disconnected, enable Wireless debugging on the phone, keep the phone and computer on a network that permits ADB, and reconnect the already authorized device using its current **connection** address/port (not its pairing port):
+
+```sh
+adb connect <phone-ip>:<connection-port>
+adb devices
+npm run android:tunnel
+adb reverse --list
+```
+
+Replace the placeholders using the address shown in Android's Wireless debugging settings. If authorization/pairing has been lost, restore it manually through your existing Android development setup. For USB, connect the cable, enable USB debugging and accept the authorization prompt on the unlocked phone. Verify that `adb devices` shows state `device`.
+
+`npm run android:tunnel` uses the same helper and restores the mapping without restarting Vite. Rerun after a phone/ADB restart, wireless reconnection or switching transports. With multiple devices, inspect each with `adb -s <serial> reverse --list`, quoting the serial according to your shell if it contains spaces. Look for `tcp:5173 tcp:5173`. If ADB is outside PATH, use the discovered SDK executable path for manual ADB commands.
+
+The hook runs only for `npm run dev`. CI's `npm ci`, `npm run typecheck`, `npm test` and `npm run build` do not invoke it; helper tests mock subprocesses and need no phone or ADB installation.
+
 ## Existing backend
 
 The read-only references inspected for integration are:
