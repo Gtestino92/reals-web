@@ -7,7 +7,7 @@ export class ApiError extends Error {
 }
 export function object(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 export class ApiClient {
-  constructor(private readonly fetcher: typeof fetch = fetch) {}
+  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
   async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number): Promise<unknown> {
     for (let attempt = 0; attempt < 2; attempt++) {
       signal.throwIfAborted();

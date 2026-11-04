@@ -12,6 +12,21 @@ function harness(...responses: Response[]) {
   return { fetcher, api: new ApiClient(fetcher), user: identity(), signal: new AbortController().signal };
 }
 describe('backend contracts', () => {
+  it('calls default native fetch with the global receiver', async () => {
+    const nativeFetch = vi.fn(function (this: unknown, ...args: Parameters<typeof fetch>) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+      expect(args[0]).toBe('/api/me');
+      return Promise.resolve(response(account));
+    });
+    vi.stubGlobal('fetch', nativeFetch);
+    try {
+      const api = new ApiClient();
+      await expect(api.request('/me', new AbortController().signal, identity())).resolves.toEqual(account);
+      expect(nativeFetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it('loads active user/profile with bearer and relative URLs', async () => {
     const h = harness(response(account), response(profile));
     expect(await bootstrap(h.api, h.user, h.signal, false)).toEqual({ account, profile });

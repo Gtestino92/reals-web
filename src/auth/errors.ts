@@ -28,8 +28,8 @@ const messages: Record<string, string> = {
 export const terminalCodes = new Set(['INVALID_TOKEN', 'AUTH_METHOD_NOT_ALLOWED', 'EMAIL_ALREADY_LINKED_TO_DIFFERENT_FIREBASE_USER', 'UNSUPPORTED_AUTH_PROVIDER', 'auth/user-disabled', 'auth/user-token-expired', 'auth/invalid-user-token', 'auth/user-not-found']);
 export function safeMessage(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'kind' in error) {
-    if (error.kind === 'invalid') return 'La respuesta del backend no es v?lida. Verific? la versi?n del servidor y reintent?.';
-    if (error.kind === 'network') return 'No pudimos conectar con el backend. Revis? que est? iniciado y reintent?.';
+    if (error.kind === 'invalid') return 'La respuesta del backend no es válida. Verificá la versión del servidor y reintentá.';
+    if (error.kind === 'network') return 'No pudimos conectar con el backend. Revisá que esté iniciado y reintentá.';
   }
   return messages[errorCode(error)] ?? 'No pudimos completar la operación. Revisá tu conexión y volvé a intentar.';
 }

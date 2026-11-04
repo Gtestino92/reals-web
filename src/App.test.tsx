@@ -97,6 +97,27 @@ it('transient backend failure preserves Firebase and retry recovers existing pro
   mount(); act(() => observer(user)); await screen.findByRole('alert'); expect(auth.signOut).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); await screen.findByText('Perfil existente: ACTIVE');
 });
+it('Retry dispatches another backend request using receiver-sensitive default fetch', async () => {
+  fetcher.mockRejectedValueOnce(new TypeError('Connection failed'));
+  ready();
+  const nativeFetch = vi.fn(function (this: unknown, ...args: Parameters<typeof fetch>) {
+    if (this !== globalThis) throw new TypeError('Illegal invocation');
+    return fetcher(...args);
+  });
+  vi.stubGlobal('fetch', nativeFetch);
+  try {
+    render(<App firebase={{ service: auth, localVerification: false }} />);
+    act(() => observer(user));
+    await screen.findByRole('alert');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(auth.signOut).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+    await screen.findByText('Sin perfil: falta completar el registro.');
+    expect(fetcher.mock.calls.map(call => call[0])).toEqual(['/api/me', '/api/me', '/api/me/profile']);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 it.each(['AUTH_METHOD_NOT_ALLOWED', 'EMAIL_ALREADY_LINKED_TO_DIFFERENT_FIREBASE_USER', 'INVALID_TOKEN'])('terminal %s clears Firebase and returns login', async code => {
   fetcher.mockImplementation(async () => json({ code }, 401)); mount(); act(() => observer(user));
   await screen.findByRole('button', { name: 'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce(); expect(screen.getByRole('alert')).toBeVisible();
