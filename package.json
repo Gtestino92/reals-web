@@ -7,7 +7,9 @@
     "node": "^24.15.0"
   },
   "scripts": {
+    "predev": "node tools/android-tunnel.mjs",
     "dev": "vite",
+    "android:tunnel": "node tools/android-tunnel.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -2,6 +2,18 @@
 
 Copy this record for each task. Use actual observations; leave unknown values pending. Record wall time separately from active human/agent effort. Overlapping time must not be double-counted. A passing automated test is not visual approval.
 
+## Task status: Web CI and Android Vite ADB automation
+
+- Branch: `chore/web-ci`, based on `main` (`4092f6d`). Both deliverables belong to this task.
+- Implementation: complete in `76e24da` (GitHub Actions CI) and `5cccceb` (automatic Android ADB tunnel before Vite startup).
+- CI scope: pull requests targeting `main` and pushes to `main`; Node 24; npm cache; `npm ci`, typecheck, tests and build; stable check `Web validation`; `contents: read` permission.
+- Local development scope: `npm run dev` invokes the shared Node.js tunnel helper through `predev`; `npm run android:tunnel` restores port 5173 mappings independently. ADB failures warn without preventing Vite startup. CI does not invoke the hook.
+- Validation repeated on 2026-11-04: `npm run typecheck` PASS; `npm test` PASS (19 tests in 2 files, including 18 mocked tunnel tests); `npm run build` PASS.
+- GitHub verification: no pull request or Actions run found for this branch at review time. Hosted CI execution and making `Web validation` a required branch-protection check remain pending.
+- Human review, browser/device acceptance and effort measurements: pending; no timings inferred.
+
+The [testing guide](testing.md#continuous-integration) documents CI inspection and the required check; [local development](local-development.md#android-chrome-over-usb-or-wireless-adb) documents Android setup and wireless reconnection.
+
 ## Task: <name>
 
 - Date, branch and starting/ending commit (or unborn branch):
