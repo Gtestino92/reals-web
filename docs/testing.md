@@ -8,7 +8,9 @@ npm test -- src/App.test.tsx
 npm run build
 ```
 
-Use `npm run test:watch -- src/App.test.tsx` while editing. `npm test` runs all tests; there is currently one. The build includes another type-check so standalone builds cannot skip it.
+Use `npm run test:watch -- src/App.test.tsx` while editing. `npm test` runs all tests: the entry point smoke test and the Android tunnel helper tests. The build includes another type-check so standalone builds cannot skip it.
+
+Run `npm test -- tools/android-tunnel.test.mjs` for the helper's 18 focused tests. These use the Node test environment and mocked subprocess calls to cover discovery precedence, non-Windows paths, authorized/unauthorized/offline and malformed device rows, multiple USB/wireless devices, literal serial arguments, command failures and per-command/total time limits. They do not run ADB or verify a physical tunnel. See [local development](local-development.md#android-chrome-over-usb-or-wireless-adb) for manual connection checks. The `predev` hook is not invoked by CI's install, typecheck, test or build commands.
 
 ## Continuous integration
 
