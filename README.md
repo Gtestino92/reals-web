@@ -1,6 +1,6 @@
 # Reals Web
 
-React + TypeScript POC for a future Reals Progressive Web App. This scaffold supports evaluating Codex development effort, code quality and eventual Android visual fidelity. It currently renders a minimal Spanish entry point; login, Firebase Authentication and PWA install/offline behavior are not implemented.
+React + TypeScript POC for a future Reals Progressive Web App. Stage A implements the Android-referenced login interface with sign-in/sign-up modes, recovery, Google action, pending states and errors. Authentication actions currently report that integration is unavailable; Firebase Authentication and PWA install/offline behavior are not implemented.
 
 Requires Node.js 24.15+ in the 24.x line and npm (lockfile committed for reproducibility).
 
@@ -14,7 +14,7 @@ Open <http://localhost:5173>. The development server proxies `/api` to `http://l
 | Command | Purpose |
 | --- | --- |
 | `npm run typecheck` | Strict TypeScript checking, including tests and configuration |
-| `npm test -- src/App.test.tsx` | Focused entry point test |
+| `npm test -- src/auth/LoginScreen.test.tsx src/App.test.tsx` | Focused login and entry point tests |
 | `npm run test:watch` | Interactive Vitest runner |
 | `npm run build` | Type-check and create `dist/` |
 | `npm run preview` | Preview the production bundle locally (no API proxy) |

@@ -10,20 +10,3 @@ body {
   font-size: var(--type-body-size);
   line-height: var(--type-body-line-height);
 }
-
-.poc-shell {
-  min-height: 100svh;
-  padding: var(--screen-padding);
-}
-
-.poc-shell h1 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--type-identity-size);
-  font-weight: var(--font-weight-display);
-  line-height: var(--type-identity-line-height);
-}
-
-.poc-shell p {
-  color: var(--color-on-surface-variant);
-}
