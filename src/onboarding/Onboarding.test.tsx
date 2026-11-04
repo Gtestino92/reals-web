@@ -202,6 +202,22 @@ it.each(['ACCOUNT_TEMPORARILY_BANNED','INVALID_TOKEN'])('does not mask session/a
   if (code === 'INVALID_TOKEN') { await screen.findByRole('button',{ name:'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce(); }
   else { expect(screen.getByRole('alert')).toHaveTextContent('suspendida temporalmente'); expect(auth.signOut).not.toHaveBeenCalled(); }
 });
+it.each([401,403])('propagates Home authorization HTTP %s with a nonterminal code and permits explicit recovery', async status => {
+  profile = { ...initialProfile }; let denied = true;
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => denied && String(input).endsWith('/home') ? Promise.resolve(json({ code:'ACCESS_DENIED' },status)) : original(input,options));
+  mount();
+  expect(await screen.findByRole('alert')).toHaveTextContent('ACCESS_DENIED');
+  expect(screen.queryByRole('heading',{ name:'Inicio no disponible' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading',{ name:'Completá tu perfil' })).not.toBeInTheDocument();
+  expect(writes('POST')).toHaveLength(0);
+  expect(auth.signOut).not.toHaveBeenCalled();
+  expect(fetcher.mock.calls.filter(x => String(x[0]).endsWith('/home'))).toHaveLength(1);
+  denied = false;
+  fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled();
+});
 it('serializes Home retry and rejects its late response after sign-out', async () => {
   profile = { ...initialProfile }; let finish: ((value: Response) => void) | undefined; let retrying = false;
   const original = fetcher.getMockImplementation()!;
@@ -239,4 +255,91 @@ it('enables activation after Firebase reload confirms email verification', async
   await screen.findByRole('heading',{ name:'Tu perfil está activo' });
   expect(user.getIdToken).toHaveBeenCalledWith(true);
   expect(fetcher.mock.calls.filter(x => String(x[0]).endsWith('/activation'))).toHaveLength(1);
+});
+const technicalStatus = /Firebase autenticado|Comprobando sesión de Firebase|Cargando sesión del backend|Sesión del backend lista|La sesión del backend no está lista/i;
+function expectPreparing() {
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando Reals…');
+  expect(screen.getByRole('heading',{ name:'Reals',level:1 })).toBeVisible();
+  expect(screen.queryByRole('button',{ name:'Ingresar' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{ name:'Actualizar estado' })).not.toBeInTheDocument();
+  expect(screen.queryByText('Actualizando estado…')).not.toBeInTheDocument();
+  expect(screen.getByRole('main').textContent).not.toMatch(technicalStatus);
+}
+it.each([
+  { status:null,legalSatisfied:true,heading:'Crear perfil' },
+  { status:'DRAFT',legalSatisfied:true,heading:'Completá tu perfil' },
+  { status:'INACTIVE',legalSatisfied:true,heading:'Completá tu perfil' },
+  { status:'ACTIVE',legalSatisfied:true,heading:'Inicio' },
+  { status:null,legalSatisfied:false,heading:'Antes de continuar' },
+])('keeps a coherent branded loading state through restoration/bootstrap to $heading ($status)', async ({ status,legalSatisfied,heading }) => {
+  if (status) profile = { ...initialProfile,status };
+  satisfied = legalSatisfied;
+  let restore: ((identity: Identity | null) => void) | undefined;
+  let finishBootstrap: ((response: Response) => void) | undefined;
+  let finishOnboarding: ((response: Response) => void) | undefined;
+  auth.observe = vi.fn(next => { restore = next; return vi.fn(); });
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => String(input) === '/api/me' ? new Promise(resolve => { finishBootstrap = resolve; }) : String(input).endsWith('/legal-status') ? new Promise(resolve => { finishOnboarding = resolve; }) : original(input,options));
+  const visibleFrames: string[] = [];
+  const observed = new MutationObserver(() => visibleFrames.push(window.document.body.textContent ?? ''));
+  observed.observe(window.document.body,{ childList:true,subtree:true,characterData:true });
+  try {
+    mount(); expectPreparing();
+    const statusElement = screen.getByRole('status');
+    act(() => restore?.(user));
+    await waitFor(() => expect(finishBootstrap).toBeDefined()); expectPreparing();
+    expect(screen.getByRole('status')).toBe(statusElement);
+    await act(async () => finishBootstrap?.(json({ id:'u',status:'ACTIVE' })));
+    await waitFor(() => expect(finishOnboarding).toBeDefined()); expectPreparing();
+    expect(screen.getByRole('button',{ name:'Cerrar sesión' })).toBeEnabled();
+    await act(async () => finishOnboarding?.(json({ requirementsSatisfied:satisfied,documents:[document()] })));
+    await screen.findByRole('heading',{ name:heading });
+    expect(screen.queryByText('Preparando Reals…')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button',{ name:'Ingresar' })).not.toBeInTheDocument();
+    expect(screen.getByRole('main').textContent).not.toMatch(technicalStatus);
+    expect(visibleFrames.length).toBeGreaterThan(0);
+    for (const frame of visibleFrames) { expect(frame).not.toMatch(technicalStatus); expect(frame).not.toContain('Iniciar sesión'); expect(frame).toContain('Reals'); }
+  } finally { observed.disconnect(); }
+});
+it.each(['signIn','signUp','google'] as const)('navigates from %s without exposing technical authenticated checkpoints', async operation => {
+  auth.observe = vi.fn(next => { next(null); return vi.fn(); });
+  auth.signIn = vi.fn().mockResolvedValue(user); auth.signUp = vi.fn().mockResolvedValue(user); auth.google = vi.fn().mockResolvedValue(user);
+  let finish: ((response: Response) => void) | undefined;
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options));
+  mount(); await screen.findByRole('button',{ name:'Ingresar' });
+  if (operation === 'google') fireEvent.click(screen.getByRole('button',{ name:'Continuar con Google' }));
+  else {
+    fireEvent.change(screen.getByLabelText('Email'),{ target:{ value:'disposable@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'),{ target:{ value:'test-password' } });
+    if (operation === 'signUp') fireEvent.click(screen.getByRole('button',{ name:'¿No tenés cuenta? Crear cuenta' }));
+    fireEvent.click(screen.getByRole('button',{ name:operation === 'signUp' ? 'Crear cuenta' : 'Ingresar' }));
+  }
+  await waitFor(() => expect(finish).toBeDefined()); expectPreparing();
+  await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[] })));
+  await screen.findByRole('heading',{ name:'Crear perfil' });
+  expect(screen.getByRole('main').textContent).not.toMatch(technicalStatus);
+});
+it('replaces initial onboarding loading with a recoverable error and restores loading during retry', async () => {
+  let offline = true; let finish: ((response: Response) => void) | undefined;
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? offline ? Promise.reject(new TypeError('offline')) : new Promise(resolve => { finish = resolve; }) : original(input,options));
+  mount(); await screen.findByRole('alert');
+  expect(screen.queryByText('Preparando Reals…')).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{ name:'Cerrar sesión' })).toBeEnabled();
+  offline = false; fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  await waitFor(() => expect(finish).toBeDefined()); expectPreparing();
+  await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[] })));
+  await screen.findByRole('heading',{ name:'Crear perfil' });
+});
+it('keeps loading sign-out accessible and rejects a late initial onboarding response', async () => {
+  let finish: ((response: Response) => void) | undefined;
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options));
+  mount(); await waitFor(() => expect(finish).toBeDefined()); expectPreparing();
+  fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' }));
+  await screen.findByRole('button',{ name:'Ingresar' });
+  await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[] })));
+  expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument();
+  expect(screen.queryByText('Preparando Reals…')).not.toBeInTheDocument();
 });

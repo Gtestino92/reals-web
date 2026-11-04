@@ -4,8 +4,9 @@ Before implementation: identity belongs to SessionController; domain work uses i
 
 | Path | Invariant / installation | Failure / concurrency |
 | --- | --- | --- |
+| Session-to-onboarding presentation | Shared Reals branding/loading message while the session is checking/loading or onboarding has no model and is busy; ready screens appear only after model installation | Presentation derives from existing phase/model/busy state; no extra readiness callback, timer or asynchronous installation path; initial errors retain refresh/sign-out and later operations retain progress announcements |
 | Initial load, resume, retry | Legal status/catalog joined by type/version/action; profile and photos installed together; unsatisfied legal status with no documents is inconsistent, never satisfied | Single owner, abort on cleanup; invalid legal/profile/photo payload blocks mutations; explicit refresh can recover |
-| Auxiliary DRAFT Home read / retry | Interaction state is true, false or unknown; a failed read cannot assert absence or presence | Transient/malformed Home failures allow completion with an unknown-state notice; retry reuses the serialized authoritative refresh; abort and terminal/account errors still propagate to existing session handling |
+| Auxiliary DRAFT Home read / retry | Interaction state is true, false or unknown; a failed read cannot assert absence or presence | Transient/malformed Home failures allow completion with an unknown-state notice; retry reuses the serialized authoritative refresh; abort, authorization and terminal/account errors propagate instead of becoming auxiliary unavailability |
 | Legal action | Exact current required action/version; refresh status/catalog | Reload even on stale-version conflict; never infer acceptance |
 | Create | One explicit submit; validate DRAFT response | Shared synchronous lock; reconcile uncertain result before another submit |
 | Details / filters | Separate contract bodies; backend status authoritative | No optimistic lifecycle update; refresh after write |

@@ -5,6 +5,8 @@ import type { FirebaseSetup } from './auth/firebase';
 import { ApiClient } from './auth/api';
 import { SessionController } from './auth/session';
 import { Onboarding } from './onboarding/Onboarding';
+import { SessionLoading } from './SessionLoading';
+import seal from './assets/reals-seal.png';
 
 let defaultSetup: FirebaseSetup | undefined;
 function setup() { return defaultSetup ??= configureFirebase(); }
@@ -24,10 +26,15 @@ function SessionApp({ controller }: { controller: SessionController }) {
     onSignUp={(email, password) => controller.authenticate('signUp', email, password)}
     onGoogleSignIn={() => controller.authenticate('google')} onPasswordReset={controller.reset} />;
   return <main className="login-page"><section className="login-panel" aria-labelledby="session-heading">
-    <h1 id="session-heading">Reals</h1>
-    <p role="status">{state.phase === 'checking' ? 'Comprobando sesión de Firebase...' : state.phase === 'signingOut' ? 'Cerrando sesión...' : state.phase === 'loading' ? 'Firebase autenticado. Cargando sesión del backend...' : state.phase === 'ready' ? 'Firebase autenticado. Sesión del backend lista.' : 'La sesión del backend no está lista.'}</p>
+    <header className="login-header"><div className="login-brand">
+      <img className="login-seal" src={seal} alt="" width="54" height="54" />
+      <h1 id="session-heading">Reals</h1>
+      <div className="brand-divider" aria-hidden="true"><span /></div>
+    </div></header>
+    {(state.phase === 'checking' || state.phase === 'loading') && <SessionLoading />}
+    {state.phase === 'signingOut' && <p role="status">Cerrando sesión…</p>}
     {state.phase === 'ready' && <Onboarding controller={controller} />}
-    {state.verificationMessage && <p>{state.verificationMessage}</p>}
+    {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
     {state.phase !== 'checking' && <button className="login-button login-outlined" disabled={state.phase === 'signingOut'} onClick={controller.signOut}>Cerrar sesión</button>}

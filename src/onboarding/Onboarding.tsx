@@ -7,6 +7,7 @@ import type { Country, Fields, FullProfile, LegalDocument, Photo } from './contr
 import { ProfileForm } from './ProfileForm';
 import { CropDialog } from './CropDialog';
 import './onboarding.css';
+import { SessionLoading } from '../SessionLoading';
 
 export function onboardingError(error: unknown) {
   const messages: Record<string,string> = {
@@ -52,7 +53,12 @@ export function Onboarding({ controller }: { controller: SessionController }) {
     if (profile?.status === 'DRAFT') {
       try { interactions = hasInteractions(await controller.request('/me/home',signal)); }
       catch (error) {
-        if (signal.aborted || terminalCodes.has(errorCode(error)) || errorCode(error).startsWith('ACCOUNT_')) throw error;
+        if (
+          signal.aborted ||
+          (error instanceof ApiError && error.kind === 'authorization') ||
+          terminalCodes.has(errorCode(error)) ||
+          errorCode(error).startsWith('ACCOUNT_')
+        ) throw error;
         interactions = null;
       }
     }
@@ -105,6 +111,7 @@ export function Onboarding({ controller }: { controller: SessionController }) {
   const selectFile = (file: File | undefined, position: number, photo?: Photo) => { if (file && !busy && !blocked) setCrop({ file,position,photo }); };
   const list = model?.photos ?? [];
   const disabled = busy || blocked;
+  if (!model && busy) return <SessionLoading />;
   return <div className="onboarding" aria-busy={busy}>
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     {busy && <p role="status">Actualizando estado…</p>}
