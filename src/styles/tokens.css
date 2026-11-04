@@ -1,0 +1,87 @@
+/* Source: reals-app/ui/theme/{RealsColors,Theme,RealsTypography,RealsShapes}.kt.
+   See docs/android-reference.md for mappings and platform differences. */
+:root {
+  --reals-ivory: #f7f2e8;
+  --reals-paper: #fcf8ef;
+  --reals-sand: #e9e1cf;
+  --reals-ink: #0f1f35;
+  --reals-ink-soft: #31435a;
+  --reals-antique-gold: #b28a3c;
+  --reals-soft-gold: #d6c39a;
+  --reals-dark-ink: #08111f;
+  --reals-dark-surface: #111c2c;
+  --reals-dark-surface-high: #18263a;
+  --reals-dark-text: #f4eddf;
+  --reals-dark-text-muted: #cfc3af;
+
+  color-scheme: light;
+  --color-primary: var(--reals-ink);
+  --color-on-primary: var(--reals-ivory);
+  --color-primary-container: var(--reals-paper);
+  --color-on-primary-container: var(--reals-ink);
+  --color-secondary: var(--reals-antique-gold);
+  --color-on-secondary: var(--reals-ink);
+  --color-secondary-container: var(--reals-sand);
+  --color-on-secondary-container: var(--reals-ink);
+  --color-tertiary: var(--reals-soft-gold);
+  --color-background: var(--reals-ivory);
+  --color-on-background: var(--reals-ink);
+  --color-surface: var(--reals-paper);
+  --color-on-surface: var(--reals-ink);
+  --color-surface-variant: var(--reals-sand);
+  --color-on-surface-variant: var(--reals-ink-soft);
+  --color-surface-container-high: var(--reals-sand);
+  --color-outline: var(--reals-soft-gold);
+  --color-outline-variant: rgb(214 195 154 / 65%);
+  --color-error: #9c2f28;
+  --color-error-container: #ffe1d9;
+  --color-on-error-container: #5c1611;
+
+  --font-body: system-ui, sans-serif;
+  --font-display: ui-serif, serif;
+  --font-weight-display: 400;
+  /* Material 3 roles used by RealsType; rem preserves browser font scaling. */
+  --type-identity-size: 2.8125rem;
+  --type-identity-line-height: 3.25rem;
+  --type-screen-title-size: 2rem;
+  --type-screen-title-line-height: 2.5rem;
+  --type-section-title-size: 1.375rem;
+  --type-section-title-line-height: 1.75rem;
+  --type-body-size: 1rem;
+  --type-body-line-height: 1.5rem;
+
+  --radius-extra-small: 8px;
+  --radius-row: 12px;
+  --radius-button: 12px;
+  --radius-card: 14px;
+  --radius-hero: 16px;
+  --control-min-height: 48px;
+  --screen-padding: 24px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --color-primary: var(--reals-dark-text);
+    --color-on-primary: var(--reals-dark-ink);
+    --color-primary-container: var(--reals-dark-surface);
+    --color-on-primary-container: var(--reals-dark-text);
+    --color-secondary: #c6a15b;
+    --color-on-secondary: var(--reals-dark-ink);
+    --color-secondary-container: var(--reals-dark-surface-high);
+    --color-on-secondary-container: var(--reals-dark-text);
+    --color-tertiary: #9e824c;
+    --color-background: var(--reals-dark-ink);
+    --color-on-background: var(--reals-dark-text);
+    --color-surface: var(--reals-dark-surface);
+    --color-on-surface: var(--reals-dark-text);
+    --color-surface-variant: var(--reals-dark-surface-high);
+    --color-on-surface-variant: var(--reals-dark-text-muted);
+    --color-surface-container-high: var(--reals-dark-surface-high);
+    --color-outline: #7e6c49;
+    --color-outline-variant: #493e2b;
+    --color-error: #ffb4a9;
+    --color-error-container: #6e211a;
+    --color-on-error-container: #ffdad4;
+  }
+}
