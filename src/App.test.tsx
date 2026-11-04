@@ -5,6 +5,9 @@ import { App } from './App';
 import { ApiClient } from './auth/api';
 import type { AuthService, Identity } from './auth/firebase';
 import { configureFirebase, localVerificationEnabled } from './auth/firebase';
+import type { SessionController } from './auth/session';
+// Stage B tests isolate authentication; Stage C exercises the real surface separately.
+vi.mock('./onboarding/Onboarding', () => ({ Onboarding: ({ controller }: { controller: SessionController }) => <p>{controller.snapshot.profile ? `Perfil existente: ${controller.snapshot.profile.status}` : 'Sin perfil: falta completar el registro.'}</p> }));
 let observer: (user: Identity | null) => void;
 let user: Identity;
 let auth: AuthService;

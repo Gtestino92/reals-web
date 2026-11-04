@@ -86,3 +86,13 @@ Work includes modular Firebase App/Auth, SDK persistence, safe config errors, em
 Validation: `npm run typecheck` PASS; `npm test` PASS (101 tests, 5 files); `npm run build` PASS. Initial typecheck caught readonly emailVerified assignment in fake users; corrected test fixtures using property descriptors. Dependency installation reported four high audit entries through unused Firestore/gRPC; see testing notes. Real smoke tests remain pending: no `.env.local` configuration was available. No credentials were invented, logged or committed; no backend was started or mutated. No commit/push/deploy performed.
 
 Effort: reference inspection, invariant design, integration, race regressions, automated validation and setup documentation completed in one session. Active engineering time was not measured; no estimate is presented as observed effort. Remaining effort is project-owner Firebase setup and Windows/Android Chrome smoke validation. Home/profile editor/legal/matchmaking/chat/PWA/production work stays outside this stage.
+
+## Stage C — profile onboarding integration
+
+Implemented on `feature/profile-onboarding`, based on fetched `origin/main` at `af49b1af3952ddad509107e51f67dc867032abda`; initial main and task base matched and working tree was clean. No commit, push, deployment or sibling modification.
+
+Added backend-driven legal, create/completion, photo crop/management, email verification, activation confirmation and temporary Home. Reused Stage B authentication/client rather than introducing another session controller. Native accessible HTML controls adapt Android UI/copy with existing theme tokens. Optional questions, account deletion, matchmaking and chats remain outside scope.
+
+Backend and MinIO health returned 200 with local configuration present. Full browser/device and authenticated disposable-account smoke remains pending; follow [testing checklist](testing.md). The [mutation review](onboarding-mutation-review.md) records concurrency and reconciliation decisions. Authenticity requirements are presented from backend errors; this stage does not implement a liveness/identity verification flow if a deployment enables that prerequisite.
+
+Validation: typecheck PASS; 178/178 tests PASS across 9 files (105 existing tests preserved); production build PASS; diff whitespace check PASS. Vite served HTTP 200 and its anonymous `/api/me` proxy returned the expected 401. No authenticated browser/device end-to-end result is claimed.

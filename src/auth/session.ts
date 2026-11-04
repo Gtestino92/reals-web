@@ -29,6 +29,33 @@ export class SessionController {
   constructor(private readonly auth: AuthService, private readonly api: ApiClient, private readonly localVerification: boolean) {}
   private install(patch: Partial<SessionSnapshot>) { this.snapshot = { ...this.snapshot, ...patch }; this.listeners.forEach(listener => listener()); }
   getSnapshot = () => this.snapshot;
+  // Domain requests share the existing identity, cancellation and restriction handling.
+  request = async (path: string, signal: AbortSignal, method = 'GET', body?: unknown) => {
+    const generation = this.generation;
+    const user = this.user;
+    if (!user || this.snapshot.phase !== 'ready') throw new DOMException('Sesión obsoleta', 'AbortError');
+    try {
+      const result = await this.api.request(path, AbortSignal.any([signal, this.controller.signal]), user, method, body);
+      if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
+      return result;
+    } catch (error) {
+      if (this.current(generation) && (terminalCodes.has(errorCode(error)) || errorCode(error).startsWith('ACCOUNT_'))) {
+        this.retry();
+      }
+      throw error;
+    }
+  };
+  verifyEmail = async (send: boolean) => {
+    const generation = this.generation;
+    const user = this.user;
+    if (!user) throw new DOMException('Sesión obsoleta', 'AbortError');
+    if (send) await this.auth.verify(user);
+    else { await user.reload(); if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError'); await user.getIdToken(true); }
+    if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
+    return user.emailVerified;
+  };
+  get emailVerified() { return this.user?.emailVerified ?? false; }
+  installProfile = (profile: Profile | null) => { if (this.snapshot.phase === 'ready') this.install({ profile }); };
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     if (this.listeners.size === 1) {

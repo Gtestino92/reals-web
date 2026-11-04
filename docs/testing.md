@@ -57,3 +57,22 @@ git diff --check
 Latest local result: typecheck PASS; 101/101 tests PASS in 5 files; build PASS. Real Firebase/backend and Windows/Android browser auth smoke tests were not run because `.env.local` was absent. Follow the [Firebase setup and manual checklist](local-development.md#firebase-web-setup-stage-b). Passing mocks do not prove OAuth authorization, real mail delivery or device persistence.
 
 `npm audit --omit=dev` reports four high entries propagated from the Firebase umbrella package's Firestore → gRPC dependency (gRPC 1.9.16). App/Auth are the only Firebase browser imports; Firestore/gRPC are not used by this application. Do not accept the audit's suggested downgrade to Firebase 9.14.0 without review. Re-evaluate upstream versions before extending Firebase usage or shipping this POC.
+
+## Stage C validation and smoke checklist
+
+Automated coverage adds real onboarding surface tests with mocked Firebase/fetch, DTO/form/legal/crop geometry validation, JPEG canvas export, multipart boundaries, add/replace/delete/reorder reconciliation, legal version conflicts, email reload/cooldown, backend activation rejection codes, StrictMode duplicate submission, sign-out stale results and crop resource cleanup. Stage B's 105 authentication/login/ADB tests remain, with its App tests explicitly isolating the onboarding surface; Stage C tests exercise that real integration separately. CI needs no backend or credentials.
+
+Latest Stage C validation: `npm run typecheck` PASS; `npm test` PASS (178 tests in 9 files, including the existing 105); `npm run build` PASS; `git diff --check` PASS.
+
+Manual disposable-account smoke (pending on Windows Chrome and physical Chrome Android):
+
+1. Start the existing Firebase/PostgreSQL/MinIO/Spring Boot setup and Vite. Confirm `/api` requests and optional MinIO ADB mapping described in [local development](local-development.md).
+2. Register a disposable account. Inspect the legal gate only when requirements are unsatisfied; open each current document, perform its explicit required action, reload and confirm persisted completion. Test an updated version from authorized backend configuration separately.
+3. Search `espana` and select España; verify required fields, invalid dates, underage input, age range and plain-text errors. Create once with rapid repeated clicks; confirm DRAFT and restoration after reload.
+4. For email/password, verify resend cooldown, delivery and **Ya verifiqué** with refreshed token. Separately test verified Google and the existing local-only auto-verification flag.
+5. Select JPEG/PNG on desktop and phone. Drag crop, use keyboard sliders, reset, cancel and confirm. Check orientation, vertical output and square thumbnails. Reject HEIC, corrupt and oversized inputs safely.
+6. Add at least four suitable disposable photos; confirm backend validation/moderation classifications. Replace one by ID, delete with cancel/confirm, reorder all photos, and reload. Test offline upload and refresh authoritative state before retrying; check no duplicate photo. Check pending/rejected guidance and refreshed storage URLs.
+7. Edit profile details and match preferences separately; reload. Attempt activation before meeting prerequisites and review actual backend errors. With server-approved requirements met, activate and confirm **Tu perfil está activo**, **Ir a Inicio**, reload into temporary Home and sign out.
+8. Check DRAFT with existing interactions against Android: Web retains a read-only notice and never destroys interactions. Verify account restrictions, legal gate after version changes, sign-out during slow load/upload, background/resume, keyboard navigation, touch drag, narrow layouts, light/dark themes and Spanish accents.
+
+Executed: backend/MinIO health HTTP 200, Vite HTTP 200, and unauthenticated `/api/me` through the Vite proxy HTTP 401. The temporary Vite process was stopped after probing. Real Firebase registration, OAuth, mail delivery, PostgreSQL persistence, photo upload/cropping/moderation, visual rendering and physical-device validation remain pending. jsdom/canvas mocks do not establish those results. No Safari/iOS or HEIC compatibility is claimed.

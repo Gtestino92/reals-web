@@ -49,6 +49,7 @@
   line-height: var(--type-section-title-line-height);
 }
 .login-header p { margin: 8px 0 26px; color: var(--color-on-surface-variant); }
+.session-loading { margin: 24px 0; text-align: center; color: var(--color-on-surface-variant); }
 .login-form { display: flex; flex-direction: column; gap: 14px; }
 .login-field { position: relative; }
 .login-field input {
