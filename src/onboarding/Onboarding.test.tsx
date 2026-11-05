@@ -6,8 +6,8 @@ import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
 import { defaults } from './contracts';
 // Real canvas/export/cleanup behavior is covered in CropDialog tests.
-vi.mock('./CropDialog', () => ({ CropDialog: ({ onConfirm, onCancel }: { onConfirm: (blob: Blob) => Promise<void>; onCancel: () => void }) => <div role="dialog"><button onClick={() => void onConfirm(new Blob(['jpeg'],{ type:'image/jpeg' }))}>Confirmar recorte</button><button onClick={onCancel}>Cancelar recorte</button></div> }));
-const initialProfile = { ...defaults, displayName:'Ana',city:'Córdoba',countryCode:'AR',id:'p',userId:'u',status:'DRAFT',authenticityVerificationStatus:'STALE' };
+vi.mock('./CropDialog', () => ({ CropDialog: ({ file, onConfirm, onCancel }: { file: File; onConfirm: (blob: Blob) => Promise<void>; onCancel: () => void }) => <div role="dialog" aria-label={file.name}><button onClick={() => void onConfirm(new Blob(['jpeg'],{ type:'image/jpeg' }))}>Confirmar recorte</button><button onClick={onCancel}>Cancelar recorte</button></div> }));
+const initialProfile = { ...defaults, birthDate:'1995-01-01',displayName:'Ana',city:'Córdoba',countryCode:'AR',id:'p',userId:'u',status:'DRAFT',authenticityVerificationStatus:'STALE' };
 const initialPhoto = { id:'photo',url:'http://localhost:9000/photo',position:1,validationStatus:'VALIDATED',moderationStatus:'APPROVED',isPersonPhoto:true,isFullBody:true };
 let profile: typeof initialProfile | null, list: typeof initialPhoto[], satisfied: boolean, version: string;
 let user: Identity, auth: AuthService;
@@ -38,7 +38,7 @@ beforeEach(() => {
 });
 function mount() { return render(<StrictMode><App firebase={{ service:auth,localVerification:false }} api={new ApiClient(fetcher)}/></StrictMode>); }
 const writes = (method: string) => fetcher.mock.calls.filter(x => x[1]?.method === method);
-async function createForm() { await screen.findByRole('heading',{ name:'Crear perfil' }); const form = screen.getByRole('form',{ name:'Crear perfil' }); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'Ana' } }); fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } }); fireEvent.change(within(form).getByLabelText('País'),{ target:{ value:'AR' } }); return form; }
+async function createForm() { await screen.findByRole('heading',{ name:'Crear perfil' }); const form = screen.getByRole('form',{ name:'Crear perfil' }); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'Ana' } }); fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } }); fireEvent.change(within(form).getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } }); return form; }
 it('creates once under StrictMode and duplicate submit, restores DRAFT and activates through backend', async () => {
   mount(); const form = await createForm(); fireEvent.submit(form); fireEvent.submit(form);
   await screen.findByRole('heading',{ name:'Completá tu perfil' }); expect(writes('POST')).toHaveLength(1); expect(profile?.status).toBe('DRAFT');
@@ -48,7 +48,7 @@ it('creates once under StrictMode and duplicate submit, restores DRAFT and activ
 it.each(['DRAFT','INACTIVE','ACTIVE'])('restores %s after reload', async status => { profile = { ...initialProfile,status }; mount(); await screen.findByRole('heading',{ name:status === 'ACTIVE' ? 'Inicio' : 'Completá tu perfil' }); expect(writes('POST')).toHaveLength(0); });
 it('records exactly the required legal action and version', async () => { satisfied = false; mount(); await screen.findByRole('heading',{ name:'Antes de continuar' }); fireEvent.click(screen.getByRole('button',{ name:'Confirmar lectura' })); await screen.findByRole('heading',{ name:'Crear perfil' }); expect(JSON.parse(String(writes('POST')[0]?.[1]?.body))).toEqual({ documentType:'PRIVACY_NOTICE',documentVersion:'v1',action:'ACKNOWLEDGED' }); });
 it('recovers a stale legal version without silently accepting the new version', async () => { satisfied = false; mount(); await screen.findByRole('heading',{ name:'Antes de continuar' }); version = 'v2'; fireEvent.click(screen.getByRole('button',{ name:'Confirmar lectura' })); await screen.findByText(/Versión v2/); expect(satisfied).toBe(false); expect(screen.getByRole('button',{ name:'Confirmar lectura' })).toBeEnabled(); });
-it('searches countries without accents and validates without a mutation', async () => { mount(); const form = await createForm(); fireEvent.change(within(form).getByLabelText('Buscar país'),{ target:{ value:'espana' } }); expect(within(form).getByRole('option',{ name:'España' })).toBeInTheDocument(); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'x' } }); fireEvent.submit(form); expect(await screen.findByRole('alert')).toHaveTextContent('Nombre visible'); expect(writes('POST')).toHaveLength(0); });
+it('uses a single country dropdown and validates without a mutation', async () => { mount(); const form = await createForm(); expect(within(form).queryByLabelText('Buscar país')).not.toBeInTheDocument(); expect(within(form).getByLabelText('País')).toHaveValue('AR'); expect(within(form).getByRole('option',{ name:'España' })).toBeInTheDocument(); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'x' } }); fireEvent.submit(form); expect(await screen.findByRole('alert')).toHaveTextContent('Nombre visible'); expect(writes('POST')).toHaveLength(0); });
 it('updates details and filters using separate contracts', async () => { profile = { ...initialProfile }; mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
   fireEvent.click(screen.getByText('Datos del perfil',{ selector:'summary' })); const details = screen.getByRole('form',{ name:'Datos del perfil' }); fireEvent.change(within(details).getByLabelText('Ciudad'),{ target:{ value:'Rosario' } }); fireEvent.submit(details); await waitFor(() => expect(profile?.city).toBe('Rosario')); await waitFor(() => expect(screen.getByRole('button',{ name:'Actualizar estado' })).toBeEnabled()); expect(JSON.parse(String(writes('PATCH')[0]?.[1]?.body))).not.toHaveProperty('intention');
   fireEvent.click(screen.getByText('Preferencias de búsqueda',{ selector:'summary' })); const filters = screen.getByRole('form',{ name:'Preferencias de búsqueda' }); fireEvent.change(within(filters).getByLabelText('Intención'),{ target:{ value:'FRIENDSHIP' } }); fireEvent.submit(filters); await waitFor(() => expect(profile?.intention).toBe('FRIENDSHIP')); expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body))).not.toHaveProperty('city');
@@ -342,4 +342,121 @@ it('keeps loading sign-out accessible and rejects a late initial onboarding resp
   await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[] })));
   expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument();
   expect(screen.queryByText('Preparando Reals…')).not.toBeInTheDocument();
+});
+const droppedFile = (name = 'drop.jpg', type = 'image/jpeg') => new File(['image'],name,{ type });
+function dropPhoto(position: number, files: File[]) {
+  const event = new Event('drop',{ bubbles:true,cancelable:true });
+  Object.defineProperty(event,'dataTransfer',{ value:{ types:['Files'],files } });
+  fireEvent(screen.getByRole('article',{ name:`Foto ${position}` }),event);
+  return event;
+}
+it('explains email restrictions and enables picker/drop immediately after verification succeeds', async () => {
+  profile = { ...initialProfile }; Object.defineProperty(user,'emailVerified',{ value:false,configurable:true });
+  mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  expect(screen.getByRole('button',{ name:'Agregar foto 1' })).toBeDisabled();
+  expect(screen.getByLabelText('Agregar foto 1')).toBeDisabled();
+  expect(screen.getByRole('button',{ name:'Agregar foto 1' })).toHaveAccessibleDescription(/Verificá tu email antes de subir fotos/);
+  expect(screen.getByRole('link',{ name:'Ir a la verificación de email' })).toHaveAttribute('href','#email-verification');
+  expect(dropPhoto(1,[droppedFile()]).defaultPrevented).toBe(true);
+  fireEvent.change(screen.getByLabelText('Agregar foto 1'),{ target:{ files:[droppedFile()] } });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user,'emailVerified',{ value:true,configurable:true }); });
+  fireEvent.click(screen.getByRole('button',{ name:'Ya verifiqué' }));
+  await waitFor(() => expect(screen.getByRole('button',{ name:'Agregar foto 1' })).toBeEnabled());
+  dropPhoto(1,[droppedFile()]); await screen.findByRole('dialog',{ name:'drop.jpg' });
+  expect(fetcher.mock.calls.filter(x => x[1]?.body instanceof FormData)).toHaveLength(0);
+});
+it.each([false,true])('drops through crop and existing multipart add/replace flow (replace=%s)', async replace => {
+  profile = { ...initialProfile }; if (replace) list = [initialPhoto];
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (input,options) => {
+    if (options?.body instanceof FormData) {
+      expect(String(input)).toBe(replace ? '/api/me/profile/photos/photo/file' : '/api/me/profile/photos');
+      expect(options.method).toBe(replace ? 'PUT' : 'POST');
+      expect(options.body.get('position')).toBe(replace ? null : '3');
+      expect(options.body.get('file')).toBeInstanceOf(File);
+      expect(options.headers).toEqual({ Authorization:'Bearer token' });
+      list = [{ ...initialPhoto,position:replace ? 1 : 3 }]; return json(list[0]);
+    }
+    return original(input,options);
+  });
+  mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  expect(dropPhoto(replace ? 1 : 3,[droppedFile('original.png','image/png')]).defaultPrevented).toBe(true);
+  await screen.findByRole('dialog',{ name:'original.png' });
+  expect(fetcher.mock.calls.filter(x => x[1]?.body instanceof FormData)).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button',{ name:'Confirmar recorte' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(fetcher.mock.calls.filter(x => x[1]?.body instanceof FormData)).toHaveLength(1);
+  expect(fetcher.mock.calls.filter(x => String(x[0]).endsWith('/reorder'))).toHaveLength(0);
+});
+it.each(['unsupported','multiple','oversized','empty','directory'])('rejects invalid dropped selection: %s', async kind => {
+  profile = { ...initialProfile }; mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  let files = [droppedFile()];
+  if (kind === 'unsupported') files = [droppedFile('photo.heic','image/heic')];
+  if (kind === 'multiple') files.push(droppedFile('second.png','image/png'));
+  if (kind === 'oversized') Object.defineProperty(files[0],'size',{ value:15*1024*1024+1 });
+  if (kind === 'empty') files = [new File([],'empty.png',{ type:'image/png' })];
+  if (kind === 'directory') files = [];
+  expect(dropPhoto(1,files).defaultPrevented).toBe(true);
+  const message = kind === 'unsupported' ? 'formato no es compatible' : ['oversized','empty'].includes(kind) ? 'hasta 15 MB' : 'una sola foto';
+  expect(screen.getByRole('alert')).toHaveTextContent(message);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(writes('POST')).toHaveLength(0);
+});
+it('uses the same validation for file selection and lets a canceled crop release ownership', async () => {
+  profile = { ...initialProfile }; mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  const input = screen.getByLabelText('Agregar foto 1');
+  expect(input).toHaveAttribute('hidden'); const click = vi.spyOn(input,'click');
+  fireEvent.click(screen.getByRole('button',{ name:'Agregar foto 1' })); expect(click).toHaveBeenCalledOnce();
+  fireEvent.change(input,{ target:{ files:[droppedFile('bad.gif','image/gif')] } });
+  expect(screen.getByRole('alert')).toHaveTextContent('formato no es compatible');
+  fireEvent.change(input,{ target:{ files:[droppedFile('picker.jpg')] } });
+  await screen.findByRole('dialog',{ name:'picker.jpg' });
+  fireEvent.click(screen.getByRole('button',{ name:'Cancelar recorte' }));
+  dropPhoto(1,[droppedFile('next.png','image/png')]); await screen.findByRole('dialog',{ name:'next.png' });
+});
+it('prevents competing selections before the first crop renders', async () => {
+  profile = { ...initialProfile }; mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  act(() => { dropPhoto(1,[droppedFile('first.jpg')]); dropPhoto(2,[droppedFile('second.jpg')]); });
+  expect(screen.getByRole('dialog',{ name:'first.jpg' })).toBeInTheDocument();
+  expect(screen.queryByRole('dialog',{ name:'second.jpg' })).not.toBeInTheDocument();
+});
+it('shows transient upload guidance during reconciliation and an actionable error after it fails', async () => {
+  profile = { ...initialProfile }; const original = fetcher.getMockImplementation()!;
+  let finish: ((response: Response) => void) | undefined; let refreshing = false;
+  fetcher.mockImplementation((input,options) => refreshing && String(input).endsWith('/photos') ? new Promise(resolve => { finish = resolve; }) : original(input,options));
+  mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  refreshing = true; fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(screen.getByRole('button',{ name:'Agregar foto 1' })).toBeDisabled();
+  expect(screen.getByRole('button',{ name:'Agregar foto 1' })).toHaveAccessibleDescription(/Estamos actualizando/);
+  dropPhoto(1,[droppedFile()]); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  await act(async () => finish?.(json({ invalid:true })));
+  expect(screen.getByRole('button',{ name:'Agregar foto 1' })).toHaveAccessibleDescription(/No pudimos confirmar el estado/);
+  expect(screen.getByRole('alert')).toHaveTextContent('respuesta del servidor no es válida');
+  dropPhoto(1,[droppedFile()]); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+it('rejects detached drop/picker callbacks after sign-out', async () => {
+  profile = { ...initialProfile }; let finish: (() => void) | undefined;
+  auth.signOut = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+  mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  const target = screen.getByRole('article',{ name:'Foto 1' }); const input = screen.getByLabelText('Agregar foto 1');
+  act(() => {
+    fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' }));
+    fireEvent.drop(target,{ dataTransfer:{ types:['Files'],files:[droppedFile()] } });
+    fireEvent.change(input,{ target:{ files:[droppedFile()] } });
+  });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(writes('POST')).toHaveLength(0);
+  await act(async () => finish?.()); await screen.findByRole('button',{ name:'Ingresar' });
+});
+it.each([
+  ['NOT_STARTED','Sin iniciar'], ['PENDING','En proceso'], ['VERIFIED','Verificada'],
+  ['REJECTED','No aprobada'], ['NEEDS_REVIEW','Requiere revisión'], ['STALE','Requiere una nueva verificación'],
+])('presents authenticity %s in Spanish without changing activation eligibility', async (status,label) => {
+  profile = { ...initialProfile,authenticityVerificationStatus:status };
+  mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  expect(screen.getByText(`Autenticidad: ${label}`)).toBeInTheDocument();
+  expect(screen.queryByText(`Autenticidad: ${status}`)).not.toBeInTheDocument();
+  expect(screen.getByText(/La validación de fotos revisa cada imagen/)).toHaveTextContent('proceso separado');
+  expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled();
+  expect(fetcher.mock.calls.some(x => String(x[0]).includes('/authenticity-verification'))).toBe(false);
 });

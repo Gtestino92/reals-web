@@ -6,6 +6,14 @@ export const intentions = ['DATE', 'FRIENDSHIP', 'CASUAL'] as const;
 export const genderLabels = ['Hombre', 'Mujer', 'No binario', 'Otra identidad'];
 export const preferenceLabels = ['Hombres', 'Mujeres', 'Personas no binarias', 'Otras identidades'];
 export const intentionLabels = ['Citas', 'Amistad', 'Algo casual'];
+export const authenticityLabels: Record<string, string> = {
+  NOT_STARTED: 'Sin iniciar',
+  PENDING: 'En proceso',
+  VERIFIED: 'Verificada',
+  REJECTED: 'No aprobada',
+  NEEDS_REVIEW: 'Requiere revisión',
+  STALE: 'Requiere una nueva verificación',
+};
 export interface Fields {
   displayName: string; birthDate: string; gender: string; lookingForGenders: string[]; intention: string;
   city: string; countryCode: string; bio: string; preferredMinAge: number; preferredMaxAge: number; maxDistanceKm: number;
@@ -14,7 +22,7 @@ export interface FullProfile extends Profile, Fields { authenticityVerificationS
 export interface Country { code: string; displayName: string }
 export interface Photo { id: string; url: string; position: number; validationStatus: string; moderationStatus: string; isPersonPhoto: boolean; isFullBody: boolean }
 export interface LegalDocument { type: string; version: string; requiredAction: 'ACCEPTED' | 'ACKNOWLEDGED'; satisfied: boolean; url: string }
-export const defaults: Fields = { displayName: '', birthDate: '1995-01-01', gender: 'MALE', lookingForGenders: ['FEMALE'], intention: 'DATE', city: '', countryCode: '', bio: '', preferredMinAge: 18, preferredMaxAge: 45, maxDistanceKm: 50 };
+export const defaults: Fields = { displayName: '', birthDate: '', gender: 'MALE', lookingForGenders: ['FEMALE'], intention: 'DATE', city: '', countryCode: '', bio: '', preferredMinAge: 18, preferredMaxAge: 45, maxDistanceKm: 50 };
 export function invalid(): never { throw new ApiError('invalid'); }
 export function safeUrl(value: unknown): string {
   if (typeof value !== 'string') return invalid();
@@ -55,7 +63,6 @@ export function legal(status: unknown, catalog: unknown): { satisfied: boolean; 
   });
   return { satisfied: false, documents };
 }
-export const fold = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es');
 export function normalize(fields: Fields): Fields { return { ...fields, displayName: fields.displayName.trim(), city: fields.city.trim(), bio: fields.bio.trim(), countryCode: fields.countryCode.trim().toUpperCase() }; }
 export function validate(f: Fields, catalog: Country[], mode: 'create' | 'details' | 'filters', now = new Date()): string[] {
   const errors: string[] = [];

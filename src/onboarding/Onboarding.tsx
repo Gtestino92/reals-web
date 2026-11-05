@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../auth/api';
 import { errorCode, terminalCodes } from '../auth/errors';
 import type { SessionController } from '../auth/session';
-import { countries, fullProfile, hasInteractions, legal, photos } from './contracts';
+import { authenticityLabels, countries, fullProfile, hasInteractions, legal, photos } from './contracts';
 import type { Country, Fields, FullProfile, LegalDocument, Photo } from './contracts';
 import { ProfileForm } from './ProfileForm';
 import { CropDialog } from './CropDialog';
+import { PhotoSlot } from './PhotoSlot';
+import { photoFileError } from './photoFiles';
 import './onboarding.css';
 import { SessionLoading } from '../SessionLoading';
 
@@ -31,6 +33,9 @@ export function Onboarding({ controller }: { controller: SessionController }) {
   const [busy, setBusy] = useState(true), [blocked,setBlocked] = useState(true), [error,setError] = useState(''), [message,setMessage] = useState('');
   const [verified,setVerified] = useState(controller.emailVerified), [success,setSuccess] = useState(false);
   const [crop,setCrop] = useState<{ file: File; photo: Photo | undefined; position: number } | null>(null);
+  const cropOwned = useRef(false);
+  const [photoError,setPhotoError] = useState('');
+  const closeCrop = () => { cropOwned.current = false; setCrop(null); };
   const [sendAt,setSendAt] = useState(0), [checkAt,setCheckAt] = useState(0), [now,setNow] = useState(Date.now());
   const owner = useRef<{ abort: AbortController; locked: boolean } | null>(null);
   const loadCountries = async (signal: AbortSignal) => {
@@ -70,7 +75,7 @@ export function Onboarding({ controller }: { controller: SessionController }) {
   const run = async (task?: (signal: AbortSignal) => Promise<void>, activation = false) => {
     const resource = owner.current;
     if (!resource || resource.locked) return false;
-    resource.locked = true; setBusy(true); setError(''); setMessage('');
+    resource.locked = true; setBusy(true); setError(''); setMessage(''); setPhotoError('');
     const signal = resource.abort.signal;
     let failure: unknown;
     try { if (task) await task(signal); }
@@ -108,9 +113,23 @@ export function Onboarding({ controller }: { controller: SessionController }) {
     });
   };
   const mutatePhoto = (path: string, method: string, body?: unknown) => { if (!blocked) void run(async signal => { await controller.request(`/me/profile/photos${path}`,signal,method,body); }); };
-  const selectFile = (file: File | undefined, position: number, photo?: Photo) => { if (file && !busy && !blocked) setCrop({ file,position,photo }); };
+  const selectFiles = (files: File[], position: number, photo?: Photo) => {
+    const resource = owner.current;
+    if (!resource || resource.abort.signal.aborted || resource.locked || busy || blocked || !verified || !controller.emailVerified || cropOwned.current || controller.snapshot.phase !== 'ready' || controller.snapshot.profile?.id !== model?.profile?.id) return;
+    if (files.length !== 1) { setPhotoError('Elegí o soltá una sola foto JPEG o PNG por vez. No se admiten carpetas.'); return; }
+    const file = files[0];
+    if (!file) return;
+    const invalid = photoFileError(file);
+    if (invalid) { setPhotoError(invalid); return; }
+    setPhotoError(''); cropOwned.current = true; setCrop({ file,position,photo });
+  };
   const list = model?.photos ?? [];
   const disabled = busy || blocked;
+  const uploadGuidance = busy ? 'Estamos actualizando el estado. Esperá un momento para subir fotos.'
+    : blocked ? 'No pudimos confirmar el estado. Revisá el error y usá «Actualizar estado» antes de subir fotos.'
+    : !verified ? 'Verificá tu email antes de subir fotos. Usá «Reenviar correo» y «Ya verifiqué» en la sección anterior.'
+    : crop ? 'Terminá o cancelá el recorte actual antes de elegir otra foto.'
+    : 'Elegí o arrastrá una sola foto JPEG o PNG de hasta 15 MB. Podés recortarla antes de subirla.';
   if (!model && busy) return <SessionLoading />;
   return <div className="onboarding" aria-busy={busy}>
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
@@ -122,15 +141,29 @@ export function Onboarding({ controller }: { controller: SessionController }) {
       <h2>Completá tu perfil</h2><p>Estado: {model.profile.status}</p>
       {model.interactions === true && <aside><h3>Inicio: interacciones vigentes</h3><p>Tenés interacciones en curso. Se conservan en el backend. Este punto de consulta es de solo lectura; usá Android para continuarlas.</p></aside>}
       {model.interactions === null && <aside><h3>Inicio no disponible</h3><p>No pudimos consultar tus interacciones. Su estado es desconocido. Podés seguir completando el perfil o consultarlas desde Android.</p><button disabled={disabled || !!crop} onClick={() => void run()}>Reintentar Inicio</button></aside>}
-      <section><h3>Verificá tu email</h3><p>{verified ? 'Email verificado' : 'Abrí el link del correo de verificación y volvé para continuar.'}</p>{!verified && <><button disabled={disabled || sendAt > now} onClick={() => { if (Date.now() < sendAt) return; void run(async () => { await controller.verifyEmail(true); setSendAt(Date.now()+60000); setMessage('Te enviamos un nuevo correo de verificación.'); }); }}>Reenviar correo{sendAt > now ? ` (${Math.ceil((sendAt-now)/1000)} s)` : ''}</button><button disabled={disabled || checkAt > now} onClick={() => { if (Date.now() < checkAt) return; void run(async () => { const value = await controller.verifyEmail(false); setCheckAt(Date.now()+10000); setMessage(value ? 'Email verificado.' : 'Todavía no vemos el email verificado. Abrí el link del correo y volvé a intentar.'); }); }}>Ya verifiqué</button></>}</section>
+      <section id="email-verification" tabIndex={-1}><h3>Verificá tu email</h3><p>{verified ? 'Email verificado' : 'Abrí el link del correo de verificación y volvé para continuar.'}</p>{!verified && <><button disabled={disabled || sendAt > now} onClick={() => { if (Date.now() < sendAt) return; void run(async () => { await controller.verifyEmail(true); setSendAt(Date.now()+60000); setMessage('Te enviamos un nuevo correo de verificación.'); }); }}>Reenviar correo{sendAt > now ? ` (${Math.ceil((sendAt-now)/1000)} s)` : ''}</button><button disabled={disabled || checkAt > now} onClick={() => { if (Date.now() < checkAt) return; void run(async () => { const value = await controller.verifyEmail(false); setCheckAt(Date.now()+10000); setMessage(value ? 'Email verificado.' : 'Todavía no vemos el email verificado. Abrí el link del correo y volvé a intentar.'); }); }}>Ya verifiqué</button></>}</section>
       <details open><summary>Fotos</summary><p>Hasta nueve fotos. Para la configuración local se suelen requerir cuatro fotos validadas, una de persona y una de cuerpo completo. El servidor decide si podés activar el perfil.</p>
-        <div className="photo-grid">{Array.from({ length:9 },(_,i) => { const position = i+1; const photo = list.find(p => p.position === position); return <article key={position}><h4>Foto {position}</h4>{photo && <><img src={photo.url} alt={`Foto ${position} del perfil`} referrerPolicy="no-referrer" onError={e => { e.currentTarget.alt = 'No se pudo cargar la foto. Actualizá el estado o revisá el acceso al almacenamiento.'; }}/><p>Validación: {photo.validationStatus} · Moderación: {photo.moderationStatus}</p><p>Persona: {photo.isPersonPhoto ? 'Sí' : 'No'} · Cuerpo completo: {photo.isFullBody ? 'Sí' : 'No'}</p>{photo.validationStatus !== 'VALIDATED' || photo.moderationStatus !== 'APPROVED' ? <p>Pendiente de revisión o no aprobada. Actualizá el estado; si fue rechazada, reemplazala.</p> : null}</>}
-          <label>{photo ? 'Reemplazar' : 'Agregar foto'}<input aria-label={`${photo ? 'Reemplazar' : 'Agregar'} foto ${position}`} type="file" accept="image/jpeg,image/png" disabled={disabled || !verified || !!crop} onChange={e => { selectFile(e.target.files?.[0],position,photo); e.target.value = ''; }}/></label>
-          {photo && <><button disabled={disabled || !!crop} onClick={() => { if (window.confirm('¿Eliminar esta foto?')) mutatePhoto(`/${encodeURIComponent(photo.id)}`,'DELETE'); }}>Eliminar foto {position}</button>{[-1,1].map(direction => <button key={direction} disabled={disabled || !!crop || !list[list.indexOf(photo)+direction]} onClick={() => { const ordered = [...list]; const index = ordered.indexOf(photo); const target = ordered[index+direction]; if (!target) return; ordered[index] = target; ordered[index+direction] = photo; mutatePhoto('/reorder','PUT',{ placements: ordered.map((p,index) => ({ photoId:p.id,position:index+1 })) }); }}>{direction < 0 ? 'Mover antes' : 'Mover después'} foto {position}</button>)}</>}
-        </article>; })}</div></details>
+        <p id="photo-upload-guidance" role="status">{uploadGuidance}</p>
+        {!verified && <p><a href="#email-verification">Ir a la verificación de email</a></p>}
+        {photoError && <p role="alert">{photoError}</p>}
+        <div className="photo-grid">{Array.from({ length:9 },(_,i) => {
+          const position = i+1;
+          const photo = list.find(p => p.position === position);
+          return <PhotoSlot key={position} position={position} photo={photo} disabled={disabled || !verified || !!crop} onSelect={files => selectFiles(files,position,photo)}>
+            {photo && <><p>Validación: {photo.validationStatus} · Moderación: {photo.moderationStatus}</p><p>Persona: {photo.isPersonPhoto ? 'Sí' : 'No'} · Cuerpo completo: {photo.isFullBody ? 'Sí' : 'No'}</p>
+              {photo.validationStatus !== 'VALIDATED' || photo.moderationStatus !== 'APPROVED' ? <p>Pendiente de revisión o no aprobada. Actualizá el estado; si fue rechazada, reemplazala.</p> : null}
+              <button disabled={disabled || !!crop} onClick={() => { if (window.confirm('¿Eliminar esta foto?')) mutatePhoto(`/${encodeURIComponent(photo.id)}`,'DELETE'); }}>Eliminar foto {position}</button>
+              {[-1,1].map(direction => <button key={direction} disabled={disabled || !!crop || !list[list.indexOf(photo)+direction]} onClick={() => {
+                const ordered = [...list]; const index = ordered.indexOf(photo); const target = ordered[index+direction]; if (!target) return;
+                ordered[index] = target; ordered[index+direction] = photo;
+                mutatePhoto('/reorder','PUT',{ placements: ordered.map((p,index) => ({ photoId:p.id,position:index+1 })) });
+              }}>{direction < 0 ? 'Mover antes' : 'Mover después'} foto {position}</button>)}
+            </>}
+          </PhotoSlot>;
+        })}</div></details>
       {(['details','filters'] as const).map(mode => <details key={mode}><summary>{mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'}</summary><ProfileForm key={`${model.profile!.id}-${mode}`} profile={model.profile!} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled || !!crop} mode={mode} submit={writeProfile}/></details>)}
-      <section><h3>Activar perfil</h3><p>Autenticidad: {model.profile.authenticityVerificationStatus}</p>{!verified && <p id="activation-email-guidance">Verificá tu email y presioná «Ya verifiqué» antes de activar el perfil.</p>}<button aria-describedby={!verified ? 'activation-email-guidance' : undefined} disabled={disabled || !!crop || !verified} onClick={() => void run(async signal => { await controller.verifyEmail(false); const result = fullProfile(await controller.request('/me/profile/activation',signal,'POST'),controller.snapshot.account?.id ?? ''); if (result.status !== 'ACTIVE') throw new ApiError('invalid'); },true)}>Activar perfil</button></section>
+      <section><h3>Activar perfil</h3><p>Autenticidad: {authenticityLabels[model.profile.authenticityVerificationStatus] ?? 'Estado no disponible'}</p><p>La validación de fotos revisa cada imagen. La verificación de autenticidad del perfil es un proceso separado. El servidor determina si es necesaria para activar tu perfil.</p>{!verified && <p id="activation-email-guidance">Verificá tu email y presioná «Ya verifiqué» antes de activar el perfil.</p>}<button aria-describedby={!verified ? 'activation-email-guidance' : undefined} disabled={disabled || !!crop || !verified} onClick={() => void run(async signal => { await controller.verifyEmail(false); const result = fullProfile(await controller.request('/me/profile/activation',signal,'POST'),controller.snapshot.account?.id ?? ''); if (result.status !== 'ACTIVE') throw new ApiError('invalid'); },true)}>Activar perfil</button></section>
     </> : null}
-    {crop && <CropDialog file={crop.file} onCancel={() => setCrop(null)} onConfirm={async blob => { if (blocked) return; const data = new FormData(); data.append('file',blob,'profile.jpg'); if (!crop.photo) data.append('position',String(crop.position)); const attempted = await run(async signal => { await controller.request(crop.photo ? `/me/profile/photos/${encodeURIComponent(crop.photo.id)}/file` : '/me/profile/photos',signal,crop.photo ? 'PUT' : 'POST',data); }); if (!attempted) throw new Error('Hay una operación en curso. Volvé a intentar.'); if (owner.current && !owner.current.abort.signal.aborted) setCrop(null); }}/ >}
+    {crop && <CropDialog file={crop.file} onCancel={closeCrop} onConfirm={async blob => { if (blocked) return; const data = new FormData(); data.append('file',blob,'profile.jpg'); if (!crop.photo) data.append('position',String(crop.position)); const attempted = await run(async signal => { await controller.request(crop.photo ? `/me/profile/photos/${encodeURIComponent(crop.photo.id)}/file` : '/me/profile/photos',signal,crop.photo ? 'PUT' : 'POST',data); }); if (!attempted) throw new Error('Hay una operación en curso. Volvé a intentar.'); if (owner.current && !owner.current.abort.signal.aborted) closeCrop(); }}/ >}
   </div>;
 }

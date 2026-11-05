@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiClient, ApiError } from '../auth/api';
-import { countries, defaults, fold, fullProfile, hasInteractions, legal, normalize, photos, validate } from './contracts';
+import { countries, defaults, fullProfile, hasInteractions, legal, normalize, photos, validate } from './contracts';
 import { cropRect, decodePhoto, exportCrop } from './CropDialog';
 import { onboardingError } from './Onboarding';
-export const profile = { ...defaults, displayName: 'Ana', city: 'Córdoba', countryCode: 'AR', id: 'p', userId: 'u', status: 'DRAFT', authenticityVerificationStatus: 'STALE' };
+export const profile = { ...defaults, birthDate: '1995-01-01', displayName: 'Ana', city: 'Córdoba', countryCode: 'AR', id: 'p', userId: 'u', status: 'DRAFT', authenticityVerificationStatus: 'STALE' };
 export const photo = { id: 'photo', url: 'http://localhost:9000/photo?signature=test', position: 1, validationStatus: 'VALIDATED', moderationStatus: 'APPROVED', isPersonPhoto: true, isFullBody: true };
 export const countryList = [{ code: 'AR', displayName: 'Argentina' }, { code: 'ES', displayName: 'España' }];
 describe('onboarding contracts', () => {
-  it('normalizes plain input and searches accents', () => { expect(normalize({ ...defaults, displayName:' Ana ', countryCode:' ar ' }).countryCode).toBe('AR'); expect(fold('España')).toBe('espana'); expect(countries(countryList)).toEqual(countryList); });
+  it('normalizes plain input and preserves backend country metadata', () => { expect(normalize({ ...defaults, displayName:' Ana ', countryCode:' ar ' }).countryCode).toBe('AR'); expect(countries(countryList)).toEqual(countryList); });
   it('accepts valid creation and distinguishes filters from details', () => { expect(validate(profile,countryList,'create')).toEqual([]); expect(validate(defaults,[],'filters')).toEqual([]); expect(validate({ ...profile, lookingForGenders:[] },countryList,'details')).toEqual([]); });
-  it.each([{ birthDate:'2000-02-30' },{ birthDate:'2020-01-01' },{ birthDate:'1900-01-01' },{ birthDate:'invalid' },{ displayName:'x' },{ displayName:'<script>' },{ city:'' },{ countryCode:'ZZ' },{ gender:'unknown' },{ intention:'unknown' },{ lookingForGenders:[] },{ bio:'x'.repeat(1001) },{ preferredMinAge:50, preferredMaxAge:40 },{ maxDistanceKm:101 }])('rejects invalid form %j', patch => { expect(validate({ ...profile,...patch },countryList,'create').length).toBeGreaterThan(0); });
+  it.each([{ birthDate:'' },{ birthDate:'2000-02-30' },{ birthDate:'2020-01-01' },{ birthDate:'1900-01-01' },{ birthDate:'invalid' },{ displayName:'x' },{ displayName:'<script>' },{ city:'' },{ countryCode:'ZZ' },{ gender:'unknown' },{ intention:'unknown' },{ lookingForGenders:[] },{ bio:'x'.repeat(1001) },{ preferredMinAge:50, preferredMaxAge:40 },{ maxDistanceKm:101 }])('rejects invalid form %j', patch => { expect(validate({ ...profile,...patch },countryList,'create').length).toBeGreaterThan(0); });
   it.each(['DRAFT','INACTIVE','ACTIVE'])('accepts backend lifecycle %s', status => expect(fullProfile({ ...profile,status },'u').status).toBe(status));
   it.each([null,{}, { ...profile,userId:'other' },{ ...profile,preferredMinAge:NaN },{ ...profile,lookingForGenders:['invalid'] }])('rejects malformed profiles', raw => expect(() => fullProfile(raw,'u')).toThrow(ApiError));
   it('legal satisfied catalogs pass; unsatisfied requires exact joined metadata', () => {

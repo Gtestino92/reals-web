@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { photoFileError } from './photoFiles';
 
 export function cropRect(width: number, height: number, zoom: number, x: number, y: number) {
   const w = Math.min(width, height * 4 / 5) / Math.max(1, Math.min(4, zoom));
@@ -6,7 +7,8 @@ export function cropRect(width: number, height: number, zoom: number, x: number,
   return { x: (width - w) * Math.max(0, Math.min(1, x)), y: (height - h) * Math.max(0, Math.min(1, y)), w, h };
 }
 export async function decodePhoto(file: File) {
-  if (!['image/jpeg', 'image/png'].includes(file.type) || file.size > 15 * 1024 * 1024) throw new Error('Elegí un JPEG o PNG de hasta 15 MB.');
+  const error = photoFileError(file);
+  if (error) throw new Error(error);
   // Inspect dimensions before allocating a full decoded image.
   const bytes = new Uint8Array(await file.arrayBuffer());
   const view = new DataView(bytes.buffer);
