@@ -37,6 +37,6 @@ function SessionApp({ controller }: { controller: SessionController }) {
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
-    {state.phase !== 'checking' && <button className="login-button login-outlined" disabled={state.phase === 'signingOut'} onClick={controller.signOut}>Cerrar sesión</button>}
+    {state.phase !== 'checking' && <div className="session-actions"><button className="login-button login-outlined" disabled={state.phase === 'signingOut'} onClick={controller.signOut}>Cerrar sesión</button></div>}
   </section></main>;
 }
