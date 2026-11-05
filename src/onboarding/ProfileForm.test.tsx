@@ -105,10 +105,26 @@ it('keeps grouped gender and age controls accessible and retains slider validati
   const ageGroup = screen.getByRole('group',{ name:'Rango de edad' });
   const min = within(ageGroup).getByRole('slider',{ name:/Edad mínima/ });
   const max = within(ageGroup).getByRole('slider',{ name:/Edad máxima/ });
-  expect(min).toHaveAttribute('min','18'); expect(max).toHaveAttribute('max','99');
+  expect(min).toHaveAttribute('aria-valuemin','18'); expect(max).toHaveAttribute('aria-valuemax','99');
   const distance = screen.getByRole('slider',{ name:/Distancia máxima/ });
   expect(distance).toHaveAttribute('min','1'); expect(distance).toHaveAttribute('max','100');
-  fireEvent.change(min,{ target:{ value:'50' } }); submitForm(); expect(submit).not.toHaveBeenCalled();
-  fireEvent.change(max,{ target:{ value:'60' } }); submitForm();
-  expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ lookingForGenders:['FEMALE','MALE'],preferredMinAge:50,preferredMaxAge:60,maxDistanceKm:50 }),'create');
+  fireEvent.keyDown(min,{ key:'End' }); expect(screen.getByText('Edad: 45–45 años')).toBeInTheDocument();
+  fireEvent.keyDown(max,{ key:'PageUp' }); submitForm();
+  expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ lookingForGenders:['FEMALE','MALE'],preferredMinAge:45,preferredMaxAge:55,maxDistanceKm:50 }),'create');
+});
+it.each([[18,45],[18,18],[99,99],[32,33]])('preserves persisted age interval %s–%s when editing match filters', (min,max) => {
+  const { submit } = mount({ profile:{ ...existing,preferredMinAge:min,preferredMaxAge:max },mode:'filters' });
+  expect(screen.getByText(`Edad: ${min}–${max} años`)).toBeInTheDocument();
+  expect(screen.getByRole('spinbutton',{ name:'Desde:' })).toHaveValue(min);
+  expect(screen.getByRole('spinbutton',{ name:'Hasta:' })).toHaveValue(max);
+  submitForm(); expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ preferredMinAge:min,preferredMaxAge:max }),'filters');
+});
+it.each(['create','filters'] as const)('submits synchronized numeric ages through the existing %s payload', mode => {
+  const { submit } = mount(mode === 'create' ? {} : { profile:existing,mode });
+  if (mode === 'create') fillRequired();
+  const from = screen.getByRole('spinbutton',{ name:'Desde:' }), to = screen.getByRole('spinbutton',{ name:'Hasta:' });
+  fireEvent.change(from,{ target:{ value:'33' } }); fireEvent.blur(from);
+  fireEvent.change(to,{ target:{ value:'34' } }); fireEvent.blur(to);
+  expect(screen.getByText('Edad: 33–34 años')).toBeInTheDocument(); submitForm();
+  expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ preferredMinAge:33,preferredMaxAge:34 }),mode);
 });

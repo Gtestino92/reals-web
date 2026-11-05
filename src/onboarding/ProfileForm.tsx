@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { defaults, genders, genderLabels, intentions, intentionLabels, normalize, preferenceLabels, validate } from './contracts';
 import type { Country, Fields, FullProfile } from './contracts';
+import { AgeRangeSlider } from './AgeRangeSlider';
 
 export function ProfileForm({ profile, catalog, countryError, retryCountries, busy, submit, mode = 'create' }: { profile?: FullProfile; catalog: Country[]; countryError: string; retryCountries: () => void; busy: boolean; submit: (fields: Fields, mode: 'create' | 'details' | 'filters') => void; mode?: 'create' | 'details' | 'filters' }) {
   // null means automatic country selection for a new profile, never an API value.
@@ -51,10 +52,7 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
         </fieldset>
         <label>Intención<select value={fields.intention} onChange={e => change('intention',e.target.value)}>{intentions.map((v,i) => <option value={v} key={v}>{intentionLabels[i]}</option>)}</select></label>
         <fieldset className="age-preference"><legend>Rango de edad</legend>
-          <div className="age-controls">
-            <label><span>Edad mínima: <strong>{fields.preferredMinAge}</strong></span><input type="range" min="18" max="99" value={fields.preferredMinAge} onChange={e => change('preferredMinAge',Number(e.target.value))}/></label>
-            <label><span>Edad máxima: <strong>{fields.preferredMaxAge}</strong></span><input type="range" min="18" max="99" value={fields.preferredMaxAge} onChange={e => change('preferredMaxAge',Number(e.target.value))}/></label>
-          </div>
+          <AgeRangeSlider minAge={fields.preferredMinAge} maxAge={fields.preferredMaxAge} disabled={busy} onChange={(min,max) => setFields(f => ({ ...f,preferredMinAge:min,preferredMaxAge:max }))}/>
         </fieldset>
         <label><span>Distancia máxima: <strong>{fields.maxDistanceKm} km</strong></span><input type="range" min="1" max="100" value={fields.maxDistanceKm} onChange={e => change('maxDistanceKm',Number(e.target.value))}/></label>
       </fieldset>}

@@ -1,65 +1,104 @@
 import { useEffect, useRef, useState } from 'react';
-import { photoFileError } from './photoFiles';
+import { cropRect, decodePhoto, drawCrop, exportCrop } from './cropImage';
+export { cropRect, decodePhoto, exportCrop } from './cropImage';
 
-export function cropRect(width: number, height: number, zoom: number, x: number, y: number) {
-  const w = Math.min(width, height * 4 / 5) / Math.max(1, Math.min(4, zoom));
-  const h = w * 5 / 4;
-  return { x: (width - w) * Math.max(0, Math.min(1, x)), y: (height - h) * Math.max(0, Math.min(1, y)), w, h };
-}
-export async function decodePhoto(file: File) {
-  const error = photoFileError(file);
-  if (error) throw new Error(error);
-  // Inspect dimensions before allocating a full decoded image.
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const view = new DataView(bytes.buffer);
-  let width = 0, height = 0;
-  if (file.type === 'image/png' && bytes.length >= 24 && view.getUint32(0) === 0x89504e47 && view.getUint32(4) === 0x0d0a1a0a) { width = view.getUint32(16); height = view.getUint32(20); }
-  else if (file.type === 'image/jpeg' && bytes[0] === 255 && bytes[1] === 216) {
-    let i = 2;
-    while (i + 9 < bytes.length) {
-      if (bytes[i] !== 255) break;
-      const marker = bytes[i+1];
-      if (marker === 218 || marker === 217) break;
-      const length = view.getUint16(i+2);
-      if (length < 2 || i + length + 2 > bytes.length) break;
-      if (marker !== undefined && [192,193,194,195,197,198,199,201,202,203,205,206,207].includes(marker)) { height = view.getUint16(i+5); width = view.getUint16(i+7); break; }
-      i += length + 2;
-    }
-  }
-  if (!width || !height || width * height > 32_000_000 || Math.max(width,height) > 16000) throw new Error('La imagen no es compatible o es demasiado grande (máximo 32 megapíxeles).');
-  return createImageBitmap(file, { imageOrientation: 'from-image', resizeWidth: Math.min(width, 2400), resizeQuality: 'high' });
-}
-export async function exportCrop(bitmap: ImageBitmap, zoom: number, x: number, y: number): Promise<Blob> {
-  const r = cropRect(bitmap.width, bitmap.height, zoom, x, y);
-  const canvas = document.createElement('canvas'); canvas.width = 1080; canvas.height = 1350;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('No se pudo preparar el recorte.');
-  context.fillStyle = '#fff'; context.fillRect(0, 0, 1080, 1350);
-  context.drawImage(bitmap, r.x, r.y, r.w, r.h, 0, 0, 1080, 1350);
-  try { return await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob?.type === 'image/jpeg' ? resolve(blob) : reject(new Error('No se pudo exportar JPEG.')), 'image/jpeg', 0.9)); }
-  finally { canvas.width = 0; canvas.height = 0; }
-}
+const unit = (value: number) => Math.max(0,Math.min(1,value));
 export function CropDialog({ file, onCancel, onConfirm }: { file: File; onCancel: () => void; onConfirm: (blob: Blob) => Promise<void> }) {
-  const [bitmap, setBitmap] = useState<ImageBitmap | null>(null);
-  const [url, setUrl] = useState('');
-  const [zoom, setZoom] = useState(1), [x, setX] = useState(.5), [y, setY] = useState(.5);
-  const [error, setError] = useState(''), [busy, setBusy] = useState(false);
-  const lock = useRef(false), alive = useRef(false);
-  const dialog = useRef<HTMLDialogElement>(null);
-  const drag = useRef<{ x: number; y: number } | null>(null);
+  const [prepared,setPrepared] = useState<{ file: File; bitmap: ImageBitmap } | null>(null);
+  const bitmap = prepared?.file === file ? prepared.bitmap : null;
+  const [zoom,setZoom] = useState(1), [x,setX] = useState(.5), [y,setY] = useState(.5);
+  const [loadError,setLoadError] = useState(''), [renderError,setRenderError] = useState(''), [error,setError] = useState('');
+  const [attempt,setAttempt] = useState(0), [ready,setReady] = useState(false), [busy,setBusy] = useState(false);
+  const lock = useRef(false), generation = useRef(0);
+  const dialog = useRef<HTMLDialogElement>(null), canvas = useRef<HTMLCanvasElement>(null);
+  const drag = useRef<{ x: number; y: number; pointerId: number; owner: HTMLDivElement } | null>(null);
+  const releaseDrag = () => {
+    const current = drag.current; drag.current = null;
+    if (current?.owner.hasPointerCapture(current.pointerId)) current.owner.releasePointerCapture(current.pointerId);
+  };
   useEffect(() => {
-    alive.current = true; let active = true; let decoded: ImageBitmap | undefined; const objectUrl = URL.createObjectURL(file); setUrl(objectUrl);
-    dialog.current?.showModal();
-    void decodePhoto(file).then(value => { if (active) { decoded = value; setBitmap(value); } else value.close(); }).catch(() => { if (active) setError('No pudimos abrir la imagen. Usá JPEG o PNG de hasta 15 MB y 32 megapíxeles.'); });
-    return () => { alive.current = false; active = false; decoded?.close(); URL.revokeObjectURL(objectUrl); };
-  }, [file]);
-  return <dialog ref={dialog} className="crop-dialog onboarding" onCancel={e => { e.preventDefault(); if (!lock.current) onCancel(); }} aria-labelledby="crop-title">
+    let active = true; let decoded: ImageBitmap | undefined;
+    const own = ++generation.current;
+    setPrepared(null); setLoadError(''); setRenderError(''); setError(''); setReady(false); setBusy(false); lock.current = false;
+    setZoom(1); setX(.5); setY(.5);
+    if (!dialog.current?.open) dialog.current?.showModal();
+    // StrictMode cleanup cancels the first scheduled decode before it allocates.
+    queueMicrotask(() => {
+      if (!active) return;
+      void decodePhoto(file).then(value => {
+        if (active) { decoded = value; setPrepared({ file,bitmap:value }); }
+        else value.close();
+      }).catch(() => { if (active) setLoadError('No pudimos abrir la imagen. Usá JPEG o PNG de hasta 15 MB, 32 megapíxeles y 16.000 píxeles por lado. Podés reintentar o elegir otra foto.'); });
+    });
+    return () => { active = false; if (generation.current === own) generation.current++; releaseDrag(); decoded?.close(); };
+  }, [file,attempt]);
+  useEffect(() => {
+    const target = canvas.current;
+    if (!target || !bitmap) return;
+    const lost = (event: Event) => { event.preventDefault(); setRenderError('La vista previa dejó de estar disponible. Reintentá o cancelá para elegir otra foto.'); setReady(false); };
+    target.addEventListener('contextlost',lost);
+    return () => { target.removeEventListener('contextlost',lost); target.width = 0; target.height = 0; };
+  }, [bitmap]);
+  useEffect(() => {
+    const target = canvas.current;
+    if (!target || !bitmap || renderError) return;
+    let active = true;
+    const frame = requestAnimationFrame(() => {
+      if (!active) return;
+      try {
+        const context = target.getContext('2d');
+        if (!context) throw new Error('Canvas unavailable');
+        drawCrop(context,bitmap,zoom,x,y,560,700);
+        setReady(true);
+      } catch { setReady(false); setRenderError('No pudimos mostrar el recorte. Reintentá o cancelá para elegir otra foto.'); }
+    });
+    return () => { active = false; cancelAnimationFrame(frame); };
+  }, [bitmap,zoom,x,y,renderError]);
+  const failed = loadError || renderError;
+  return <dialog ref={dialog} className="crop-dialog onboarding" onCancel={event => { event.preventDefault(); if (!lock.current) onCancel(); }} aria-labelledby="crop-title">
     <h2 id="crop-title">Recortar foto</h2><p>Mové la foto o ajustá los controles. El recorte será vertical 4:5.</p>
-    {bitmap && <div className="crop-viewport" onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY }; }} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }} onPointerMove={e => { if (drag.current && !busy) { setX(v => Math.max(0,Math.min(1,v-(e.clientX-drag.current!.x)/250))); setY(v => Math.max(0,Math.min(1,v-(e.clientY-drag.current!.y)/250))); drag.current = { x: e.clientX, y: e.clientY }; } }}>
-      <img alt="Vista previa del recorte" src={url} draggable={false} style={{ width: `${Math.max(1,bitmap.width / bitmap.height / .8)*zoom*100}%`, height: `${Math.max(1,bitmap.height / bitmap.width * .8)*zoom*100}%`, left: `${x*100}%`, top: `${y*100}%`, transform: `translate(-${x*100}%, -${y*100}%)` }} />
+    {!bitmap && !failed && <p role="status">Preparando imagen…</p>}
+    {bitmap && <div className="crop-viewport"
+      onPointerDown={event => {
+        if (busy || !ready || failed || drag.current || event.isPrimary === false || event.button !== 0) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { x:event.clientX,y:event.clientY,pointerId:event.pointerId,owner:event.currentTarget };
+      }}
+      onPointerUp={event => { if (drag.current?.pointerId === event.pointerId) releaseDrag(); }}
+      onPointerCancel={event => { if (drag.current?.pointerId === event.pointerId) releaseDrag(); }}
+      onLostPointerCapture={event => { if (drag.current?.pointerId === event.pointerId) releaseDrag(); }}
+      onPointerMove={event => {
+        const previous = drag.current;
+        if (!previous || previous.pointerId !== event.pointerId || busy || failed) return;
+        // Snapshot numbers before queued React updaters run; pointer-up can clear drag.
+        const dx = event.clientX-previous.x, dy = event.clientY-previous.y;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const crop = cropRect(bitmap.width,bitmap.height,zoom,0,0);
+        const horizontal = (bitmap.width-crop.w)*bounds.width/crop.w;
+        const vertical = (bitmap.height-crop.h)*bounds.height/crop.h;
+        drag.current = { ...previous,x:event.clientX,y:event.clientY };
+        if (horizontal > 0) setX(value => unit(value-dx/horizontal));
+        if (vertical > 0) setY(value => unit(value-dy/vertical));
+      }}>
+      <canvas ref={canvas} width={560} height={700} role="img" aria-label="Vista previa del recorte">No se pudo mostrar la vista previa.</canvas>
     </div>}
-    <fieldset disabled={busy}><label>Zoom<input type="range" min="1" max="4" step=".01" value={zoom} onChange={e => setZoom(Number(e.target.value))}/></label><label>Posición horizontal<input type="range" min="0" max="1" step=".01" value={x} onChange={e => setX(Number(e.target.value))}/></label><label>Posición vertical<input type="range" min="0" max="1" step=".01" value={y} onChange={e => setY(Number(e.target.value))}/></label>
-    <button type="button" onClick={() => { setZoom(1); setX(.5); setY(.5); }}>Restablecer</button><button type="button" onClick={onCancel}>Cancelar</button><button type="button" disabled={!bitmap} onClick={() => { if (!bitmap || lock.current) return; lock.current = true; setBusy(true); void exportCrop(bitmap,zoom,x,y).then(blob => { if (alive.current) return onConfirm(blob); }).catch(() => { if (alive.current) setError('No se pudo completar el recorte o la carga. Revisá el estado y volvé a intentar.'); }).finally(() => { lock.current = false; if (alive.current) setBusy(false); }); }}>{busy ? 'Procesando…' : 'Usar foto'}</button></fieldset>
+    {failed && <p role="alert">{failed}</p>}
+    {failed && <button type="button" disabled={busy} onClick={() => setAttempt(value => value+1)}>Reintentar imagen</button>}
+    <fieldset disabled={busy || !ready || !!failed}>
+      <label>Zoom<input type="range" min="1" max="4" step=".01" value={zoom} onChange={event => setZoom(Number(event.target.value))}/></label>
+      <label>Posición horizontal<input type="range" min="0" max="1" step=".01" value={x} onChange={event => setX(Number(event.target.value))}/></label>
+      <label>Posición vertical<input type="range" min="0" max="1" step=".01" value={y} onChange={event => setY(Number(event.target.value))}/></label>
+      <button type="button" onClick={() => { setZoom(1); setX(.5); setY(.5); }}>Restablecer</button>
+      <button type="button" onClick={() => {
+        if (!bitmap || lock.current || !ready || failed) return;
+        const own = generation.current;
+        lock.current = true; setBusy(true); releaseDrag();
+        void exportCrop(bitmap,zoom,x,y).then(blob => { if (generation.current === own) return onConfirm(blob); })
+          .catch(() => { if (generation.current === own) setError('No se pudo completar el recorte o la carga. Revisá el estado y volvé a intentar.'); })
+          .finally(() => { if (generation.current === own) { lock.current = false; setBusy(false); } });
+      }}>{busy ? 'Procesando…' : 'Usar foto'}</button>
+    </fieldset>
+    <button type="button" disabled={busy} onClick={onCancel}>Cancelar</button>
     {error && <p role="alert">{error}</p>}
   </dialog>;
 }

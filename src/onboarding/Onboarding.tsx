@@ -6,7 +6,8 @@ import { authenticityLabels, countries, fullProfile, hasInteractions, legal, pho
 import type { Country, Fields, FullProfile, LegalDocument, Photo } from './contracts';
 import { ProfileForm } from './ProfileForm';
 import { CropDialog } from './CropDialog';
-import { PhotoSlot } from './PhotoSlot';
+import { PhotoGrid } from './PhotoGrid';
+import { photoPlacements } from './photoReorder';
 import { photoFileError } from './photoFiles';
 import './onboarding.css';
 import { SessionLoading } from '../SessionLoading';
@@ -113,6 +114,12 @@ export function Onboarding({ controller }: { controller: SessionController }) {
     });
   };
   const mutatePhoto = (path: string, method: string, body?: unknown) => { if (!blocked) void run(async signal => { await controller.request(`/me/profile/photos${path}`,signal,method,body); }); };
+  const reorderPhoto = (photoId: string, target: number) => {
+    const resource = owner.current;
+    if (!resource || resource.abort.signal.aborted || resource.locked || busy || blocked || cropOwned.current || controller.snapshot.phase !== 'ready' || controller.snapshot.profile?.id !== model?.profile?.id) return;
+    const placements = photoPlacements(model?.photos ?? [],photoId,target);
+    if (placements) mutatePhoto('/reorder','PUT',{ placements });
+  };
   const selectFiles = (files: File[], position: number, photo?: Photo) => {
     const resource = owner.current;
     if (!resource || resource.abort.signal.aborted || resource.locked || busy || blocked || !verified || !controller.emailVerified || cropOwned.current || controller.snapshot.phase !== 'ready' || controller.snapshot.profile?.id !== model?.profile?.id) return;
@@ -141,26 +148,14 @@ export function Onboarding({ controller }: { controller: SessionController }) {
       <h2>Completá tu perfil</h2><p>Estado: {model.profile.status}</p>
       {model.interactions === true && <aside><h3>Inicio: interacciones vigentes</h3><p>Tenés interacciones en curso. Se conservan en el backend. Este punto de consulta es de solo lectura; usá Android para continuarlas.</p></aside>}
       {model.interactions === null && <aside><h3>Inicio no disponible</h3><p>No pudimos consultar tus interacciones. Su estado es desconocido. Podés seguir completando el perfil o consultarlas desde Android.</p><button disabled={disabled || !!crop} onClick={() => void run()}>Reintentar Inicio</button></aside>}
-      <section id="email-verification" tabIndex={-1}><h3>Verificá tu email</h3><p>{verified ? 'Email verificado' : 'Abrí el link del correo de verificación y volvé para continuar.'}</p>{!verified && <><button disabled={disabled || sendAt > now} onClick={() => { if (Date.now() < sendAt) return; void run(async () => { await controller.verifyEmail(true); setSendAt(Date.now()+60000); setMessage('Te enviamos un nuevo correo de verificación.'); }); }}>Reenviar correo{sendAt > now ? ` (${Math.ceil((sendAt-now)/1000)} s)` : ''}</button><button disabled={disabled || checkAt > now} onClick={() => { if (Date.now() < checkAt) return; void run(async () => { const value = await controller.verifyEmail(false); setCheckAt(Date.now()+10000); setMessage(value ? 'Email verificado.' : 'Todavía no vemos el email verificado. Abrí el link del correo y volvé a intentar.'); }); }}>Ya verifiqué</button></>}</section>
+      {!verified && <section id="email-verification" tabIndex={-1}><h3>Verificá tu email</h3><p>Abrí el link del correo de verificación y volvé para continuar.</p><button disabled={disabled || sendAt > now} onClick={() => { if (Date.now() < sendAt) return; void run(async () => { await controller.verifyEmail(true); setSendAt(Date.now()+60000); setMessage('Te enviamos un nuevo correo de verificación.'); }); }}>Reenviar correo{sendAt > now ? ` (${Math.ceil((sendAt-now)/1000)} s)` : ''}</button><button disabled={disabled || checkAt > now} onClick={() => { if (Date.now() < checkAt) return; void run(async () => { const value = await controller.verifyEmail(false); setVerified(value); setCheckAt(Date.now()+10000); setMessage(value ? 'Email verificado.' : 'Todavía no vemos el email verificado. Abrí el link del correo y volvé a intentar.'); }); }}>Ya verifiqué</button></section>}
       <details open><summary>Fotos</summary><p>Hasta nueve fotos. Para la configuración local se suelen requerir cuatro fotos validadas, una de persona y una de cuerpo completo. El servidor decide si podés activar el perfil.</p>
         <p id="photo-upload-guidance" role="status">{uploadGuidance}</p>
         {!verified && <p><a href="#email-verification">Ir a la verificación de email</a></p>}
         {photoError && <p role="alert">{photoError}</p>}
-        <div className="photo-grid">{Array.from({ length:9 },(_,i) => {
-          const position = i+1;
-          const photo = list.find(p => p.position === position);
-          return <PhotoSlot key={position} position={position} photo={photo} disabled={disabled || !verified || !!crop} onSelect={files => selectFiles(files,position,photo)}>
-            {photo && <><p>Validación: {photo.validationStatus} · Moderación: {photo.moderationStatus}</p><p>Persona: {photo.isPersonPhoto ? 'Sí' : 'No'} · Cuerpo completo: {photo.isFullBody ? 'Sí' : 'No'}</p>
-              {photo.validationStatus !== 'VALIDATED' || photo.moderationStatus !== 'APPROVED' ? <p>Pendiente de revisión o no aprobada. Actualizá el estado; si fue rechazada, reemplazala.</p> : null}
-              <button disabled={disabled || !!crop} onClick={() => { if (window.confirm('¿Eliminar esta foto?')) mutatePhoto(`/${encodeURIComponent(photo.id)}`,'DELETE'); }}>Eliminar foto {position}</button>
-              {[-1,1].map(direction => <button key={direction} disabled={disabled || !!crop || !list[list.indexOf(photo)+direction]} onClick={() => {
-                const ordered = [...list]; const index = ordered.indexOf(photo); const target = ordered[index+direction]; if (!target) return;
-                ordered[index] = target; ordered[index+direction] = photo;
-                mutatePhoto('/reorder','PUT',{ placements: ordered.map((p,index) => ({ photoId:p.id,position:index+1 })) });
-              }}>{direction < 0 ? 'Mover antes' : 'Mover después'} foto {position}</button>)}
-            </>}
-          </PhotoSlot>;
-        })}</div></details>
+        <PhotoGrid photos={list} disabled={disabled || !!crop} uploadsDisabled={disabled || !verified || !!crop} onSelect={selectFiles} onMove={reorderPhoto}
+          onDelete={photo => { if (window.confirm('¿Eliminar esta foto?')) mutatePhoto(`/${encodeURIComponent(photo.id)}`,'DELETE'); }}/>
+      </details>
       {(['details','filters'] as const).map(mode => <details key={mode}><summary>{mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'}</summary><ProfileForm key={`${model.profile!.id}-${mode}`} profile={model.profile!} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled || !!crop} mode={mode} submit={writeProfile}/></details>)}
       <section><h3>Activar perfil</h3><p>Autenticidad: {authenticityLabels[model.profile.authenticityVerificationStatus] ?? 'Estado no disponible'}</p><p>La validación de fotos revisa cada imagen. La verificación de autenticidad del perfil es un proceso separado. El servidor determina si es necesaria para activar tu perfil.</p>{!verified && <p id="activation-email-guidance">Verificá tu email y presioná «Ya verifiqué» antes de activar el perfil.</p>}<button aria-describedby={!verified ? 'activation-email-guidance' : undefined} disabled={disabled || !!crop || !verified} onClick={() => void run(async signal => { await controller.verifyEmail(false); const result = fullProfile(await controller.request('/me/profile/activation',signal,'POST'),controller.snapshot.account?.id ?? ''); if (result.status !== 'ACTIVE') throw new ApiError('invalid'); },true)}>Activar perfil</button></section>
     </> : null}
