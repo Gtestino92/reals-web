@@ -78,11 +78,82 @@ Matching responses verify connectivity and proxy path preservation, not authenti
 8. On both browsers: register a disposable email/password account; verify the real email link with local helper disabled (or confirm local verification when explicitly enabled). Confirm backend ready and missing-profile state. Sign out, sign in, reload, close/reopen the browser and confirm SDK restoration. An account with an existing profile should show its authoritative status. Test Google sign-in, popup cancellation/blocking and sign-out; ensure authenticated presentation disappears. Do not capture bearer headers in logs/screenshots.
 9. Request password reset with a test email. Only a 202 shows “Si el email está registrado, te enviamos instrucciones para recuperar el acceso.” and a 60-second resend cooldown. Verify actual mailbox behavior separately; the response never promises delivery or reveals existence. Stop backend connectivity to confirm recoverable bootstrap/reset failures, then restart it and retry. Use backend-managed fixture accounts for suspended/deleted/provider-restricted checks; never manipulate database state to bypass restrictions.
 
-Firebase uses SDK-managed local persistence until explicit sign-out, regardless of **Recordar credenciales**. This retained Stage A checkbox currently has no behavioral effect: browser password-manager save/autofill is browser-owned, and no raw credentials or ID tokens are stored by application code. Persistence is scoped to browser origin: switching between localhost and 127.0.0.1 uses separate sessions. Sign-out does not sign the user out of their Google account globally.
+### Authentication persistence policy
+
+**Mantener sesión iniciada** is unchecked on every new login screen. For email
+sign-in and registration, unchecked selects Firebase `browserSessionPersistence`;
+checked selects `browserLocalPersistence`. The selected SDK persistence must
+finish configuring before sending credentials. The application never writes
+passwords or tokens to custom storage; password-manager autofill remains
+browser-owned. A failed persistence setup blocks authentication and shows a
+safe error asking the user to reload, without falling back to local storage.
+
+Google always uses session persistence, regardless of the email checkbox (the
+screen explains this). Anonymous auth observation prepares session persistence
+before showing the login. `google()` then calls `signInWithPopup` synchronously
+from the user click; no persistence await is inserted before popup opening.
+Failed email authentication resets anonymous persistence to session before
+releasing the operation. If reset fails, Google stays blocked until a successful
+preparation/reload; it cannot reuse the previous local setting.
+
+Migration policy: preserve already-authenticated users, including legacy local
+sessions. There is no forced logout or silent conversion on startup/refresh.
+Initialization supplies `[browserSessionPersistence, browserLocalPersistence]`.
+In the installed Firebase browser SDK, session storage does not opt into
+migration, and local storage migrates only among migration-capable providers;
+this order discovers both without promoting session to local or converting
+legacy local to session. Authenticated observer events never call setPersistence.
+Real-SDK regression tests use synthetic stored users to verify both restorations
+and sign-out. Recheck these tests when updating Firebase. Legacy users who want
+session-only access must explicitly sign out and sign back in unchecked.
+
+Refresh restores either type in its existing tab. Local persistence survives
+ordinary browser restarts until sign-out. Session persistence is scoped to the
+current tab/window, not a shared login across all tabs. Browser session recovery
+or duplicating a tab may restore/copy sessionStorage: do not treat browser close
+as server revocation, an idle timeout or a guaranteed privacy wipe. Origins are
+separate: localhost and 127.0.0.1 have distinct sessions. SDK token refresh,
+backend bootstrap, email verification and profile handling are unchanged.
+
+Firebase synchronizes local authentication across same-origin tabs. Local
+sign-out propagates through SDK notifications. Session tabs are independent;
+signing out of one session-only tab does not promise global logout. Switching
+a shared local session to session persistence can sign other local tabs out;
+a new local login can affect other same-origin tabs. No application cross-tab
+token copying or custom storage synchronization is introduced. See
+[Firebase persistence semantics](https://firebase.google.com/docs/auth/web/auth-state-persistence).
+
+Chrome desktop / Android smoke checklist (use disposable test accounts):
+
+1. On the exact same origin, sign out first. Sign in and register unchecked;
+   refresh and verify restoration/backend bootstrap, email verification and
+   profile status. Close/reopen the tab and browser with session recovery off;
+   verify a new login is required. Repeat with session recovery enabled and
+   document browser-dependent recovery. Test an independently opened second tab.
+2. Repeat checked; confirm restoration after refresh and browser restart, local
+   synchronization across tabs and sign-out propagation. Never inspect/log token
+   values. Confirm an already-existing legacy local login survives this upgrade
+   until explicit sign-out, then unchecked login uses session storage.
+3. Try Google with the checkbox both ways: the popup must open directly on click,
+   cancellation/blocking must release controls, and successful login must use
+   session persistence. Try Google after failed checked email login/registration.
+4. Deny browser storage and verify safe failure without credential authentication
+   or local fallback. Reload after restoring storage. While setup/login is
+   pending, double-submit, close/unmount the screen and trigger another-tab
+   sign-out; no obsolete bootstrap/profile response may restore the old UI.
+5. Test explicit sign-out, background/resume, automatic token refresh and the
+   existing single INVALID_TOKEN retry. A unit test can simulate storage events;
+   independent tabs, browser restart/recovery and real Google user activation
+   still require real-browser/provider verification.
+
+Observed Hardening #1 smoke: headless desktop Chrome with a new temporary
+profile loaded the login, rendered the correct label and unchecked checkbox,
+and displayed Google sign-in. No credentials were entered. Real provider popup,
+Android, independent tabs and restart/recovery checks above remain manual.
 
 Google uses popup only, invoked directly from the click callback. No redirect flow is implemented. Safari/iOS OAuth and cross-origin storage/redirect compatibility require separate validation; do not switch to redirect without implementing Firebase's [redirect browser requirements](https://firebase.google.com/docs/auth/web/redirect-best-practices). SDK persistence reference: [Firebase auth state persistence](https://firebase.google.com/docs/auth/web/auth-state-persistence).
 
-Real provider configuration, authorized domains, Google OAuth, email delivery, persistent browser storage, Docker authorization and device popup behavior cannot be established by unit tests. Stage B automated validation uses no credentials. No `.env.local` was available during implementation, so the real auth/device smoke checklist remains pending.
+Real provider configuration, authorized domains, Google OAuth, email delivery, persistent browser storage, Docker authorization and device popup behavior cannot be established by unit tests. Stage B automated validation used no credentials; at that stage no `.env.local` was available. The Hardening #1 smoke above is limited to anonymous screen loading; real auth/device checks remain pending.
 
 ## Stage C local photo storage
 

@@ -15,8 +15,8 @@ export interface LoginScreenProps {
   passwordResetMessage?: string | null;
   passwordResetAvailableAtMillis?: number | null;
   // The integration owns asynchronous work, pending state and failure mapping.
-  onSignIn: (email: string, password: string, rememberCredentials: boolean) => void;
-  onSignUp: (email: string, password: string, rememberCredentials: boolean) => void;
+  onSignIn: (email: string, password: string, keepSignedIn: boolean) => void;
+  onSignUp: (email: string, password: string, keepSignedIn: boolean) => void;
   onPasswordReset: (email: string) => void;
   onGoogleSignIn: () => void;
 }
@@ -67,7 +67,7 @@ export function LoginScreen({
   const [mode, setMode] = useState<AuthMode>('signIn');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberCredentials, setRememberCredentials] = useState(false);
+  const [keepSignedIn, setKeepSignedIn] = useState(false);
   const cooldown = useResetCooldown(passwordResetAvailableAtMillis);
   const busy = loading || googleLoading || passwordResetLoading;
   const signIn = mode === 'signIn';
@@ -104,7 +104,7 @@ export function LoginScreen({
           onSubmit={(event) => {
             event.preventDefault();
             if (busy) return;
-            (signIn ? onSignIn : onSignUp)(email, password, rememberCredentials);
+            (signIn ? onSignIn : onSignUp)(email, password, keepSignedIn);
           }}
           onKeyDown={(event) => {
             // Browser Back keeps its normal navigation meaning. Escape offers
@@ -130,10 +130,11 @@ export function LoginScreen({
             <label htmlFor="login-password">Password</label>
           </div>
           <label className="login-remember">
-            <input type="checkbox" checked={rememberCredentials} disabled={busy}
-              onChange={(event) => setRememberCredentials(event.target.checked)} />
-            <span>Recordar credenciales</span>
+            <input type="checkbox" aria-describedby="persistence-description" checked={keepSignedIn} disabled={busy}
+              onChange={(event) => setKeepSignedIn(event.target.checked)} />
+            <span>Mantener sesión iniciada</span>
           </label>
+          <p id="persistence-description" className="login-feedback">La opción se aplica a email y contraseña. Con Google, la sesión dura sólo en esta pestaña.</p>
           {visibleError && <p className="login-error" role="alert">{error}</p>}
           {signIn && passwordResetMessage !== null && (
             <p className="login-feedback" role="status">{passwordResetMessage}</p>

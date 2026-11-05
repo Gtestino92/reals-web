@@ -49,7 +49,7 @@ it('signs in, suppresses duplicate submits and auth-observer bootstrap overlap',
   fireEvent.click(screen.getByRole('button', { name: 'Ingresar' }));
   fireEvent.submit(screen.getByRole('form'));
   await screen.findByText('Sin perfil: falta completar el registro.');
-  expect(auth.signIn).toHaveBeenCalledExactlyOnceWith('test@example.com', 'password'); expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(auth.signIn).toHaveBeenCalledExactlyOnceWith('test@example.com', 'password', false); expect(fetcher).toHaveBeenCalledTimes(2);
 });
 it('maps sign-in failure with safe Spanish message', async () => {
   vi.mocked(auth.signIn).mockRejectedValue({ code: 'auth/invalid-credential', message: 'secret' });
@@ -183,4 +183,25 @@ it('unmount aborts in-flight HTTP and late completion cannot start another reque
   act(() => observer(user)); await waitFor(() => expect(fetcher).toHaveBeenCalledOnce()); mounted.unmount();
   expect(fetcher.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
   await act(async () => resolve(json({ id: 'u', status: 'ACTIVE' }))); expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it.each([false, true])('passes checkbox preference through App/controller to both email operations (%s)', async keepSignedIn => {
+  ready(); mount(); login(); credentials();
+  expect(screen.getByRole('checkbox', { name: 'Mantener sesión iniciada' })).not.toBeChecked();
+  if (keepSignedIn) fireEvent.click(screen.getByRole('checkbox'));
+  vi.mocked(auth.signIn).mockRejectedValueOnce({ code: 'auth/invalid-credential' });
+  fireEvent.click(screen.getByRole('button', { name: 'Ingresar' })); await screen.findByRole('alert');
+  expect(auth.signIn).toHaveBeenCalledExactlyOnceWith('test@example.com', 'password', keepSignedIn);
+  fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  await screen.findByText('Sin perfil: falta completar el registro.');
+  expect(auth.signUp).toHaveBeenCalledExactlyOnceWith('test@example.com', 'password', keepSignedIn);
+});
+it('persistence failure uses safe authentication error and allows retry without bootstrap', async () => {
+  vi.mocked(auth.signIn).mockRejectedValueOnce({ code: 'auth/persistence-unavailable', message: 'private diagnostic' });
+  mount(); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: 'Ingresar' }));
+  const error = await screen.findByRole('alert');
+  expect(error).toHaveTextContent('No pudimos configurar la duración de la sesión');
+  expect(error).not.toHaveTextContent('private diagnostic'); expect(fetcher).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Ingresar' })).toBeEnabled();
 });

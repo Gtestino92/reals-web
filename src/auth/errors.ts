@@ -2,6 +2,7 @@ export function errorCode(error: unknown): string {
   return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : '';
 }
 const messages: Record<string, string> = {
+  'auth/persistence-unavailable': 'No pudimos configurar la duración de la sesión. Recargá la página e intentá nuevamente.',
   'auth/invalid-credential': 'No se pudo iniciar sesión. Revisá el email y la contraseña. Si eliminaste tu cuenta, creá una nueva.',
   'auth/wrong-password': 'Revisá el email y la contraseña.',
   'auth/user-not-found': 'Revisá el email y la contraseña.',

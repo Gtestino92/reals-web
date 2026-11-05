@@ -1,12 +1,12 @@
 import { getApps, initializeApp } from 'firebase/app';
-import { browserLocalPersistence, browserPopupRedirectResolver, createUserWithEmailAndPassword, GoogleAuthProvider, initializeAuth, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut } from 'firebase/auth';
+import { browserLocalPersistence, browserSessionPersistence, setPersistence, browserPopupRedirectResolver, createUserWithEmailAndPassword, GoogleAuthProvider, initializeAuth, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 
 export type Identity = Pick<User, 'uid' | 'emailVerified' | 'getIdToken' | 'reload'>;
 export interface AuthService {
   observe: (next: (user: Identity | null) => void, error: (error: unknown) => void) => () => void;
-  signIn: (email: string, password: string) => Promise<Identity>;
-  signUp: (email: string, password: string) => Promise<Identity>;
+  signIn: (email: string, password: string, keepSignedIn: boolean) => Promise<Identity>;
+  signUp: (email: string, password: string, keepSignedIn: boolean) => Promise<Identity>;
   google: () => Promise<Identity>;
   verify: (user: Identity) => Promise<void>;
   signOut: () => Promise<void>;
@@ -22,21 +22,68 @@ export function configureFirebase(env: ImportMetaEnv = import.meta.env): Firebas
   }
   try {
     const app = getApps()[0] ?? initializeApp({ apiKey: env.VITE_FIREBASE_API_KEY, authDomain: env.VITE_FIREBASE_AUTH_DOMAIN, projectId: env.VITE_FIREBASE_PROJECT_ID, appId: env.VITE_FIREBASE_APP_ID });
-    const auth = initializeAuth(app, { persistence: browserLocalPersistence, popupRedirectResolver: browserPopupRedirectResolver });
+    const auth = initializeAuth(app, { persistence: [browserSessionPersistence, browserLocalPersistence], popupRedirectResolver: browserPopupRedirectResolver });
+    let googleSessionReady = false;
+    let authRevision = 0;
+    const persistenceError = () => Object.assign(new Error('Authentication persistence unavailable'), { code: 'auth/persistence-unavailable' });
+    const prepareSession = async (revision: number) => {
+      googleSessionReady = false;
+      try { await setPersistence(auth, browserSessionPersistence); }
+      catch { throw persistenceError(); }
+      if (revision === authRevision && !auth.currentUser) googleSessionReady = true;
+    };
+    const emailAuth = async (register: boolean, email: string, password: string, keepSignedIn: boolean) => {
+      googleSessionReady = false;
+      const revision = ++authRevision;
+      try {
+        try { await setPersistence(auth, keepSignedIn ? browserLocalPersistence : browserSessionPersistence); }
+        catch { throw persistenceError(); }
+        if (revision !== authRevision || auth.currentUser) throw persistenceError();
+        return (await (register ? createUserWithEmailAndPassword(auth, email, password) : signInWithEmailAndPassword(auth, email, password))).user;
+      } catch (error) {
+        // A failed local-persistence attempt must not affect the next Google click.
+        // Never migrate an identity restored concurrently from another tab.
+        if (revision === authRevision && !auth.currentUser) await prepareSession(revision);
+        throw error;
+      }
+    };
     return {
       localVerification: localVerificationEnabled(env.DEV, env.VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION, window.location.hostname),
       service: {
-        observe: (next, error) => onAuthStateChanged(auth, next, error),
-        signIn: async (email, password) => (await signInWithEmailAndPassword(auth, email, password)).user,
-        signUp: async (email, password) => (await createUserWithEmailAndPassword(auth, email, password)).user,
+        observe: (next, error) => {
+          let active = true;
+          let revision = 0;
+          const unsubscribe = onAuthStateChanged(auth, user => {
+            if (!active) return;
+            const event = ++revision;
+            const authEvent = ++authRevision;
+            googleSessionReady = false;
+            if (user) { next(user); return; }
+            // Keep the login hidden until Google can open synchronously and safely.
+            void prepareSession(authEvent).then(() => {
+              if (active && event === revision && authEvent === authRevision) next(null);
+            }).catch(failure => { if (active && event === revision && authEvent === authRevision) error(failure); });
+          }, failure => { revision++; authRevision++; googleSessionReady = false; if (active) error(failure); });
+          return () => { active = false; revision++; authRevision++; googleSessionReady = false; unsubscribe(); };
+        },
+        signIn: (email, password, keepSignedIn) => emailAuth(false, email, password, keepSignedIn),
+        signUp: (email, password, keepSignedIn) => emailAuth(true, email, password, keepSignedIn),
         // No await precedes opening the popup from the click callback.
-        google: () => signInWithPopup(auth, new GoogleAuthProvider()).then(result => result.user),
+        google: () => {
+          if (!googleSessionReady || auth.currentUser) return Promise.reject(persistenceError());
+          return signInWithPopup(auth, new GoogleAuthProvider()).then(result => result.user);
+        },
         verify: async user => {
           const current = auth.currentUser;
           if (!current || current.uid !== user.uid) throw new Error('Session changed');
           await sendEmailVerification(current);
         },
-        signOut: () => signOut(auth),
+        signOut: async () => {
+          googleSessionReady = false;
+          authRevision++;
+          await signOut(auth);
+          if (!auth.currentUser) await prepareSession(authRevision);
+        },
       },
     };
   } catch {

@@ -18,7 +18,7 @@ it('starts in sign-in with Android copy, masking, autofill hints and unchecked r
   expect(screen.getByLabelText('Email')).toHaveAttribute('autocomplete', 'username');
   expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password');
   expect(screen.getByLabelText('Password')).toHaveAttribute('autocomplete', 'current-password');
-  expect(screen.getByRole('checkbox', { name: 'Recordar credenciales' })).not.toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'Mantener sesión iniciada' })).not.toBeChecked();
   expect(screen.getByRole('button', { name: 'Ingresar' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Olvidé mi contraseña' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Continuar con Google' })).toBeVisible();
