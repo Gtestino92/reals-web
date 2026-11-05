@@ -126,7 +126,7 @@ export class SessionController {
     if (this.user) void this.load();
     else this.install({ phase: 'login', error: null });
   };
-  authenticate = (operation: 'signIn' | 'signUp' | 'google', email = '', password = '') => {
+  authenticate = (operation: 'signIn' | 'signUp' | 'google', email = '', password = '', keepSignedIn = false) => {
     if (this.locked || this.snapshot.phase !== 'login') return;
     const owner = operation === 'google' ? 'shared' : operation;
     if (operation !== 'google' && (!email.trim() || !password.trim())) {
@@ -137,7 +137,7 @@ export class SessionController {
     this.install({ phase: 'authenticating', operation, error: null, resetMessage: null });
     // Called synchronously: popup opens in the original user interaction.
     let request: Promise<Identity>;
-    try { request = operation === 'google' ? this.auth.google() : operation === 'signIn' ? this.auth.signIn(email.trim(), password) : this.auth.signUp(email.trim(), password); }
+    try { request = operation === 'google' ? this.auth.google() : operation === 'signIn' ? this.auth.signIn(email.trim(), password, keepSignedIn) : this.auth.signUp(email.trim(), password, keepSignedIn); }
     catch (error) { request = Promise.reject(error); }
     void request.then(user => {
       if (!this.current(generation)) return;

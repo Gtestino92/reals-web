@@ -22,8 +22,8 @@ function SessionApp({ controller }: { controller: SessionController }) {
     googleLoading={state.operation === 'google'} passwordResetLoading={state.operation === 'reset'}
     error={state.error?.message ?? null} errorOwner={state.error?.owner ?? null}
     passwordResetMessage={state.resetMessage} passwordResetAvailableAtMillis={state.resetAt}
-    onSignIn={(email, password) => controller.authenticate('signIn', email, password)}
-    onSignUp={(email, password) => controller.authenticate('signUp', email, password)}
+    onSignIn={(email, password, keepSignedIn) => controller.authenticate('signIn', email, password, keepSignedIn)}
+    onSignUp={(email, password, keepSignedIn) => controller.authenticate('signUp', email, password, keepSignedIn)}
     onGoogleSignIn={() => controller.authenticate('google')} onPasswordReset={controller.reset} />;
   return <main className="login-page"><section className="login-panel" aria-labelledby="session-heading">
     <header className="login-header"><div className="login-brand">
