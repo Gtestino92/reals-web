@@ -7,6 +7,7 @@ import { SessionController } from './auth/session';
 import { Onboarding } from './onboarding/Onboarding';
 import { SessionLoading } from './SessionLoading';
 import seal from './assets/reals-seal.png';
+import { Home } from './home/Home';
 
 let defaultSetup: FirebaseSetup | undefined;
 function setup() { return defaultSetup ??= configureFirebase(); }
@@ -33,7 +34,7 @@ function SessionApp({ controller }: { controller: SessionController }) {
     </div></header>
     {(state.phase === 'checking' || state.phase === 'loading') && <SessionLoading />}
     {state.phase === 'signingOut' && <p role="status">Cerrando sesión…</p>}
-    {state.phase === 'ready' && <Onboarding controller={controller} />}
+    {state.phase === 'ready' && (state.profile?.status === 'ACTIVE' ? <Home key={`${state.account?.id}-${state.profile.id}`} controller={controller} onCompleteProfile={() => controller.retry()} /> : <Onboarding controller={controller} />)}
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}

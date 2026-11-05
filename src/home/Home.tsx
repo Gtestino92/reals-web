@@ -1,0 +1,77 @@
+import { useEffect, useRef, useState } from 'react';
+import type { SessionController } from '../auth/session';
+import type { Activity } from './contracts';
+import { useHome } from './useHome';
+import { activityPresentation } from './presentation';
+import { SearchingScreen } from './SearchingScreen';
+import './home.css';
+
+const labels: Record<string, string> = {
+  FIRST_CHAT: 'Primer chat', VISUAL_REVIEW: 'Perfil por descubrir', SCHEDULING: 'Coordinar horarios',
+  SECOND_CHAT_SCHEDULED: 'Segundo chat programado', SECOND_CHAT_AVAILABLE: 'Segundo chat disponible',
+  SECOND_CHAT_EXPIRED: 'Segundo chat: ventana finalizada', SECOND_CHAT_READ_ONLY: 'Segundo chat en modo lectura',
+};
+const blockedLabels: Record<string, string> = {
+  PROFILE_REQUIRED: 'Creá tu perfil antes de buscar chat.',
+  PROFILE_NOT_ACTIVE: 'Activá tu perfil para buscar nuevas personas.',
+  ACTIVE_PENALTY: 'La búsqueda no está disponible por ahora. Revisá el estado de tu cuenta.',
+  ACTIVE_MATCH_LIMIT_REACHED: 'Ya tenés conversaciones activas. Terminá una antes de buscar otra.',
+  ACTIVE_CONNECTION_LIMIT_REACHED: 'Ya tenés conexiones activas. Terminá una antes de buscar otra.',
+  VISUAL_ADVANCEMENT_LIMIT_REACHED: 'Alcanzaste el límite de perfiles por descubrir. Volvé a consultar más adelante.',
+};
+function ActivityCard({ item }: { item: Activity }) {
+  const when = item.type === 'SCHEDULING' ? item.schedulingExpiresAt : item.type === 'VISUAL_REVIEW' ? item.visualExpiresAt : item.secondChat?.availableAt;
+  const body: Record<string, string> = {
+    FIRST_CHAT: 'Tenés una conversación inicial para continuar.', VISUAL_REVIEW: 'Tenés un perfil por descubrir.',
+    SCHEDULING: item.requiresAction ? 'Requiere tu atención para coordinar horarios.' : 'Esperando respuesta.',
+    SECOND_CHAT_SCHEDULED: 'El servidor confirmó un próximo encuentro.', SECOND_CHAT_AVAILABLE: 'Tu segundo chat está disponible.',
+    SECOND_CHAT_EXPIRED: 'La ventana para entrar terminó.', SECOND_CHAT_READ_ONLY: 'Esta conversación está en modo lectura.',
+  };
+  return <article className="home-card"><h4>{labels[item.type] ?? 'Actividad pendiente'}</h4>
+    {item.partnerName && <p>Con {item.partnerName}</p>}
+    <p>{body[item.type] ?? 'Consultá esta actividad desde Android.'}</p>
+    {typeof when === 'string' && <p>{item.type === 'SCHEDULING' || item.type === 'VISUAL_REVIEW' ? 'Hasta: ' : 'Fecha: '}<time dateTime={when}>{new Date(when).toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' })}</time></p>}
+  </article>;
+}
+export function Home({ controller, onCompleteProfile }: { controller: SessionController; onCompleteProfile?: () => void }) {
+  const { model, busy, blocked, error, refresh, search, cancel, searchPhase, backFromSearch } = useHome(controller);
+  const [surface, setSurface] = useState<'overview' | 'activity'>('overview');
+  const root = useRef<HTMLDivElement>(null);
+  const home = model?.home, m = home?.matchmaking;
+  const waiting = !!m?.inQueue || searchPhase !== 'idle';
+  const screen = waiting ? 'search' : surface;
+  useEffect(() => {
+    if (waiting) setSurface('overview');
+    const heading = root.current?.querySelector('h2');
+    if (heading) { heading.tabIndex = -1; heading.focus(); }
+  }, [screen, waiting]);
+  const presentation = home ? activityPresentation(home) : null;
+  if (waiting) return <div ref={root}><SearchingScreen phase={searchPhase === 'idle' ? 'queued' : searchPhase} error={error} busy={busy} blocked={blocked} inQueue={!!m?.inQueue} onCancel={cancel} onRefresh={refresh} onBack={backFromSearch}/></div>;
+  if (surface === 'activity' && home && presentation) return <div ref={root} className="home" aria-busy={busy}>
+    <header className="home-heading"><h2>Actividad</h2><button className="login-button login-outlined" onClick={() => setSurface('overview')}>Volver a Inicio</button></header>
+    <p>Descubrimientos, próximos pasos y conversaciones en un solo lugar.</p>
+    {error && <p className="home-error" role="alert">{error}</p>}
+    <button className="login-button login-outlined" disabled={busy} onClick={refresh}>Actualizar</button>
+    {presentation.groups.map(section => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3><div className="home-grid">{section.items.map((item, index) => <ActivityCard key={`${item.matchId}-${item.connectionId}-${item.type}-${index}`} item={item}/>)}</div></section>)}
+    {presentation.groups.length === 0 && <p>{home.summary.hasPendingSchedulingConnection ? 'Estamos preparando una coordinación de horarios.' : presentation.hasActivity ? 'Hay actividad en curso. Los detalles aparecerán cuando el servidor los informe.' : 'No tenés pendientes por ahora.'}</p>}
+    {home.passiveNotices.map((notice, index) => <aside className="home-notice" key={`${notice}-${index}`}>{notice === 'SCHEDULING_PREPARING' ? 'Estamos preparando tus próximos pasos para coordinar horarios.' : 'Hay novedades sobre tus interacciones. Consultalas desde Android.'}</aside>)}
+    <p className="home-notice">Estos resúmenes son de solo lectura. Continuar chats, descubrir perfiles y coordinar horarios todavía no está disponible en la Web POC. Podés continuar desde Android.</p>
+  </div>;
+  return <div ref={root} className="home" aria-busy={busy}>
+    <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><button className="login-button login-outlined" disabled={busy} onClick={refresh}>Actualizar</button></header>
+    {busy && <p role="status">Actualizando Inicio…</p>}
+    {error && <p className="home-error" role="alert">{error}</p>}
+    {home && <>
+      {home.profileStatus !== 'ACTIVE' && <aside className="home-card"><h3>{home.profileStatus === 'DRAFT' ? 'Tu perfil está en borrador' : 'Tu perfil no está activo'}</h3><p>Tus interacciones se conservan. Para buscar nuevas personas, revisá y activá tu perfil.</p>{onCompleteProfile && <button className="login-button login-outlined" onClick={onCompleteProfile} disabled={busy}>Completar perfil</button>}</aside>}
+      {!!presentation?.priorities.length && <section className="home-priority" aria-label="Prioridad ahora"><h3>Prioridad ahora</h3>{presentation.priorities.map((item, index) => <p key={`${item.matchId}-${item.type}-${index}`}>{labels[item.type] ?? 'Actividad pendiente'}{item.partnerName ? ` con ${item.partnerName}` : ''} · Revisá tu Actividad.</p>)}</section>}
+      <section className="home-card home-search" aria-labelledby="search-title"><h3 id="search-title">Buscar chat</h3>
+        <p>Una conversación es el comienzo de algo real.</p>
+          {!m?.canSearch && <p>{blockedLabels[m?.blockedReason?.code ?? ''] ?? 'La búsqueda no está disponible por ahora. Actualizá el estado o revisá tus interacciones.'}</p>}
+          <p>Usamos tu ubicación actual para buscar personas cerca. El navegador te pedirá permiso al iniciar.</p>
+          <button className="login-button login-primary" disabled={busy || blocked || !m?.canSearch || home.profileStatus !== 'ACTIVE'} onClick={search}>Buscar chat</button>
+      </section>
+      {presentation?.hasActivity && <button className="home-card home-activity-entry" onClick={() => setSurface('activity')} aria-label="Ver Actividad"><span className="home-entry-title">Actividad</span><span>{presentation.required ? `${presentation.required} requieren tu acción` : 'Tus conversaciones y próximos pasos'}</span><span aria-hidden="true">Ver actividad →</span></button>}
+      {home.passiveNotices.map((notice, i) => <aside className="home-notice" key={`${notice}-${i}`}>{notice === 'SCHEDULING_PREPARING' ? 'Estamos preparando tus próximos pasos para coordinar horarios.' : 'Hay novedades sobre tus interacciones. Consultalas desde Android.'}</aside>)}
+    </>}
+  </div>;
+}

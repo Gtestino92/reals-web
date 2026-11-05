@@ -11,6 +11,7 @@ import { photoPlacements } from './photoReorder';
 import { photoFileError } from './photoFiles';
 import './onboarding.css';
 import { SessionLoading } from '../SessionLoading';
+import { Home } from '../home/Home';
 
 export function onboardingError(error: unknown) {
   const messages: Record<string,string> = {
@@ -56,7 +57,7 @@ export function Onboarding({ controller }: { controller: SessionController }) {
     catch (e) { if (!(e instanceof ApiError) || e.code !== 'PROFILE_NOT_FOUND' || e.status !== 404) throw e; }
     const list = profile ? photos(await controller.request('/me/profile/photos',signal)) : [];
     let interactions: boolean | null = false;
-    if (profile?.status === 'DRAFT') {
+    if (profile?.status === 'DRAFT' || profile?.status === 'INACTIVE') {
       try { interactions = hasInteractions(await controller.request('/me/home',signal)); }
       catch (error) {
         if (
@@ -144,9 +145,10 @@ export function Onboarding({ controller }: { controller: SessionController }) {
     <button type="button" disabled={busy || !!crop} onClick={() => void run()}>Actualizar estado</button>
     {model && !model.legal.satisfied ? <><h2>Antes de continuar</h2><p>Revisá los documentos vigentes. Algunas acciones de participación requieren que completes la acción indicada.</p>
       {model.legal.documents.map(doc => <article key={doc.type}><h3>{({ TERMS_OF_USE: 'Términos de uso', PRIVACY_NOTICE: 'Aviso de privacidad', COMMUNITY_GUIDELINES: 'Normas de la comunidad' } as Record<string,string>)[doc.type] ?? doc.type}</h3><p>Versión {doc.version} · {doc.requiredAction} · {doc.satisfied ? 'Completado' : 'Pendiente'}</p><a href={doc.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Ver documento</a>{!doc.satisfied && <button disabled={disabled} onClick={() => void run(async signal => { await controller.request('/me/legal-document-actions',signal,'POST',{ documentType: doc.type, documentVersion: doc.version, action: doc.requiredAction }); })}>{doc.requiredAction === 'ACCEPTED' ? 'Aceptar' : 'Confirmar lectura'}</button>}</article>)}
-    </> : model && success && model.profile?.status === 'ACTIVE' ? <><h2>Tu perfil está activo</h2><p>Ya podés entrar a Inicio y buscar un chat cuando quieras.</p><p>Tus fotos quedaron guardadas. Si más adelante las cambiás, puede que revisemos tu perfil otra vez.</p><button onClick={() => setSuccess(false)}>Ir a Inicio</button></> : model?.profile?.status === 'ACTIVE' ? <><h2>Inicio</h2><p>Este es un punto de integración temporal. Inicio todavía no está implementado.</p></> : model && !model.profile ? <><h2>Crear perfil</h2><p>Completá tus datos principales. Después vas a poder sumar fotos y activar tu perfil.</p><ProfileForm catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled} submit={writeProfile}/></> : model?.profile ? <>
+    </> : model && success && model.profile?.status === 'ACTIVE' ? <><h2>Tu perfil está activo</h2><p>Ya podés entrar a Inicio y buscar un chat cuando quieras.</p><p>Tus fotos quedaron guardadas. Si más adelante las cambiás, puede que revisemos tu perfil otra vez.</p><button onClick={() => setSuccess(false)}>Ir a Inicio</button></> : model?.profile?.status === 'ACTIVE' ? <Home controller={controller} /> : model && !model.profile ? <><h2>Crear perfil</h2><p>Completá tus datos principales. Después vas a poder sumar fotos y activar tu perfil.</p><ProfileForm catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled} submit={writeProfile}/></> : model?.profile ? <>
       <h2>Completá tu perfil</h2><p>Estado: {model.profile.status}</p>
       {model.interactions === true && <aside><h3>Inicio: interacciones vigentes</h3><p>Tenés interacciones en curso. Se conservan en el backend. Este punto de consulta es de solo lectura; usá Android para continuarlas.</p></aside>}
+      {model.interactions === true && <Home controller={controller} />}
       {model.interactions === null && <aside><h3>Inicio no disponible</h3><p>No pudimos consultar tus interacciones. Su estado es desconocido. Podés seguir completando el perfil o consultarlas desde Android.</p><button disabled={disabled || !!crop} onClick={() => void run()}>Reintentar Inicio</button></aside>}
       {!verified && <section id="email-verification" tabIndex={-1}><h3>Verificá tu email</h3><p>Abrí el link del correo de verificación y volvé para continuar.</p><button disabled={disabled || sendAt > now} onClick={() => { if (Date.now() < sendAt) return; void run(async () => { await controller.verifyEmail(true); setSendAt(Date.now()+60000); setMessage('Te enviamos un nuevo correo de verificación.'); }); }}>Reenviar correo{sendAt > now ? ` (${Math.ceil((sendAt-now)/1000)} s)` : ''}</button><button disabled={disabled || checkAt > now} onClick={() => { if (Date.now() < checkAt) return; void run(async () => { const value = await controller.verifyEmail(false); setVerified(value); setCheckAt(Date.now()+10000); setMessage(value ? 'Email verificado.' : 'Todavía no vemos el email verificado. Abrí el link del correo y volvé a intentar.'); }); }}>Ya verifiqué</button></section>}
       <details open><summary>Fotos</summary><p>Hasta nueve fotos. Para la configuración local se suelen requerir cuatro fotos validadas, una de persona y una de cuerpo completo. El servidor decide si podés activar el perfil.</p>
