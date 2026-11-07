@@ -24,22 +24,25 @@ function ConfirmDialog({ kind, busy, close, confirm }: { kind: string; busy: boo
 }
 function ChatMenu({ actions }: { actions: { label: string; disabled: boolean; run: () => void }[] }) {
   const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null);
+  const boundary = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null);
   const close = () => { setOpen(false); trigger.current?.focus(); };
   useEffect(() => {
     if (!open) return;
     menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
     const outside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !menu.current?.contains(event.target) && !trigger.current?.contains(event.target)) setOpen(false);
+      if (event.target instanceof Node && !boundary.current?.contains(event.target)) setOpen(false);
     };
     document.addEventListener('pointerdown', outside);
     return () => document.removeEventListener('pointerdown', outside);
   }, [open]);
-  return <div className="chat-overflow"><button ref={trigger} aria-label="Opciones del chat" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); } }}>⋮</button>
-    {open && <div ref={menu} role="menu" aria-label="Decisiones y seguridad" className="chat-menu" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }} onKeyDown={event => {
+  return <div ref={boundary} className="chat-overflow" onBlur={event => {
+    // Trigger and popup share one focus boundary. Pointer focus reaches the
+    // trigger before click; closing here would make that click reopen the menu.
+    if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+  }} onKeyDown={event => { if (event.key === 'Escape' && open) { event.preventDefault(); close(); } }}><button ref={trigger} aria-label="Opciones del chat" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(current => !current)} onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); } }}>⋮</button>
+    {open && <div ref={menu} role="menu" aria-label="Decisiones y seguridad" className="chat-menu" onKeyDown={event => {
       const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
       const index = items.findIndex(item => item === document.activeElement);
-      if (event.key === 'Escape') { event.preventDefault(); close(); }
       if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
         event.preventDefault();
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;

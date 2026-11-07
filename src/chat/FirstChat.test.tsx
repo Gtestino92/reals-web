@@ -51,3 +51,27 @@ it.each([
   expect(screen.getByRole('dialog')).toBeVisible();expect(vi.mocked(controller.request).mock.calls.some(c=>c[0]===path&&c[2]==='POST')).toBe(false);
   fireEvent.click(screen.getByRole('button',{name:'Confirmar'}));await waitFor(()=>expect(vi.mocked(controller.request).mock.calls.some(c=>c[0]===path&&c[2]==='POST')).toBe(true));
 });
+
+it('toggles closed after pointer focus moves to trigger and can reopen under StrictMode',async()=>{
+  mount();await ready();const trigger=screen.getByRole('button',{name:'Opciones del chat'});
+  fireEvent.click(trigger);expect(screen.getByRole('menu')).toBeVisible();
+  // fireEvent.click alone omits the browser focus transition preceding click.
+  fireEvent.pointerDown(trigger);act(()=>trigger.focus());
+  expect(screen.getByRole('menu')).toBeVisible();
+  fireEvent.click(trigger);expect(screen.queryByRole('menu')).toBeNull();expect(trigger).toHaveAttribute('aria-expanded','false');
+  fireEvent.click(trigger);expect(screen.getByRole('menu')).toBeVisible();
+  fireEvent.keyDown(document.activeElement!,{key:'ArrowDown'});expect(screen.getByRole('menuitem',{name:'Salida consensuada'})).toHaveFocus();
+  act(()=>trigger.focus());expect(screen.getByRole('menu')).toBeVisible();
+  fireEvent.keyDown(trigger,{key:'Escape'});expect(screen.queryByRole('menu')).toBeNull();expect(trigger).toHaveFocus();
+});
+it('keeps focus moves inside the boundary open and dismisses focus leaving it',async()=>{
+  mount();await ready();const trigger=screen.getByRole('button',{name:'Opciones del chat'});fireEvent.click(trigger);
+  act(()=>trigger.focus());act(()=>screen.getByRole('menuitem',{name:'Bloquear'}).focus());expect(screen.getByRole('menu')).toBeVisible();
+  act(()=>screen.getByRole('textbox',{name:'Mensaje'}).focus());expect(screen.queryByRole('menu')).toBeNull();
+});
+it('disabled menu actions cannot open a confirmation or send a mutation',async()=>{
+  chat.myDecision='APPROVED';mount();await screen.findByRole('heading',{name:'María'});
+  fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));const reject=screen.getByRole('menuitem',{name:'Rechazar chat'});
+  expect(reject).toBeDisabled();fireEvent.click(reject);expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('menu')).toBeVisible();
+  expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
+});
