@@ -13,6 +13,7 @@ let geo: ReturnType<typeof vi.fn<Geolocation['getCurrentPosition']>>;
 const json = (v: unknown, code = 200) => new Response(JSON.stringify(v), { status: code });
 const position = (overrides = {}) => ({ coords: { latitude: 12, longitude: -21, accuracy: 25, altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}) }, timestamp: Date.now(), toJSON: () => ({}), ...overrides });
 function mount() { return render(<App firebase={{ service: auth, localVerification: false }} api={new ApiClient(fetcher)} />); }
+const confirmed = async () => { await screen.findByRole('status', { name: 'Búsqueda confirmada' }); };
 const search = () => screen.getByRole('button', { name: 'Buscar chat' });
 const ready = async () => { await waitFor(() => { expect(document.querySelector('.home')).toHaveAttribute('aria-busy', 'false'); expect(screen.queryByText('Hola, Lucía') ?? screen.queryByRole('heading', { name: 'Buscando chat' })).toBeTruthy(); }); };
 const writes = () => fetcher.mock.calls.filter(([url, o]) => String(url).endsWith('/queue') && o?.method !== 'GET');
@@ -80,6 +81,7 @@ it.each(['network','http','malformed'])('reconciles uncertain enqueue %s without
   });
   mount(); await ready(); fireEvent.click(search()); const cancel = await screen.findByRole('button', { name: 'Cancelar búsqueda' });
   await screen.findByRole('alert'); expect(cancel).toBeDisabled(); expect(writes()).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: 'Reintentar ubicación' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Actualizar' })); await waitFor(() => expect(cancel).toBeEnabled()); expect(writes()).toHaveLength(1);
 });
 it('cancel failure reconciles queue and requires an explicit refresh', async () => {
@@ -175,7 +177,7 @@ it('opens Activity and returns with heading focus without fetching again', async
 it('can cancel location acquisition, reconcile and ignore a late position', async () => {
   let done: PositionCallback | undefined; geo.mockImplementation(ok => { done = ok; });
   mount(); await ready(); fireEvent.click(search());
-  expect(screen.getByRole('heading', { name: 'Obteniendo tu ubicación' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible();
   expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' }));
   await waitFor(() => expect(search()).toBeEnabled());
@@ -186,7 +188,7 @@ it('serializes cancellation after an in-flight admission and suppresses duplicat
   const original = fetcher.getMockImplementation()!; let admit: ((response: Response) => void) | undefined;
   fetcher.mockImplementation((url, options) => options?.method === 'POST' ? new Promise(resolve => { admit = resolve; }) : original(url, options));
   mount(); await ready(); fireEvent.click(search());
-  await screen.findByRole('heading', { name: 'Iniciando búsqueda' }); await waitFor(() => expect(admit).toBeDefined());
+  await screen.findByRole('heading', { name: 'Buscando chat' }); await waitFor(() => expect(admit).toBeDefined());
   const cancel = screen.getByRole('button', { name: 'Cancelar búsqueda' }); fireEvent.click(cancel); fireEvent.click(cancel);
   expect(screen.getByRole('heading', { name: 'Cancelando búsqueda' })).toBeVisible();
   expect(writes().map(([, o]) => o?.method)).toEqual(['POST']);
@@ -194,6 +196,47 @@ it('serializes cancellation after an in-flight admission and suppresses duplicat
   await act(async () => admit?.(json({ userId: 'u', inQueue: true })));
   await waitFor(() => expect(search()).toBeEnabled());
   expect(writes().map(([, o]) => o?.method)).toEqual(['POST','DELETE']); expect(home.matchmaking.inQueue).toBe(false);
+});
+it('keeps one stable preparation surface through location, admission and reconciliation', async () => {
+  let located: PositionCallback | undefined, admit: ((response: Response) => void) | undefined, queueRead: ((response: Response) => void) | undefined;
+  geo.mockImplementation(ok => { located = ok; });
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => {
+    if (options?.method === 'POST') return new Promise(resolve => { admit = resolve; });
+    if (url === '/api/matchmaking/queue') return new Promise(resolve => { queueRead = resolve; });
+    return original(url, options);
+  });
+  mount(); await ready(); fireEvent.click(search());
+  const heading = screen.getByRole('heading', { name: 'Buscando chat' }), status = screen.getByRole('status');
+  const text = status.textContent, seal = screen.getByRole('img', { name: 'Reals' }), dots = document.querySelector('.search-dots');
+  await act(async () => located?.(position())); await waitFor(() => expect(admit).toBeDefined());
+  expect(heading).toHaveTextContent('Buscando chat'); expect(status.textContent).toBe(text);
+  home.matchmaking.inQueue = true; await act(async () => admit?.(json({ userId: 'u', inQueue: true })));
+  await waitFor(() => expect(queueRead).toBeDefined());
+  expect(heading).toHaveTextContent('Buscando chat'); expect(status.textContent).toBe(text);
+  expect(screen.getByRole('button', { name: 'Cancelar búsqueda' })).toBeEnabled();
+  await act(async () => queueRead?.(json({ userId: 'u', inQueue: true })));
+  await confirmed();
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBe(heading);
+  expect(screen.getByRole('status')).toBe(status); expect(screen.getByRole('img', { name: 'Reals' })).toBe(seal); expect(document.querySelector('.search-dots')).toBe(dots);
+  expect(writes()).toHaveLength(1);
+});
+it('accepts cancellation during admission reconciliation and keeps cancellation copy until it finishes', async () => {
+  let queueRead: ((response: Response) => void) | undefined; let held = false;
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => {
+    if (url === '/api/matchmaking/queue' && options?.method === 'GET' && !held) {
+      held = true; return new Promise(resolve => { queueRead = resolve; });
+    }
+    return original(url, options);
+  });
+  mount(); await ready(); fireEvent.click(search()); await waitFor(() => expect(queueRead).toBeDefined());
+  const cancel = screen.getByRole('button', { name: 'Cancelar búsqueda' });
+  expect(cancel).toBeEnabled(); fireEvent.click(cancel); fireEvent.click(cancel);
+  expect(screen.getByRole('heading', { name: 'Cancelando búsqueda' })).toBeVisible(); expect(cancel).toBeDisabled();
+  await act(async () => queueRead?.(json({ userId: 'u', inQueue: true })));
+  await waitFor(() => expect(search()).toBeEnabled());
+  expect(writes().map(([, options]) => options?.method)).toEqual(['POST','DELETE']); expect(home.matchmaking.inQueue).toBe(false);
 });
 it('keeps uncertain canceled admission visible even if a later DELETE succeeds', async () => {
   const original = fetcher.getMockImplementation()!; let rejectAdmission: (() => void) | undefined;
@@ -211,6 +254,84 @@ it('shows restored queue membership on the dedicated surface', async () => {
   expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Ver Actividad' })).toBeNull();
   expect(screen.queryByRole('heading', { name: 'Buscar chat' })).toBeNull();
+  expect(screen.getByRole('status')).toHaveTextContent('Estamos buscando a alguien compatible. Te avisaremos cuando encontremos una persona para conversar.');
+});
+it('waits for first permission grant and slow acquisition before sending exactly one admission', async () => {
+  let granted: PositionCallback | undefined; geo.mockImplementation(ok => { granted = ok; });
+  vi.useFakeTimers(); mount(); await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  fireEvent.click(search());
+  await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(writes()).toHaveLength(0);
+  await act(async () => { granted?.(position()); await vi.advanceTimersByTimeAsync(0); });
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(writes()).toHaveLength(1); expect(geo).toHaveBeenCalledOnce();
+});
+it('retries a pre-POST timeout on the same screen with no full Home refresh or duplicate admission', async () => {
+  let oldCallback: PositionCallback | undefined;
+  const timeout: Geolocation['getCurrentPosition'] = (ok, fail) => { oldCallback = ok; fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }); };
+  geo.mockImplementationOnce(timeout).mockImplementationOnce(timeout);
+  mount(); await ready(); fetcher.mockClear(); fireEvent.click(search());
+  const retry = await screen.findByRole('button', { name: 'Reintentar ubicación' });
+  expect(screen.getByRole('alert')).toHaveTextContent('Se agotó el tiempo'); expect(fetcher).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: 'Actualizar' })).toBeNull();
+  fireEvent.click(retry); fireEvent.click(retry);
+  await confirmed(); await act(async () => oldCallback?.(position()));
+  expect(geo).toHaveBeenCalledTimes(3); expect(writes()).toHaveLength(1);
+  expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['/api/matchmaking/queue','/api/me/home/status','/api/me/profile','/api/matchmaking/queue','/api/me/home']);
+});
+it.each(['stale','inaccurate','invalid'])('explicit retry after %s asks for a fresh position', async kind => {
+  const rejected: Geolocation['getCurrentPosition'] = ok => ok(kind === 'stale' ? position({ timestamp: Date.now() - 900001 }) : position({ coords: { ...position().coords, accuracy: kind === 'inaccurate' ? 5001 : NaN } }));
+  geo.mockImplementationOnce(rejected); if (kind === 'inaccurate') geo.mockImplementationOnce(rejected);
+  mount(); await ready(); fireEvent.click(search()); const retry = await screen.findByRole('button', { name: 'Reintentar ubicación' });
+  expect(writes()).toHaveLength(0); fireEvent.click(retry);
+  await confirmed(); expect(geo.mock.calls.at(-1)?.[2]).toMatchObject({ maximumAge: 0, enableHighAccuracy: true }); expect(writes()).toHaveLength(1);
+});
+it('permission denied has an explicit retry and never retries automatically', async () => {
+  geo.mockImplementation((_ok, fail) => fail?.({ code: 1, message: 'sensitive', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }));
+  vi.useFakeTimers(); mount(); await act(async () => { await vi.advanceTimersByTimeAsync(0); }); fireEvent.click(search());
+  await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+  expect(screen.getByRole('alert')).toHaveTextContent('Permití el acceso'); expect(geo).toHaveBeenCalledOnce(); expect(writes()).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar ubicación' }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); }); expect(geo).toHaveBeenCalledTimes(2); expect(writes()).toHaveLength(0);
+});
+it('canceling a location retry ignores its callback and never enqueues', async () => {
+  let done: PositionCallback | undefined;
+  const timeout: Geolocation['getCurrentPosition'] = (_ok, fail) => fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
+  geo.mockImplementationOnce(timeout).mockImplementationOnce(timeout).mockImplementation(ok => { done = ok; });
+  mount(); await ready(); fireEvent.click(search()); fireEvent.click(await screen.findByRole('button', { name: 'Reintentar ubicación' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' }));
+  await waitFor(() => expect(search()).toBeEnabled()); await act(async () => done?.(position())); expect(writes()).toHaveLength(0);
+});
+it('fallback admits once with actual coarse accuracy and does not change the visible waiting copy', async () => {
+  let coarse: PositionCallback | undefined;
+  geo.mockImplementationOnce((_ok, fail) => fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 })).mockImplementation(ok => { coarse = ok; });
+  mount(); await ready(); fireEvent.click(search()); await waitFor(() => expect(geo).toHaveBeenCalledTimes(2));
+  const heading = screen.getByRole('heading', { name: 'Buscando chat' }), status = screen.getByRole('status');
+  const title = heading.textContent, text = status.textContent;
+  expect(status).toHaveAccessibleName('Preparando búsqueda; ingreso todavía no confirmado'); expect(writes()).toHaveLength(0);
+  await act(async () => coarse?.(position({ coords: { ...position().coords, accuracy: 4200 } }))); await confirmed();
+  expect(heading.textContent).toBe(title); expect(status.textContent).toBe(text);
+  expect(writes()).toHaveLength(1); expect(JSON.parse(String(writes()[0]?.[1]?.body)).accuracyMeters).toBe(4200);
+  expect(geo.mock.calls[1]?.[2]?.enableHighAccuracy).toBe(false);
+});
+it('cancels during the coarse fallback and ignores late results from both requests', async () => {
+  const callbacks: PositionCallback[] = [];
+  geo.mockImplementation((ok, fail, options) => {
+    callbacks.push(ok);
+    if (options?.enableHighAccuracy) fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
+  });
+  mount(); await ready(); fireEvent.click(search()); await waitFor(() => expect(geo).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' })); await waitFor(() => expect(search()).toBeEnabled());
+  await act(async () => callbacks.forEach(ok => ok(position()))); expect(writes()).toHaveLength(0);
+});
+it('polling keeps location failure guidance but authoritative queue membership supersedes retry', async () => {
+  geo.mockImplementation((_ok, fail) => fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }));
+  vi.useFakeTimers(); mount(); await act(async () => { await vi.advanceTimersByTimeAsync(0); }); fireEvent.click(search());
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); }); status.version++;
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.getByRole('button', { name: 'Reintentar ubicación' })).toBeEnabled(); expect(screen.getByRole('alert')).toHaveTextContent('Se agotó el tiempo');
+  home.matchmaking.inQueue = true; status.version++;
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(screen.queryByRole('button', { name: 'Reintentar ubicación' })).toBeNull(); expect(writes()).toHaveLength(0);
 });
 it('leaves waiting for authoritative new activity using the same poller', async () => {
   home.matchmaking.inQueue = true; vi.useFakeTimers();

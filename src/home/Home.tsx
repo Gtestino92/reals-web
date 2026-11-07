@@ -34,7 +34,7 @@ function ActivityCard({ item }: { item: Activity }) {
   </article>;
 }
 export function Home({ controller, onCompleteProfile }: { controller: SessionController; onCompleteProfile?: () => void }) {
-  const { model, busy, blocked, error, refresh, search, cancel, searchPhase, backFromSearch } = useHome(controller);
+  const { model, busy, blocked, error, refresh, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller);
   const [surface, setSurface] = useState<'overview' | 'activity'>('overview');
   const root = useRef<HTMLDivElement>(null);
   const home = model?.home, m = home?.matchmaking;
@@ -46,7 +46,7 @@ export function Home({ controller, onCompleteProfile }: { controller: SessionCon
     if (heading) { heading.tabIndex = -1; heading.focus(); }
   }, [screen, waiting]);
   const presentation = home ? activityPresentation(home) : null;
-  if (waiting) return <div ref={root}><SearchingScreen phase={searchPhase === 'idle' ? 'queued' : searchPhase} error={error} busy={busy} blocked={blocked} inQueue={!!m?.inQueue} onCancel={cancel} onRefresh={refresh} onBack={backFromSearch}/></div>;
+  if (waiting) return <div ref={root}><SearchingScreen phase={searchPhase === 'idle' ? 'queued' : searchPhase} error={error} busy={busy} blocked={blocked} inQueue={!!m?.inQueue} onCancel={cancel} onRefresh={refresh} onBack={backFromSearch} canRetryLocation={canRetryLocation} onRetryLocation={retryLocation}/></div>;
   if (surface === 'activity' && home && presentation) return <div ref={root} className="home" aria-busy={busy}>
     <header className="home-heading"><h2>Actividad</h2><button className="login-button login-outlined" onClick={() => setSurface('overview')}>Volver a Inicio</button></header>
     <p>Descubrimientos, próximos pasos y conversaciones en un solo lugar.</p>
@@ -67,7 +67,7 @@ export function Home({ controller, onCompleteProfile }: { controller: SessionCon
       <section className="home-card home-search" aria-labelledby="search-title"><h3 id="search-title">Buscar chat</h3>
         <p>Una conversación es el comienzo de algo real.</p>
           {!m?.canSearch && <p>{blockedLabels[m?.blockedReason?.code ?? ''] ?? 'La búsqueda no está disponible por ahora. Actualizá el estado o revisá tus interacciones.'}</p>}
-          <p>Usamos tu ubicación actual para buscar personas cerca. El navegador te pedirá permiso al iniciar.</p>
+          <p>Usamos tu ubicación actual para buscar personas cerca. Puede ser aproximada. El navegador te pedirá permiso al iniciar.</p>
           <button className="login-button login-primary" disabled={busy || blocked || !m?.canSearch || home.profileStatus !== 'ACTIVE'} onClick={search}>Buscar chat</button>
       </section>
       {presentation?.hasActivity && <button className="home-card home-activity-entry" onClick={() => setSurface('activity')} aria-label="Ver Actividad"><span className="home-entry-title">Actividad</span><span>{presentation.required ? `${presentation.required} requieren tu acción` : 'Tus conversaciones y próximos pasos'}</span><span aria-hidden="true">Ver actividad →</span></button>}
