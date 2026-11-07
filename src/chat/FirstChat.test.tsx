@@ -218,7 +218,7 @@ it('prevents duplicates from repeated Enter and simultaneous form submission whi
   mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Una vez'}});
   enter(input,{repeat:true});expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
   enter(input);enter(input);fireEvent.submit(input.closest('form')!);
-  expect(vi.mocked(controller.request).mock.calls.filter(c=>c[0]==='/chats/c/messages')).toHaveLength(1);expect(input).toBeDisabled();
+  expect(vi.mocked(controller.request).mock.calls.filter(c=>c[0]==='/chats/c/messages')).toHaveLength(1);expect(input).toBeEnabled();fireEvent.change(input,{target:{value:'Siguiente borrador'}});expect(input).toHaveValue('Siguiente borrador');
 });
 it('never sends with Enter in decision-only mode',async()=>{
   chat.partnerDecision='APPROVED';mount();await screen.findByRole('heading',{name:'María'});const input=screen.getByRole('textbox',{name:'Mensaje'});
@@ -245,4 +245,21 @@ it('preserves the text and quoted target when delivery is uncertain',async()=>{
   vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>path==='/chats/c/messages'&&method==='POST'?Promise.reject(new TypeError('Synthetic failure')):original(path,signal,method,body));
   mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Responder pregunta'}));const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Respuesta pendiente'}});enter(input);
   await screen.findByText('Sin confirmar');expect(input).toHaveValue('Respuesta pendiente');expect(screen.getByRole('complementary',{name:'Respuesta seleccionada'})).toHaveTextContent('Pregunta');expect(screen.getByRole('button',{name:'Quitar respuesta'})).toBeDisabled();
+});
+
+it.each(['guidance','reaction','message'] as const)('keeps global presentation stable during %s writes',async kind=>{
+  const original=vi.mocked(controller.request).getMockImplementation()!;
+  vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>method&&method!=='GET'?new Promise(()=>{}):original(path,signal,method,body));
+  mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});act(()=>input.focus());
+  if(kind==='guidance')fireEvent.click(screen.getByRole('button',{name:'Otra pregunta'}));
+  if(kind==='reaction')fireEvent.click(screen.getByRole('button',{name:'Reaccionar con corazón'}));
+  if(kind==='message'){fireEvent.change(input,{target:{value:'Texto enviado'}});enter(input);}
+  expect(screen.getByRole('button',{name:'Aprobar chat'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Aprobar chat'})).toHaveClass('chat-stable-control');
+  expect(screen.queryByText('Actualizando?')).toBeNull();expect(input).toBeEnabled();expect(input).toHaveFocus();
+  if(kind==='guidance')expect(screen.getByRole('button',{name:'Otra pregunta'})).toHaveAttribute('aria-busy','true');
+});
+it('reply selection focuses input without asking the browser to scroll ancestors',async()=>{
+  mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'}),focus=vi.spyOn(input,'focus');
+  fireEvent.click(screen.getByRole('button',{name:'Responder pregunta'}));expect(focus).toHaveBeenCalledWith({preventScroll:true});
 });

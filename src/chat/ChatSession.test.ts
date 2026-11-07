@@ -8,6 +8,26 @@ let chat:ReturnType<typeof chatFixture>, messages:ReturnType<typeof messageFixtu
 let controller:ReturnType<typeof controllerFixture>, session:ChatSession, home:ReturnType<typeof vi.fn<(message: string) => void>>;
 let request:MockInstance<typeof controller.request>;
 const writes=()=>request.mock.calls.filter(([, ,method])=>method && method!=='GET');
+it('installs authoritative guidance acknowledgement even if following reconciliation fails',async()=>{
+  await session.refresh();const base=request.getMockImplementation()!;let accepted=false;
+  request.mockImplementation((path,signal,method,body)=>{
+    if(path.endsWith('/guidance/next-request')){accepted=true;return Promise.resolve({...chat.guidance,myNextRequested:true});}
+    if(accepted)return Promise.reject(new ApiError('network'));
+    return base(path,signal,method,body);
+  });
+  await session.action('guidance');
+  expect(session.getSnapshot()).toMatchObject({busy:false,guidancePending:false,blocked:true,chat:{guidance:{myNextRequested:true}}});
+  expect(session.getSnapshot().error).toContain('confirmada');expect(writes()).toHaveLength(1);
+  await session.action('guidance');expect(writes()).toHaveLength(1);
+});
+it('installs the next immutable guidance question and refreshed audio policy from server state',async()=>{
+  await session.refresh();const base=request.getMockImplementation()!;
+  request.mockImplementation((path,signal,method,body)=>{
+    if(path.endsWith('/guidance/next-request')){chat.guidance={...chat.guidance,questionOrdinal:2,question:{...chat.guidance.question,instanceId:'question-2',text:'Segunda pregunta'}};return Promise.resolve(chat.guidance);}
+    return base(path,signal,method,body);
+  });
+  await session.action('guidance');expect(session.getSnapshot().chat?.guidance?.question.instanceId).toBe('question-2');expect(session.getSnapshot().blocked).toBe(false);
+});
 beforeEach(()=>{
   chat=chatFixture();messages=[messageFixture()];exits=[];matchState='CHAT_ACTIVE';controller=controllerFixture();home=vi.fn();
   request=vi.spyOn(controller,'request').mockImplementation(async(path,_signal,method='GET',body)=>{

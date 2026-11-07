@@ -1,11 +1,11 @@
 import { ApiError, object } from '../auth/api';
 import type { SessionController } from '../auth/session';
-import { mergeMessages, parseChat, parseExits, parseMessage, plainText, policy, reactable, reactionCursor, str } from './contracts';
+import { mergeMessages, parseChat, parseGuidance, parseExits, parseMessage, plainText, policy, reactable, reactionCursor, str } from './contracts';
 import type { Chat, Exit, Message, Reply } from './contracts';
 export interface Outgoing { clientMessageId: string; content: string | null; file: Blob | null; replyTo: Reply | null; phase: 'pending' | 'failed' | 'uncertain' }
-interface State { messageError: boolean; messagePending: boolean; confirmedReply: Reply | null; confirmedFile: Blob | null; reactionFeedback: 'pending' | 'error' | null; chat: Chat | null; messages: Message[]; exits: Exit[]; busy: boolean; error: string; blocked: boolean; outgoing: Outgoing | null; confirmed: string | null; confirmationVersion: number; offset: number; historyLimited: boolean }
+interface State { guidancePending: boolean; messageError: boolean; messagePending: boolean; confirmedReply: Reply | null; confirmedFile: Blob | null; reactionFeedback: 'pending' | 'error' | null; chat: Chat | null; messages: Message[]; exits: Exit[]; busy: boolean; error: string; blocked: boolean; outgoing: Outgoing | null; confirmed: string | null; confirmationVersion: number; offset: number; historyLimited: boolean }
 export class ChatSession {
-  private state: State = { messageError: false, messagePending: false, confirmedReply: null, confirmedFile: null, reactionFeedback: null, chat: null, messages: [], exits: [], busy: false, error: '', blocked: true, outgoing: null, confirmed: null, confirmationVersion: 0, offset: 0, historyLimited: false };
+  private state: State = { guidancePending: false, messageError: false, messagePending: false, confirmedReply: null, confirmedFile: null, reactionFeedback: null, chat: null, messages: [], exits: [], busy: false, error: '', blocked: true, outgoing: null, confirmed: null, confirmationVersion: 0, offset: 0, historyLimited: false };
   private listeners = new Set<() => void>();
   private lifetime = new AbortController();
   private read: AbortController | null = null;
@@ -86,7 +86,7 @@ export class ChatSession {
     this.writing = true; this.read?.abort(); this.read = null;
     const serial = ++this.serial, signal = this.lifetime.signal;
     let accepted = false;
-    this.install({ busy: true, messageError: false, messagePending: !!outgoing, reactionFeedback: method === 'PUT' ? 'pending' : null, error: '', ...(outgoing ? { outgoing: { ...outgoing, phase: 'pending' } } : {}) });
+    this.install({ busy: true, guidancePending: path.endsWith('/guidance/next-request'), messageError: false, messagePending: !!outgoing, reactionFeedback: method === 'PUT' ? 'pending' : null, error: '', ...(outgoing ? { outgoing: { ...outgoing, phase: 'pending' } } : {}) });
     try {
       const result = await this.request(path, signal, method, body);
       if (!this.current(serial)) return;
@@ -98,6 +98,7 @@ export class ChatSession {
         this.install({ messages: mergeMessages(this.state.messages, [this.parseMessage(result)]) });
       }
       accepted = true;
+      if (path.endsWith('/guidance/next-request') && this.state.chat) this.install({ chat: { ...this.state.chat, guidance: parseGuidance(result) } });
       if (path.endsWith('/safety-cancellations')) this.terminalNotice = 'Recibimos tu reporte y cerramos el chat por seguridad. Será revisado.';
       if (path.endsWith('/block')) this.terminalNotice = 'La persona quedó bloqueada. Actualizamos Inicio.';
       // The response is not used to synthesize lifecycle transitions; read authoritative state.
@@ -111,7 +112,7 @@ export class ChatSession {
       this.install({ blocked: true, messageError: !!outgoing, reactionFeedback: method === 'PUT' ? 'error' : null, error: outgoing && ambiguous ? 'Envío sin confirmar. Actualizá antes de reintentar; conservamos el mismo mensaje.' : code === 'CHAT_APPROVAL_TOO_EARLY' || code.includes('PARTICIPATION') || code.includes('APPROVAL') ? 'Todavía no se cumplen los requisitos para aprobar. Seguí conversando y actualizá el estado.' : 'No pudimos completar la acción. Actualizá el estado antes de volver a intentar.',
         ...(outgoing && this.state.outgoing ? { outgoing: { ...outgoing, phase: ambiguous ? 'uncertain' : 'failed' } } : {}) });
       try { await this.load(signal, serial, !!outgoing); } catch { /* Error remains visible; no mutation is replayed automatically. */ }
-    } finally { if (this.current(serial)) { this.writing = false; this.install({ busy: false, messagePending: false, reactionFeedback: this.state.reactionFeedback === 'pending' ? null : this.state.reactionFeedback }); } }
+    } finally { if (this.current(serial)) { this.writing = false; this.install({ busy: false, guidancePending: false, messagePending: false, reactionFeedback: this.state.reactionFeedback === 'pending' ? null : this.state.reactionFeedback }); } }
   }
   private get rules() { return policy(this.state.chat, this.state.exits, Date.now() + this.state.offset); }
   send(content: string, replyTo: Reply | null, file: Blob | null = null) {

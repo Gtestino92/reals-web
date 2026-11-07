@@ -39,7 +39,7 @@ try {
   if (fixture.result.value.overflow || fixture.result.value.messages !== 2 || !fixture.result.value.confirmed) throw Error('Synthetic chat smoke failed');
   console.log('Synthetic chat/mobile smoke:',JSON.stringify(fixture.result.value));
   const diagnose = process.argv.includes('--diagnose');
-  const evidenceRoot = process.argv.includes('--composer') ? 'artifacts/first-chat-composer' : 'artifacts/first-chat-interactions';
+  const evidenceRoot = process.argv.includes('--corrections') ? 'artifacts/first-chat-corrections/interactions' : process.argv.includes('--composer') ? 'artifacts/first-chat-composer' : 'artifacts/first-chat-interactions';
   const evidence={gestures:[],reactions:[]};
   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
   const delay=ms=>new Promise(r=>setTimeout(r,ms));

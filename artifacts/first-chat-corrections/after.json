@@ -1,0 +1,300 @@
+[
+  {
+    "touchBefore": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 199,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "touchDuring": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 199,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "touchAfter": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 199,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "width": 390,
+    "before": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 199,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "reaction": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 199,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "guidancePending": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 199,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "beforeSending": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 223,
+      "scrollTop": 200,
+      "next": null,
+      "frame": "1px",
+      "status": false
+    },
+    "sending": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 223,
+      "scrollTop": 200,
+      "next": null,
+      "frame": "1px",
+      "status": false
+    },
+    "swipeBefore": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 199,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "duringSwipe": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 199,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "afterSwipe": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 199,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    }
+  },
+  {
+    "touchBefore": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 217,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "touchDuring": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 217,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "touchAfter": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 217,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "width": 1440,
+    "before": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 217,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "reaction": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 217,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "guidancePending": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 217,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "beforeSending": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 241,
+      "scrollTop": 200,
+      "next": null,
+      "frame": "1px",
+      "status": false
+    },
+    "sending": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 241,
+      "scrollTop": 200,
+      "next": null,
+      "frame": "1px",
+      "status": false
+    },
+    "swipeBefore": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 217,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "duringSwipe": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 217,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    },
+    "afterSwipe": {
+      "approvalOpacity": "1",
+      "inputDisabled": false,
+      "rootScroll": 0,
+      "timelineTop": 217,
+      "scrollTop": 200,
+      "next": {
+        "opacity": "1",
+        "width": 56,
+        "height": 48
+      },
+      "frame": "1px",
+      "status": false
+    }
+  }
+]

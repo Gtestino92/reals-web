@@ -24,14 +24,17 @@ export interface Chat {
   serverTime: string; guidance: Guidance | null; audioPolicy: AudioPolicy | null;
 }
 export interface Exit { id: string; requesterUserId: string; responderUserId: string; status: string; createdAt: string; type: string }
+export function parseGuidance(value: unknown): Guidance {
+  const g = value; if (!object(g) || !object(g.question)) return invalid();
+  return { question: { id: str(g.question.id), instanceId: g.question.instanceId == null ? null : str(g.question.instanceId), text: str(g.question.text) },
+      questionOrdinal: num(g.questionOrdinal), maxQuestions: num(g.maxQuestions), requiredParticipationScore: num(g.requiredParticipationScore), directQuestionReplyMultiplier: num(g.directQuestionReplyMultiplier),
+      progressionAction: g.progressionAction == null ? null : str(g.progressionAction), canRequestNext: bool(g.canRequestNext), myNextRequested: bool(g.myNextRequested), completed: bool(g.completed) };
+}
 export function parseChat(v: unknown, matchId: string, chatId: string, partnerId: string): Chat {
   if (!object(v) || v.id !== chatId || v.matchId !== matchId || v.chatType !== 'FIRST_CHAT' || !object(v.partner) || v.partner.userId !== partnerId) return invalid();
   let guidance: Guidance | null = null, audioPolicy: AudioPolicy | null = null;
   if (v.guidance != null) {
-    const g = v.guidance; if (!object(g) || !object(g.question)) return invalid();
-    guidance = { question: { id: str(g.question.id), instanceId: g.question.instanceId == null ? null : str(g.question.instanceId), text: str(g.question.text) },
-      questionOrdinal: num(g.questionOrdinal), maxQuestions: num(g.maxQuestions), requiredParticipationScore: num(g.requiredParticipationScore), directQuestionReplyMultiplier: num(g.directQuestionReplyMultiplier),
-      progressionAction: g.progressionAction == null ? null : str(g.progressionAction), canRequestNext: bool(g.canRequestNext), myNextRequested: bool(g.myNextRequested), completed: bool(g.completed) };
+    guidance = parseGuidance(v.guidance);
   }
   if (v.audioPolicy != null) {
     const a = v.audioPolicy; if (!object(a)) return invalid();

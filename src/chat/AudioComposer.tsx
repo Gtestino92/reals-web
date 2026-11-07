@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AudioPolicy } from './contracts';
-import { inspectAudio, recordingMime } from './audio';
+import { prepareRecording, recordingMime } from './audio';
 import { ChatIcon } from './ChatIcon';
 
 type Phase = 'idle' | 'permission' | 'recording' | 'checking';
@@ -91,16 +91,20 @@ export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payload
           const native = new Blob(chunks, { type: recorder.mimeType });
           const bytes = await native.arrayBuffer(), current = settings.current.policy;
           if (!owns() || !current?.enabled || current.remainingMessages === 0) return;
-          const duration = inspectAudio(bytes, current.maxDurationMillis, current.maxFileSizeBytes);
+          const prepared = prepareRecording(bytes, current.maxDurationMillis, current.maxFileSizeBytes);
+          const duration = prepared.duration;
           if (!owns()) return;
           // Normalize MIME only after binary admission; never transcode.
-          const file = new Blob(chunks, { type: 'audio/mp4' });
+          const file = new Blob([prepared.bytes], { type: 'audio/mp4' });
           r.url = URL.createObjectURL(file); setDraft({ file, url: r.url, duration }); changePhase('idle');
           if (sendAfter) void send(file,sendAfter);
         } catch { if (owns()) { setIncompatible(true); setError('Este navegador no produjo MP4/AAC compatible con Reals. Podés usar texto o Android.'); } }
         finally { if (owns()) { r.recorder = null; changePhase('idle'); } }
       };
-      recorder.start(250); setSeconds(0); changePhase('recording');
+      // Keep one recording segment. Chrome's timesliced fragments can contain
+      // decode-time gaps at each cut; do not rewrite that timing or transcode.
+      // Duration still stops locally; binary size/duration are checked before upload.
+      recorder.start(); setSeconds(0); changePhase('recording');
       r.timer = window.setInterval(() => {
         if (!owns()) return;
         const elapsed = performance.now() - started; setSeconds(Math.floor(elapsed / 1000));

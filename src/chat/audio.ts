@@ -1,5 +1,7 @@
+import { flattenRecording } from './mp4Recording';
+
 // Conservative ISO-BMFF admission check. The server still performs final validation.
-// Fragmented MP4 is deliberately rejected: the backend requires populated stsz/stco/stsc.
+// Uploads must have populated stsz/stco/stsc; recording fragments are finalized first.
 export function inspectAudio(bytes: ArrayBuffer, maxDuration: number, maxSize: number): number {
   const v = new DataView(bytes), b = new Uint8Array(bytes);
   const fail = (): never => { throw new Error('Este navegador no produjo un audio MP4/AAC compatible. Usá mensajes de texto o Android.'); };
@@ -54,4 +56,9 @@ export function inspectAudio(bytes: ArrayBuffer, maxDuration: number, maxSize: n
 }
 export function recordingMime(): string | null {
   return typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.isTypeSupported === 'function' ? ['audio/mp4;codecs=mp4a.40.2','audio/mp4'].find(t => MediaRecorder.isTypeSupported(t)) ?? null : null;
+}
+
+export function prepareRecording(bytes: ArrayBuffer, maxDuration: number, maxSize: number) {
+  const fileBytes = flattenRecording(bytes,maxSize);
+  return { bytes: fileBytes, duration: inspectAudio(fileBytes,maxDuration,maxSize) };
 }
