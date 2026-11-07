@@ -25,6 +25,13 @@ beforeEach(()=>{
   session=new ChatSession(controller,'m','c','me',home);
 });
 it('validates ownership and loads initial snapshot atomically',async()=>{await session.refresh();expect(session.getSnapshot().chat?.partner.displayName).toBe('María');expect(session.getSnapshot().blocked).toBe(false);expect(session.getSnapshot().messages).toHaveLength(1);});
+it('keeps a confirmed reaction authoritative when reconciliation fails and exposes recoverable reaction feedback',async()=>{
+  const base=request.getMockImplementation()!;await session.refresh();let failRefresh=true;
+  request.mockImplementation((path,signal,method,body)=>method==='PUT'?base(path,signal,method,body):failRefresh?Promise.reject(new ApiError('network')):base(path,signal,method,body));
+  await session.react('1');expect(session.getSnapshot()).toMatchObject({reactionFeedback:'error',busy:false,blocked:true});
+  expect(session.getSnapshot().messages[0]?.reactionType).toBe('HEART');expect(session.getSnapshot().error).toContain('confirmada');
+  failRefresh=false;await session.refresh();expect(session.getSnapshot()).toMatchObject({reactionFeedback:null,error:'',blocked:false});expect(writes()).toHaveLength(1);
+});
 it.each(['id','matchId','chatType'])('rejects wrong snapshot %s',async field=>{Object.assign(chat,{[field]:'wrong'});await session.refresh();expect(session.getSnapshot().chat).toBeNull();expect(session.getSnapshot().blocked).toBe(true);});
 it('rejects nonparticipants before accessing chat',async()=>{request.mockResolvedValue({id:'m',userAId:'stranger',userBId:'other',state:'CHAT_ACTIVE'});await session.refresh();expect(session.getSnapshot().blocked).toBe(true);expect(request).toHaveBeenCalledTimes(1);});
 it('sends stable logical text once and confirms it',async()=>{await session.refresh();await Promise.all([session.send('¡Hola!',null),session.send('¡Hola!',null)]);expect(writes()).toHaveLength(1);expect(writes()[0]?.[3]).toMatchObject({content:'¡Hola!',clientMessageId:expect.any(String)});expect(session.getSnapshot().outgoing).toBeNull();expect(session.getSnapshot().messages).toHaveLength(2);});

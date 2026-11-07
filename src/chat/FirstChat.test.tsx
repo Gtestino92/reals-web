@@ -134,3 +134,30 @@ it('hides guidance and reply affordances in decision-only mode',async()=>{
   expect(screen.queryByRole('button',{name:/Responder mensaje|Responder pregunta/})).toBeNull();
   expect(screen.getByRole('button',{name:'Reaccionar con corazón'})).toBeDisabled();
 });
+it.each(['success','failure'] as const)('reaction %s never scrolls or inserts a loading row, near bottom or in older content',async outcome=>{
+  const original=vi.mocked(controller.request).getMockImplementation()!;
+  let complete: ((value:unknown)=>void) | undefined, fail: ((error:unknown)=>void) | undefined;
+  let holdRead=false, resumeRead: (()=>void) | undefined;
+  vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>{
+    if(path.endsWith('/reaction'))return new Promise((resolve,reject)=>{complete=resolve;fail=reject;});
+    if(holdRead&&path==='/matches/m')return new Promise(resolve=>{resumeRead=()=>{holdRead=false;void original(path,signal,method,body).then(resolve);};});
+    return original(path,signal,method,body);
+  });
+  mount();await ready();const list=screen.getByRole('list',{name:'Mensajes'}), bubble=list.querySelector('article');
+  let position=outcome==='success'?675:100;
+  const scroll=vi.fn((next:number)=>{position=next;});
+  Object.defineProperties(list,{scrollTop:{configurable:true,get:()=>position,set:scroll},scrollHeight:{configurable:true,value:1000},clientHeight:{configurable:true,value:300}});
+  fireEvent.scroll(list);
+  fireEvent.click(screen.getByRole('button',{name:'Reaccionar con corazón'}));
+  expect(screen.queryByText('Actualizando…')).toBeNull();
+  await act(async()=>{if(outcome==='success'){messages[0]={...messages[0]!,reactionType:'HEART'};complete?.(messages[0]);}else {holdRead=true;fail?.(new TypeError('Synthetic network failure'));}});
+  expect(scroll).not.toHaveBeenCalled();expect(list.querySelector('article')).toBe(bubble);
+  if(outcome==='failure'){
+    expect(screen.getByRole('alert')).toHaveClass('chat-reaction-error');
+    expect(screen.queryByText('Actualizando…')).toBeNull();
+    expect(screen.getByRole('button',{name:'Reintentar conexión'})).toBeDisabled();
+    await act(async()=>resumeRead?.());
+    fireEvent.click(screen.getByRole('button',{name:'Reintentar conexión'}));await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
+    expect(vi.mocked(controller.request).mock.calls.filter(c=>c[0].endsWith('/reaction'))).toHaveLength(1);
+  }
+});

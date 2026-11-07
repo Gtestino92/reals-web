@@ -3,9 +3,9 @@ import type { SessionController } from '../auth/session';
 import { mergeMessages, parseChat, parseExits, parseMessage, plainText, policy, reactable, reactionCursor, str } from './contracts';
 import type { Chat, Exit, Message, Reply } from './contracts';
 export interface Outgoing { clientMessageId: string; content: string | null; file: Blob | null; replyTo: Reply | null; phase: 'pending' | 'failed' | 'uncertain' }
-interface State { chat: Chat | null; messages: Message[]; exits: Exit[]; busy: boolean; error: string; blocked: boolean; outgoing: Outgoing | null; confirmed: string | null; confirmationVersion: number; offset: number; historyLimited: boolean }
+interface State { reactionFeedback: 'pending' | 'error' | null; chat: Chat | null; messages: Message[]; exits: Exit[]; busy: boolean; error: string; blocked: boolean; outgoing: Outgoing | null; confirmed: string | null; confirmationVersion: number; offset: number; historyLimited: boolean }
 export class ChatSession {
-  private state: State = { chat: null, messages: [], exits: [], busy: false, error: '', blocked: true, outgoing: null, confirmed: null, confirmationVersion: 0, offset: 0, historyLimited: false };
+  private state: State = { reactionFeedback: null, chat: null, messages: [], exits: [], busy: false, error: '', blocked: true, outgoing: null, confirmed: null, confirmationVersion: 0, offset: 0, historyLimited: false };
   private listeners = new Set<() => void>();
   private lifetime = new AbortController();
   private read: AbortController | null = null;
@@ -77,7 +77,7 @@ export class ChatSession {
     const read = new AbortController(); this.read = read;
     const signal = AbortSignal.any([read.signal, this.lifetime.signal]), serial = ++this.serial;
     this.install({ busy: !this.state.chat });
-    try { await this.load(signal, serial, full); if (this.current(serial) && !silent) this.install({ error: '' }); }
+    try { await this.load(signal, serial, full); if (this.current(serial) && !silent) this.install({ error: '', reactionFeedback: null }); }
     catch (error) { if (this.current(serial) && !signal.aborted && !this.terminalError(error)) this.install({ blocked: true, error: 'No pudimos actualizar el chat. Revisá tu conexión y presioná Actualizar.' }); }
     finally { if (this.current(serial)) { this.read = null; this.install({ busy: false }); } }
   };
@@ -86,7 +86,7 @@ export class ChatSession {
     this.writing = true; this.read?.abort(); this.read = null;
     const serial = ++this.serial, signal = this.lifetime.signal;
     let accepted = false;
-    this.install({ busy: true, error: '', ...(outgoing ? { outgoing: { ...outgoing, phase: 'pending' } } : {}) });
+    this.install({ busy: true, reactionFeedback: method === 'PUT' ? 'pending' : null, error: '', ...(outgoing ? { outgoing: { ...outgoing, phase: 'pending' } } : {}) });
     try {
       const result = await this.request(path, signal, method, body);
       if (!this.current(serial)) return;
@@ -105,13 +105,13 @@ export class ChatSession {
     } catch (error) {
       if (!this.current(serial)) return;
       if (this.terminalError(error)) return;
-      if (accepted) { this.install({ blocked: true, error: 'La acción fue confirmada, pero no pudimos actualizar el chat. Presioná Actualizar; no hace falta repetirla.' }); return; }
+      if (accepted) { this.install({ blocked: true, reactionFeedback: method === 'PUT' ? 'error' : null, error: 'La acción fue confirmada, pero no pudimos actualizar el chat. Presioná Actualizar; no hace falta repetirla.' }); return; }
       const ambiguous = !(error instanceof ApiError) || error.status === 0 || error.status >= 500 || error.kind === 'invalid';
       const code = error instanceof ApiError ? error.code : '';
-      this.install({ blocked: true, error: outgoing && ambiguous ? 'Envío sin confirmar. Actualizá antes de reintentar; conservamos el mismo mensaje.' : code === 'CHAT_APPROVAL_TOO_EARLY' || code.includes('PARTICIPATION') || code.includes('APPROVAL') ? 'Todavía no se cumplen los requisitos para aprobar. Seguí conversando y actualizá el estado.' : 'No pudimos completar la acción. Actualizá el estado antes de volver a intentar.',
+      this.install({ blocked: true, reactionFeedback: method === 'PUT' ? 'error' : null, error: outgoing && ambiguous ? 'Envío sin confirmar. Actualizá antes de reintentar; conservamos el mismo mensaje.' : code === 'CHAT_APPROVAL_TOO_EARLY' || code.includes('PARTICIPATION') || code.includes('APPROVAL') ? 'Todavía no se cumplen los requisitos para aprobar. Seguí conversando y actualizá el estado.' : 'No pudimos completar la acción. Actualizá el estado antes de volver a intentar.',
         ...(outgoing && this.state.outgoing ? { outgoing: { ...outgoing, phase: ambiguous ? 'uncertain' : 'failed' } } : {}) });
       try { await this.load(signal, serial, !!outgoing); } catch { /* Error remains visible; no mutation is replayed automatically. */ }
-    } finally { if (this.current(serial)) { this.writing = false; this.install({ busy: false }); } }
+    } finally { if (this.current(serial)) { this.writing = false; this.install({ busy: false, reactionFeedback: this.state.reactionFeedback === 'pending' ? null : this.state.reactionFeedback }); } }
   }
   private get rules() { return policy(this.state.chat, this.state.exits, Date.now() + this.state.offset); }
   send(content: string, replyTo: Reply | null, file: Blob | null = null) {

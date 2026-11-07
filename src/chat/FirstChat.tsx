@@ -79,11 +79,10 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
     if (nearBottom.current && list) { list.scrollTop = list.scrollHeight; setUnseen(false); } else setUnseen(true);
   }, [state.messages.length]);
   useEffect(() => { const warn = (e: BeforeUnloadEvent) => { if (dirty.current) { e.preventDefault(); } }; window.addEventListener('beforeunload',warn); return () => window.removeEventListener('beforeunload',warn); }, [draft,state.outgoing]);
-  const reactionLayout = state.messages.map(m => `${m.id}:${m.reactionType ?? ''}`).join('|');
   useLayoutEffect(() => {
     const list = timeline.current;
     if (nearBottom.current && list) list.scrollTop = list.scrollHeight;
-  }, [reactionLayout, reply?.targetId]);
+  }, [reply?.targetId]);
   const chat = state.chat, p = policy(chat,state.exits,now+state.offset), me = session.me, eligible = reactable(state.messages,me), g = chat?.guidance;
   const disabled = state.busy || state.blocked, ordinary = p.ordinary && !disabled && !state.outgoing;
   const deadline = chat ? Math.min(Date.parse(chat.timeoutAt), !p.decisionOnly && chat.inactivityExpiresAt ? Date.parse(chat.inactivityExpiresAt) : Infinity) : Infinity;
@@ -109,7 +108,7 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       { label: 'Bloquear', disabled: disabled || !p.safety, run: () => setDialog('block') },
     ]}/></header>
     <button className="chat-approve" disabled={disabled || audioDirty || !p.decide} onClick={() => setDialog('approve')}>Aprobar chat</button>
-    {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && <p className="chat-status" role="status">Actualizando…</p>}{state.error && <p role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
+    {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && state.reactionFeedback === null && <p className="chat-status" role="status">Actualizando…</p>}{state.error && <p className={state.reactionFeedback === 'error' ? 'chat-reaction-error' : undefined} role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
     {chat && remaining <= 60 && <p role="status">{remaining ? `El plazo del chat termina en ${remaining} s.` : 'El plazo local terminó. Consultando el estado del servidor…'}</p>}
     {p.decisionOnly && <aside className="chat-panel">{chat?.myDecision === 'PENDING' ? 'La otra persona aprobó. La conversación está pausada mientras decidís.' : 'Guardamos tu aprobación. Esperando la otra decisión.'}</aside>}
     {g && !p.decisionOnly && <ReplySwipe key={g.question.instanceId ?? g.question.text} enabled={ordinary && !audioDirty && !!g.question.instanceId} label="Responder pregunta" onReply={() => g.question.instanceId && beginReply({ type: 'GUIDANCE_QUESTION', targetId: g.question.instanceId }, g.question.text)}><aside className="chat-panel chat-guidance" aria-label="Conversación guiada"><p>Pregunta {g.questionOrdinal} de {g.maxQuestions}</p><p>{g.question.text}</p><p>{g.canRequestNext ? 'Ya podés pedir continuar.' : 'Sigan participando. Responder directamente a la pregunta ayuda a avanzar.'}</p>
