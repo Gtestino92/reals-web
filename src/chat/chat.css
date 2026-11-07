@@ -51,6 +51,24 @@
 .chat-composer > aside, .chat-composer > p { grid-column:1 / -1; overflow-wrap:anywhere; }
 .chat-audio-composer { font-size:.75rem; padding-bottom:env(safe-area-inset-bottom); }
 .chat-audio-composer p, .chat-status { margin:0; }
+.reply-swipe { position:relative; min-width:0; transition:transform 180ms ease-out; }
+.reply-swipe-enabled { touch-action:pan-y pinch-zoom; }
+.reply-swipe-enabled:active { cursor:grab; }
+.first-chat .reply-keyboard-action { position:absolute; width:1px; height:1px; min-height:0; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.first-chat .reply-keyboard-action:focus-visible { clip-path:none; width:auto; height:auto; min-height:36px; padding:6px 10px; right:4px; top:4px; z-index:2; }
+.chat-message-row { position:relative; display:flex; align-items:flex-end; min-width:0; min-height:48px; flex-shrink:0; }
+.chat-message-row.incoming > .reply-swipe { max-width:min(560px, calc(100% - 48px)); }
+.chat-message-row.outgoing { justify-content:flex-end; padding-bottom:12px; }
+.chat-message-row.outgoing > .reply-swipe { max-width:min(560px, 85%); }
+.chat-message-row .chat-message { max-width:100%; box-sizing:border-box; padding:6px 10px; }
+.chat-message-row .chat-message p { margin:2px 0; }
+.chat-message-row time { display:block; text-align:right; }
+.chat-reaction-lane { flex:0 0 48px; width:48px; min-height:48px; display:flex; align-items:center; justify-content:center; }
+.first-chat .chat-heart { width:48px; height:48px; padding:0; border:0; background:transparent; font-size:24px; }
+.chat-given-heart { width:48px; height:48px; display:grid; place-items:center; color:var(--color-primary); font-size:24px; animation:chat-heart-arrive 150ms ease-out; }
+.chat-received-heart { position:absolute; bottom:0; right:16px; width:24px; height:24px; display:grid; place-items:center; color:var(--color-primary); font-size:20px; }
+@keyframes chat-heart-arrive { from { transform:scale(.86); } to { transform:scale(1); } }
+@media (prefers-reduced-motion:reduce) { .reply-swipe { transition:none; } .chat-given-heart { animation:none; } }
 @media (min-width:1024px) {
   .first-chat { padding:20px 32px; }
   .chat-guidance { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; align-items:center; gap:4px 12px; }
