@@ -18,6 +18,8 @@ export function App({ firebase = setup(), api }: { firebase?: FirebaseSetup; api
 }
 function SessionApp({ controller }: { controller: SessionController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const [chatActive, setChatActive] = useState(false);
+  const chatShell = chatActive && state.phase === 'ready' && state.profile?.status === 'ACTIVE';
   if (state.phase === 'login' || state.phase === 'authenticating') return <LoginScreen
     loading={state.operation === 'signIn' || state.operation === 'signUp'}
     googleLoading={state.operation === 'google'} passwordResetLoading={state.operation === 'reset'}
@@ -26,18 +28,18 @@ function SessionApp({ controller }: { controller: SessionController }) {
     onSignIn={(email, password, keepSignedIn) => controller.authenticate('signIn', email, password, keepSignedIn)}
     onSignUp={(email, password, keepSignedIn) => controller.authenticate('signUp', email, password, keepSignedIn)}
     onGoogleSignIn={() => controller.authenticate('google')} onPasswordReset={controller.reset} />;
-  return <main className="login-page"><section className="login-panel" aria-labelledby="session-heading">
-    <header className="login-header"><div className="login-brand">
+  return <main className={chatShell ? "chat-page" : "login-page"}><section className={chatShell ? "chat-shell" : "login-panel"} aria-label={chatShell ? "Conversación activa" : undefined} aria-labelledby={chatShell ? undefined : "session-heading"}>
+    {!chatShell && <header className="login-header"><div className="login-brand">
       <img className="login-seal" src={seal} alt="" width="54" height="54" />
       <h1 id="session-heading">Reals</h1>
       <div className="brand-divider" aria-hidden="true"><span /></div>
-    </div></header>
+    </div></header>}
     {(state.phase === 'checking' || state.phase === 'loading') && <SessionLoading />}
     {state.phase === 'signingOut' && <p role="status">Cerrando sesión…</p>}
-    {state.phase === 'ready' && (state.profile?.status === 'ACTIVE' ? <Home key={`${state.account?.id}-${state.profile.id}`} controller={controller} onCompleteProfile={() => controller.retry()} /> : <Onboarding key={state.account?.id} controller={controller} />)}
+    {state.phase === 'ready' && (state.profile?.status === 'ACTIVE' ? <Home key={`${state.account?.id}-${state.profile.id}`} controller={controller} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding key={state.account?.id} controller={controller} />)}
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
-    {state.phase !== 'checking' && <div className="session-actions"><button className="login-button login-outlined" disabled={state.phase === 'signingOut'} onClick={controller.signOut}>Cerrar sesión</button></div>}
+    {!chatShell && state.phase !== 'checking' && <div className="session-actions"><button className="login-button login-outlined" disabled={state.phase === 'signingOut'} onClick={controller.signOut}>Cerrar sesión</button></div>}
   </section></main>;
 }

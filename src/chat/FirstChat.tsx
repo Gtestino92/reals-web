@@ -22,6 +22,32 @@ function ConfirmDialog({ kind, busy, close, confirm }: { kind: string; busy: boo
     <button disabled={busy} onClick={close}>Volver</button><button disabled={busy || (safety && !plainText(details.trim()))} onClick={() => confirm(safety ? { reason, details: details.trim(), blockUser: block } : undefined)}>Confirmar</button>
   </dialog>;
 }
+function ChatMenu({ actions }: { actions: { label: string; disabled: boolean; run: () => void }[] }) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null);
+  const close = () => { setOpen(false); trigger.current?.focus(); };
+  useEffect(() => {
+    if (!open) return;
+    menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !menu.current?.contains(event.target) && !trigger.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open]);
+  return <div className="chat-overflow"><button ref={trigger} aria-label="Opciones del chat" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); } }}>⋮</button>
+    {open && <div ref={menu} role="menu" aria-label="Decisiones y seguridad" className="chat-menu" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }} onKeyDown={event => {
+      const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+      const index = items.findIndex(item => item === document.activeElement);
+      if (event.key === 'Escape') { event.preventDefault(); close(); }
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault();
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items[next]?.focus();
+      }
+    }}>{actions.map(action => <button role="menuitem" key={action.label} disabled={action.disabled} onClick={() => { close(); action.run(); }}>{action.label}</button>)}</div>}
+  </div>;
+}
 export function FirstChat({ controller, matchId, chatId, onHome }: { controller: SessionController; matchId: string; chatId: string; onHome: (message?: string, closed?: boolean) => void }) {
   const dirty = useRef(false), knownClosed = useRef(false), terminalMessage = useRef('');
   const [terminalNotice,setTerminalNotice] = useState(''), [audioDirty,setAudioDirty] = useState(false);
@@ -54,14 +80,29 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
   const remaining = Math.max(0,Math.ceil((deadline-now-state.offset)/1000));
   const beginReply = (target: Reply, preview: string) => { setReply({ ...target,preview }); text.current?.focus(); };
   dirty.current = !!draft || !!state.outgoing || audioDirty;
-  const home = () => { if (!dirty.current || window.confirm('Hay un borrador o envío pendiente. ¿Querés salir y descartarlo?')) onHome(terminalMessage.current,knownClosed.current); else window.history.pushState(null, ''); };
-  useEffect(() => { window.addEventListener('popstate',home); return () => window.removeEventListener('popstate',home); });
+  const home = () => { if (!dirty.current || window.confirm('Hay un borrador o envío pendiente. ¿Querés salir y descartarlo?')) onHome(terminalMessage.current,knownClosed.current); };
+  useEffect(() => {
+    // Back changes browser history, never the authoritative conversation lifecycle.
+    // Do not push replacement entries: a second Back can leave this document normally.
+    const back = () => { if (knownClosed.current) home(); };
+    window.addEventListener('popstate',back);
+    return () => window.removeEventListener('popstate',back);
+  });
   return <section className="first-chat" aria-label="Primer chat">
-    <header className="chat-heading"><div><h2 ref={heading} tabIndex={-1}>{chat?.partner.displayName ?? 'Cargando conversación…'}</h2><p>Primer chat · Sin fotos</p></div><button onClick={home}>Volver a Inicio</button><button disabled={state.busy} onClick={() => void session.refresh()}>Actualizar</button></header>
-    {terminalNotice && <p role="status">{terminalNotice}</p>}{state.busy && <p role="status">Actualizando…</p>}{state.error && <p role="alert">{state.error}</p>}
+    <header className="chat-heading"><div><p className="chat-phase">PRIMER CHAT</p><h2 ref={heading} tabIndex={-1}>{chat?.partner.displayName ?? 'Cargando conversación…'}</h2></div><ChatMenu actions={[
+      { label: 'Rechazar chat', disabled: disabled || audioDirty || !p.decide, run: () => setDialog('reject') },
+      ...(!p.decisionOnly ? [
+        { label: 'Salida consensuada', disabled: !ordinary, run: () => setDialog('mutual') },
+        { label: 'Salir unilateralmente', disabled: disabled || !p.safety, run: () => setDialog('cancel') },
+      ] : []),
+      { label: 'Reportar por seguridad', disabled: disabled || !p.safety, run: () => setDialog('safety') },
+      { label: 'Bloquear', disabled: disabled || !p.safety, run: () => setDialog('block') },
+    ]}/></header>
+    <button className="chat-approve" disabled={disabled || audioDirty || !p.decide} onClick={() => setDialog('approve')}>Aprobar chat</button>
+    {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && <p className="chat-status" role="status">Actualizando…</p>}{state.error && <p role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
     {chat && remaining <= 60 && <p role="status">{remaining ? `El plazo del chat termina en ${remaining} s.` : 'El plazo local terminó. Consultando el estado del servidor…'}</p>}
     {p.decisionOnly && <aside className="chat-panel">{chat?.myDecision === 'PENDING' ? 'La otra persona aprobó. La conversación está pausada mientras decidís.' : 'Guardamos tu aprobación. Esperando la otra decisión.'}</aside>}
-    {g && <aside className="chat-panel" aria-label="Conversación guiada"><p>Pregunta {g.questionOrdinal} de {g.maxQuestions}</p><p>{g.question.text}</p><p>{g.canRequestNext ? 'Ya podés pedir continuar.' : 'Sigan participando. Responder directamente a la pregunta ayuda a avanzar.'}</p>
+    {g && <aside className="chat-panel chat-guidance" aria-label="Conversación guiada"><p>Pregunta {g.questionOrdinal} de {g.maxQuestions}</p><p>{g.question.text}</p><p>{g.canRequestNext ? 'Ya podés pedir continuar.' : 'Sigan participando. Responder directamente a la pregunta ayuda a avanzar.'}</p>
       <button disabled={!ordinary || !g.question.instanceId} onClick={() => g.question.instanceId && beginReply({ type: 'GUIDANCE_QUESTION',targetId: g.question.instanceId },g.question.text)}>Responder pregunta</button>
       {g.completed ? <p>Etapa guiada completada.</p> : g.myNextRequested ? <p>Esperando a la otra persona para continuar.</p> : <button disabled={!ordinary || !g.canRequestNext || (g.progressionAction !== null && !['NEXT_QUESTION','COMPLETE'].includes(g.progressionAction))} onClick={() => void session.action('guidance')}>{g.progressionAction === 'COMPLETE' ? 'Completar etapa' : 'Otra pregunta'}</button>}
     </aside>}
@@ -86,11 +127,6 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       {!!draft && !plainText(draft) && <p>Usá texto sin &lt;, &gt; ni caracteres de control. Máximo 1000 caracteres.</p>}
     </form>
     <AudioComposer key={state.messages.filter(m => m.senderId === me && m.messageType === 'AUDIO').length} payloadLocked={!!state.outgoing} onDirtyChange={setAudioDirty} policy={chat?.audioPolicy ?? null} disabled={!ordinary || !!draft} onSend={file => void session.send('',reply ? { type:reply.type,targetId:reply.targetId } : null,file)} />
-    <nav aria-label="Decisiones y seguridad" className="chat-actions">
-      <button disabled={disabled || audioDirty || !p.decide} onClick={() => setDialog('approve')}>Aprobar chat</button><button disabled={disabled || audioDirty || !p.decide} onClick={() => setDialog('reject')}>Rechazar chat</button>
-      <button disabled={!ordinary} onClick={() => setDialog('mutual')}>Salida consensuada</button><button disabled={disabled || !p.safety || p.decisionOnly} onClick={() => setDialog('cancel')}>Salir unilateralmente</button>
-      <button disabled={disabled || !p.safety} onClick={() => setDialog('safety')}>Reportar por seguridad</button><button disabled={disabled || !p.safety} onClick={() => setDialog('block')}>Bloquear</button>
-    </nav>
     {dialog && <ConfirmDialog kind={dialog} busy={state.busy} close={() => setDialog(null)} confirm={body => { void (async () => { await session.action(dialog,body); if (!session.getSnapshot().error) setDialog(null); })(); }}/> }
   </section>;
 }

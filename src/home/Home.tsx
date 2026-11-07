@@ -45,8 +45,9 @@ const managementEntries = [
   ['account', 'Cuenta', 'Notificaciones, seguridad y sesión'],
 ] as const;
 
-export function Home({ controller, onCompleteProfile }: { controller: SessionController; onCompleteProfile?: () => void }) {
+export function Home({ controller, onCompleteProfile, onChatActiveChange }: { onChatActiveChange?: (active: boolean) => void; controller: SessionController; onCompleteProfile?: () => void }) {
   const [chat, setChat] = useState<Activity | null>(null), [notice, setNotice] = useState('');
+  useEffect(() => { onChatActiveChange?.(!!chat); return () => onChatActiveChange?.(false); }, [chat, onChatActiveChange]);
   const suppressed = useRef(new Set<string>());
   const hidden = useRef(new Set<string>());
   // A terminal match cannot become active again. Keep this session-only guard

@@ -368,12 +368,14 @@ function installFirstChatBackend() {
     return original(url,options);
   });
 }
-it('restores pending First Chat after authenticated bootstrap and permits manual Home without loops',async()=>{
+it('keeps active chat on Back and hides session chrome',async()=>{
   installFirstChatBackend();home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();
-  await screen.findByRole('heading',{name:'María'});expect(screen.queryByRole('heading',{name:'Inicio'})).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'Volver a Inicio'}));await ready();
-  fireEvent.click(screen.getByRole('button',{name:'Actualizar'}));await ready();expect(screen.queryByRole('heading',{name:'María'})).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));fireEvent.click(screen.getByRole('button',{name:'Abrir primer chat'}));await screen.findByRole('heading',{name:'María'});
+  await screen.findByRole('region',{name:'Primer chat'});
+  expect(screen.queryByRole('heading',{name:'Reals'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'Cerrar sesión'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'Volver a Inicio'})).toBeNull();
+  act(()=>window.dispatchEvent(new PopStateEvent('popstate')));
+  expect(screen.getByRole('region',{name:'Primer chat'})).toBeVisible();
 });
 it('sign-out removes pending chat and aborts its resources',async()=>{
   installFirstChatBackend();home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByRole('heading',{name:'María'});
@@ -407,8 +409,7 @@ it.each(['network','http'])('transient %s failure preserves a valid First Chat a
   fetcher.mockImplementation((url,options)=>url==='/api/matches/m/chat'?(failure==='network'?Promise.reject(new TypeError()):Promise.resolve(json({code:'SERVICE_UNAVAILABLE'},503))):original(url,options));
   home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByRole('alert');
   expect(screen.getByRole('region',{name:'Primer chat'})).toBeVisible();
-  fireEvent.click(screen.getByRole('button',{name:'Volver a Inicio'}));await ready();
-  fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));expect(screen.getByRole('button',{name:'Abrir primer chat'})).toBeEnabled();
+  act(()=>window.dispatchEvent(new PopStateEvent('popstate')));expect(screen.getByRole('region',{name:'Primer chat'})).toBeVisible();
 });
 it('terminal suppression is not inherited by a new authenticated identity',async()=>{
   installFirstChatBackend();const original=fetcher.getMockImplementation()!;let closed=true;
@@ -416,11 +417,11 @@ it('terminal suppression is not inherited by a new authenticated identity',async
   home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByText('El chat se cerró por inactividad.');await ready();
   closed=false;act(()=>observer({...user,uid:'new-account'}));await screen.findByRole('heading',{name:'María'});
 });
-it('a manually opened chat that reports terminal cannot be reopened from stale Activity',async()=>{
+it('an active chat reconciles terminal state and suppresses stale Activity',async()=>{
   installFirstChatBackend();const original=fetcher.getMockImplementation()!;let closed=false;
   fetcher.mockImplementation((url,options)=>closed&&url==='/api/matches/m/chat'?Promise.resolve(json({code:'CHAT_ABANDONED'},409)):original(url,options));
-  home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'},{type:'VISUAL_REVIEW',matchId:'other',chatId:null}];mount();await screen.findByRole('heading',{name:'María'});
-  fireEvent.click(screen.getByRole('button',{name:'Volver a Inicio'}));await ready();fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));
-  closed=true;fireEvent.click(screen.getByRole('button',{name:'Abrir primer chat'}));await screen.findByText('El chat se cerró por inactividad.');await ready();
-  fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));expect(screen.queryByRole('button',{name:'Abrir primer chat'})).toBeNull();
+  home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByRole('region',{name:'Primer chat'});
+  closed=true;act(()=>window.dispatchEvent(new Event('online')));await screen.findByText('El chat se cerró por inactividad.');await ready();
+  expect(screen.getByRole('button',{name:'Cerrar sesión'})).toBeVisible();
+  expect(screen.queryByRole('region',{name:'Primer chat'})).toBeNull();
 });
