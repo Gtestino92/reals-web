@@ -16,13 +16,13 @@ export class ChatSession {
   private terminal = false;
   private terminalNotice: string | null = null;
   private timedOutRequests = new Set<string>();
-  constructor(private controller: SessionController, readonly matchId: string, readonly chatId: string, readonly me: string, private onTerminal: (message: string) => void) {}
+  constructor(private controller: SessionController, readonly matchId: string, readonly chatId: string, readonly me: string, private onTerminal: (message: string, closed: boolean) => void) {}
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
   private install(patch: Partial<State>) { if (!this.lifetime.signal.aborted) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); } }
   start() { if (this.lifetime.signal.aborted) { this.lifetime = new AbortController(); this.read = null; this.writing = false; this.serial++; } }
   dispose() { this.lifetime.abort(); this.read?.abort(); }
-  private finish(message: string) { this.terminal = true; this.install({ blocked: true, busy: false }); this.onTerminal(this.terminalNotice ?? message); }
+  private finish(message: string, closed = true) { this.terminal = true; this.install({ blocked: true, busy: false }); this.onTerminal(this.terminalNotice ?? message, closed); }
   private terminalError(error: unknown) {
     if (error instanceof ApiError && ['CHAT_EXPIRED','CHAT_ABANDONED'].includes(error.code)) {
       this.finish(error.code === 'CHAT_ABANDONED' ? 'El chat se cerró por inactividad.' : 'El chat venció.'); return true;
@@ -50,11 +50,13 @@ export class ChatSession {
     const match = await this.request(`/matches/${this.matchId}`, signal);
     if (!object(match) || match.id !== this.matchId || (match.userAId !== this.me && match.userBId !== this.me)) throw new ApiError('invalid');
     this.partner = str(match.userAId === this.me ? match.userBId : match.userAId);
+    if (match.state !== 'CHAT_ACTIVE' && !['VISUAL_PHASE','VISUAL_APPROVED','CHAT_REJECTED','VISUAL_REJECTED','EXPIRED'].includes(str(match.state))) throw new ApiError('invalid');
     if (match.state !== 'CHAT_ACTIVE') { if (this.current(serial)) this.finish(match.state === 'VISUAL_PHASE' ? 'Ambas personas aprobaron. Revisá tu Actividad.' : 'El chat terminó. Actualizamos Inicio.'); return; }
     const started = Date.now();
     const raw = await this.request(`/matches/${this.matchId}/chat`, signal);
     const received = Date.now();
     const chat = parseChat(raw, this.matchId, this.chatId, this.partner);
+    if (chat.status !== 'ACTIVE' && !['CANCELLED','EXPIRED','ABANDONED','CLOSED','FINISHED'].includes(chat.status)) throw new ApiError('invalid');
     if (chat.status !== 'ACTIVE') { if (this.current(serial)) this.finish(chat.status === 'ABANDONED' ? 'El chat se cerró por inactividad.' : 'El chat terminó. Actualizamos Inicio.'); return; }
     const cursor = full ? undefined : this.reconcileReactions ? reactionCursor(this.state.messages) : this.state.messages.at(-1)?.id;
     this.reconcileReactions = !this.reconcileReactions;
@@ -67,7 +69,7 @@ export class ChatSession {
     const confirmed = outgoing && merged.some(m => m.clientMessageId === outgoing.clientMessageId && m.senderId === this.me);
     this.install({ chat, messages: merged, exits, offset: Date.parse(chat.serverTime) - (started + received) / 2, blocked: false,
       ...(confirmed ? { outgoing: null, confirmed: outgoing.content, confirmationVersion: this.state.confirmationVersion + 1 } : {}), historyLimited: this.state.historyLimited || (!cursor && messages.length >= 500) });
-    if (chat.myDecision !== 'PENDING') this.finish('Guardamos tu decisión. Revisá tu Actividad.');
+    if (chat.myDecision !== 'PENDING') this.finish('Guardamos tu decisión. Revisá tu Actividad.', false);
   }
   private current(serial: number) { return !this.lifetime.signal.aborted && serial === this.serial; }
   refresh = async (full = false, silent = false) => {

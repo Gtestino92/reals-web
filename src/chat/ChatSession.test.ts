@@ -72,3 +72,5 @@ it('does not request timeout before the advisory delay',async()=>{
   exits=[{id:'exit',requesterUserId:'them',responderUserId:'me',type:'MUTUAL_CANCEL',status:'PENDING',createdAt:new Date().toISOString()}];await session.refresh();await session.checkExitTimeout();expect(writes()).toHaveLength(0);
 });
 it.each([{}, {reason:'HARASSMENT',details:'<b>x</b>',blockUser:false}, {reason:'OTHER',details:'',blockUser:true}])('rejects malformed safety details without a write',async body=>{await session.refresh();await session.action('safety',body);expect(writes()).toHaveLength(0);});
+it('does not classify a malformed match state as conclusive termination',async()=>{request.mockResolvedValue({id:'m',userAId:'me',userBId:'them'});await session.refresh();expect(home).not.toHaveBeenCalled();expect(session.getSnapshot().blocked).toBe(true);});
+it('does not hide unsupported future chat states as known-closed',async()=>{chat.status='FUTURE';await session.refresh();expect(home).not.toHaveBeenCalled();expect(session.getSnapshot().blocked).toBe(true);});

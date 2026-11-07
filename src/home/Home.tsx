@@ -6,6 +6,7 @@ import { useHome } from './useHome';
 import { activityPresentation } from './presentation';
 import { SearchingScreen } from './SearchingScreen';
 import { FirstChat } from '../chat/FirstChat';
+import { reconcileHiddenFirstChats, visibleHome } from './hiddenFirstChats';
 import './home.css';
 
 const labels: Record<string, string> = {
@@ -47,11 +48,19 @@ const managementEntries = [
 export function Home({ controller, onCompleteProfile }: { controller: SessionController; onCompleteProfile?: () => void }) {
   const [chat, setChat] = useState<Activity | null>(null), [notice, setNotice] = useState('');
   const suppressed = useRef(new Set<string>());
+  const hidden = useRef(new Set<string>());
+  // A terminal match cannot become active again. Keep this session-only guard
+  // even after a clean Home retires its currently-stale suppression entry.
+  const knownClosed = useRef(new Set<string>());
   const openChat = (item: Activity, automatic = false) => {
-    if (!item.chatId || (automatic && suppressed.current.has(item.chatId))) return;
+    if (!item.chatId || knownClosed.current.has(item.matchId) || (automatic && suppressed.current.has(item.chatId))) return;
     window.history.pushState(null, ''); setNotice(''); setChat(item);
   };
-  const closeChat = (message = '') => { if (chat?.chatId) suppressed.current.add(chat.chatId); setChat(null); setNotice(message); };
+  const closeChat = (message = '', closed = false) => {
+    if (chat?.chatId) suppressed.current.add(chat.chatId);
+    if (closed && chat) { hidden.current.add(chat.matchId); knownClosed.current.add(chat.matchId); }
+    setChat(null); setNotice(message);
+  };
   const [surface, setSurface] = useState<ManagementSurface | null>(null);
   const locked = useRef(false), root = useRef<HTMLDivElement>(null);
   const open = (next: ManagementSurface) => {
@@ -74,7 +83,7 @@ export function Home({ controller, onCompleteProfile }: { controller: SessionCon
     if (heading) { heading.tabIndex = -1; heading.focus(); }
   }, [surface]);
   if (chat?.chatId) return <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>;
-  if (!surface) return <>{notice && <p role="status">{notice}</p>}<HomeOverview controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current}/></>;
+  if (!surface) return <>{notice && <p role="status">{notice}</p>}<HomeOverview controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current}/></>;
   return <div className="home" ref={root}>
     <header className="home-heading"><h2>{managementEntries.find(entry => entry[0] === surface)?.[1]}</h2></header>
     {surface === 'profile' || surface === 'preferences' ? <Onboarding controller={controller} management={surface === 'profile' ? 'details' : 'filters'} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; }} /> : <>
@@ -89,11 +98,12 @@ export function Home({ controller, onCompleteProfile }: { controller: SessionCon
   </div>;
 }
 
-function HomeOverview({ controller, onCompleteProfile, onManage, onOpenChat, suppressed }: { controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string> }) {
+function HomeOverview({ controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed }: { controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
   const { model, busy, blocked, error, refresh, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller);
   const [surface, setSurface] = useState<'overview' | 'activity'>('overview');
   const root = useRef<HTMLDivElement>(null);
-  const home = model?.home, m = home?.matchmaking;
+  const home = model ? visibleHome(model.home, knownClosed) : undefined, m = home?.matchmaking;
+  useEffect(() => { if (model && !busy && !blocked) reconcileHiddenFirstChats(model.home, hidden, knownClosed); }, [model, busy, blocked, hidden, knownClosed]);
   useEffect(() => {
     const item = home?.pendingActions.find(i => i.type === 'FIRST_CHAT' && i.chatId && !suppressed.has(i.chatId));
     if (item && !busy && !blocked) onOpenChat(item, true);

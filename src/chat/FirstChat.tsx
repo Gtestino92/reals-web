@@ -22,10 +22,10 @@ function ConfirmDialog({ kind, busy, close, confirm }: { kind: string; busy: boo
     <button disabled={busy} onClick={close}>Volver</button><button disabled={busy || (safety && !plainText(details.trim()))} onClick={() => confirm(safety ? { reason, details: details.trim(), blockUser: block } : undefined)}>Confirmar</button>
   </dialog>;
 }
-export function FirstChat({ controller, matchId, chatId, onHome }: { controller: SessionController; matchId: string; chatId: string; onHome: (message?: string) => void }) {
-  const dirty = useRef(false);
+export function FirstChat({ controller, matchId, chatId, onHome }: { controller: SessionController; matchId: string; chatId: string; onHome: (message?: string, closed?: boolean) => void }) {
+  const dirty = useRef(false), knownClosed = useRef(false), terminalMessage = useRef('');
   const [terminalNotice,setTerminalNotice] = useState(''), [audioDirty,setAudioDirty] = useState(false);
-  const [session] = useState(() => new ChatSession(controller,matchId,chatId,controller.snapshot.account?.id ?? '',message => { if (dirty.current) setTerminalNotice(message + ' Conservamos tu borrador hasta que vuelvas a Inicio.'); else onHome(message); }));
+  const [session] = useState(() => new ChatSession(controller,matchId,chatId,controller.snapshot.account?.id ?? '',(message, closed) => { knownClosed.current = closed; terminalMessage.current = message; if (dirty.current) setTerminalNotice(message + ' Conservamos tu borrador hasta que vuelvas a Inicio.'); else onHome(message,closed); }));
   const state = useSyncExternalStore(session.subscribe,session.getSnapshot);
   const [draft,setDraft] = useState(''), [reply,setReply] = useState<(Reply & { preview: string }) | null>(null), [dialog,setDialog] = useState<Parameters<ChatSession['action']>[0] | null>(null), [now,setNow] = useState(Date.now()), [unseen,setUnseen] = useState(false);
   const timeline = useRef<HTMLOListElement>(null), nearBottom = useRef(true), text = useRef<HTMLTextAreaElement>(null), heading = useRef<HTMLHeadingElement>(null);
@@ -54,7 +54,7 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
   const remaining = Math.max(0,Math.ceil((deadline-now-state.offset)/1000));
   const beginReply = (target: Reply, preview: string) => { setReply({ ...target,preview }); text.current?.focus(); };
   dirty.current = !!draft || !!state.outgoing || audioDirty;
-  const home = () => { if (!dirty.current || window.confirm('Hay un borrador o envío pendiente. ¿Querés salir y descartarlo?')) onHome(); else window.history.pushState(null, ''); };
+  const home = () => { if (!dirty.current || window.confirm('Hay un borrador o envío pendiente. ¿Querés salir y descartarlo?')) onHome(terminalMessage.current,knownClosed.current); else window.history.pushState(null, ''); };
   useEffect(() => { window.addEventListener('popstate',home); return () => window.removeEventListener('popstate',home); });
   return <section className="first-chat" aria-label="Primer chat">
     <header className="chat-heading"><div><h2 ref={heading} tabIndex={-1}>{chat?.partner.displayName ?? 'Cargando conversación…'}</h2><p>Primer chat · Sin fotos</p></div><button onClick={home}>Volver a Inicio</button><button disabled={state.busy} onClick={() => void session.refresh()}>Actualizar</button></header>
