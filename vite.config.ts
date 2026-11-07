@@ -1,9 +1,10 @@
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { androidTunnelPlugin } from './tools/android-tunnel-monitor.ts';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), androidTunnelPlugin()],
   server: {
     host: '127.0.0.1',
     port: 5173,

@@ -45,11 +45,11 @@ it('ACTIVE reaches accessible empty Home without asking for location', async () 
   expect(screen.queryByRole('button', { name: 'Ver Actividad' })).toBeNull(); expect(document.body.textContent).not.toMatch(/0 conversaciones|No tenés primeros|Cuando haya próximos/);
 });
 it('renders all known summaries, notices and unknown types as text without navigation', async () => {
-  home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c', partner: { displayName: '<img src=x>' } }, { type: 'VISUAL_REVIEW', matchId: 'v', chatId: null }];
+  home.pendingActions = [{ type: 'VISUAL_REVIEW', matchId: 'm', chatId: null, partner: { displayName: '<img src=x>' } }, { type: 'VISUAL_REVIEW', matchId: 'v', chatId: null }];
   home.nextSteps = ['SCHEDULING','SECOND_CHAT_SCHEDULED','SECOND_CHAT_AVAILABLE','SECOND_CHAT_EXPIRED','SECOND_CHAT_READ_ONLY','FUTURE'].map(type => ({ type, connectionId: type, matchId: 'm', requiresAction: true }));
   home.passiveNotices = [{ type: 'SCHEDULING_PREPARING' }, { type: 'UNKNOWN' }];
   mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Ver Actividad' })); expect(screen.getByText('Con <img src=x>')).toBeVisible(); expect(screen.getByText('Actividad pendiente')).toBeVisible();
-  expect(screen.getByText(/Estos resúmenes son de solo lectura/)).toBeVisible(); expect(screen.queryByRole('link')).toBeNull(); expect(document.body.textContent).not.toContain('SECOND_CHAT_');
+  expect(screen.getByText(/Podés continuar tu primer chat/)).toBeVisible(); expect(screen.queryByRole('link')).toBeNull(); expect(document.body.textContent).not.toContain('SECOND_CHAT_');
 });
 it('blocks ineligible search and offers cancellation while queued', async () => {
   home.matchmaking = { canSearch: false, inQueue: true, blockedReason: null };
@@ -118,7 +118,7 @@ it.each(['signout','observer'])('clears Home and ignores late requests on %s', a
   expect(screen.queryByText('Hola, Lucía')).toBeNull(); expect(writes()).toHaveLength(0);
 });
 it('preserves summaries when authoritative profile changes to DRAFT', async () => {
-  mount(); await ready(); profile.status = 'DRAFT'; home.profileStatus = 'DRAFT'; home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }];
+  mount(); await ready(); profile.status = 'DRAFT'; home.profileStatus = 'DRAFT'; home.pendingActions = [{ type: 'VISUAL_REVIEW', matchId: 'm', chatId: null }];
   fireEvent.click(screen.getByRole('button', { name: 'Actualizar' })); await screen.findByText('Tu perfil está en borrador'); expect(await screen.findByRole('button', { name: 'Ver Actividad' })).toBeVisible(); expect(search()).toBeDisabled();
 });
 it.each(['version','due'])('refreshes full Home for a status %s change', async mode => {
@@ -339,11 +339,11 @@ it('leaves waiting for authoritative new activity using the same poller', async 
   expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); fetcher.mockClear();
   home.matchmaking.inQueue = false; home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }]; status.version++;
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-  expect(screen.getByRole('heading', { name: 'Inicio' })).toBeVisible(); expect(screen.getByRole('region', { name: 'Prioridad ahora' })).toHaveTextContent('Primer chat');
+  expect(screen.getByRole('region', { name: 'Primer chat' })).toBeVisible();
   expect(fetcher.mock.calls.filter(([url]) => url === '/api/me/home')).toHaveLength(1);
-  fetcher.mockClear(); fireEvent.click(screen.getByRole('button', { name: 'Ver Actividad' }));
+  fetcher.mockClear();
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-  expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['/api/me/home/status']);
+  expect(fetcher.mock.calls.some(([url]) => String(url).startsWith('/api/me/home'))).toBe(false);
   view.unmount(); fetcher.mockClear(); await act(async () => { await vi.advanceTimersByTimeAsync(10000); }); expect(fetcher).not.toHaveBeenCalled();
 });
 it('resets Activity and aborts pending location when authenticated account changes', async () => {
@@ -355,4 +355,31 @@ it('resets Activity and aborts pending location when authenticated account chang
   let done: PositionCallback | undefined; geo.mockImplementation(ok => { done = ok; }); fireEvent.click(search());
   act(() => observer(null)); await screen.findByRole('button', { name: 'Ingresar' });
   await act(async () => done?.(position())); expect(writes()).toHaveLength(0);
+});
+
+function installFirstChatBackend() {
+  const original = fetcher.getMockImplementation()!;
+  const chat = { id:'c',matchId:'m',chatType:'FIRST_CHAT',status:'ACTIVE',partner:{userId:'them',displayName:'María'},myDecision:'PENDING',partnerDecision:'PENDING',timeoutAt:new Date(Date.now()+600000).toISOString(),inactivityExpiresAt:new Date(Date.now()+300000).toISOString(),serverTime:new Date().toISOString(),guidance:null,audioPolicy:null };
+  fetcher.mockImplementation(async(url,options)=>{
+    if(url==='/api/matches/m')return json({id:'m',userAId:'u',userBId:'them',state:'CHAT_ACTIVE'});
+    if(url==='/api/matches/m/chat')return json(chat);
+    if(String(url).startsWith('/api/chats/c/messages'))return json([]);
+    if(url==='/api/chats/c/exit-requests')return json([]);
+    return original(url,options);
+  });
+}
+it('restores pending First Chat after authenticated bootstrap and permits manual Home without loops',async()=>{
+  installFirstChatBackend();home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();
+  await screen.findByRole('heading',{name:'María'});expect(screen.queryByRole('heading',{name:'Inicio'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Volver a Inicio'}));await ready();
+  fireEvent.click(screen.getByRole('button',{name:'Actualizar'}));await ready();expect(screen.queryByRole('heading',{name:'María'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));fireEvent.click(screen.getByRole('button',{name:'Abrir primer chat'}));await screen.findByRole('heading',{name:'María'});
+});
+it('sign-out removes pending chat and aborts its resources',async()=>{
+  installFirstChatBackend();home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByRole('heading',{name:'María'});
+  act(()=>observer(null));await screen.findByRole('button',{name:'Ingresar'});expect(screen.queryByRole('region',{name:'Primer chat'})).toBeNull();
+});
+it('authenticated identity replacement reloads chat ownership before rendering messages',async()=>{
+  installFirstChatBackend();home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByRole('heading',{name:'María'});
+  home=emptyHome();profile.displayName='Cuenta nueva';act(()=>observer({...user,uid:'new'}));await screen.findByText('Hola, Cuenta nueva');expect(screen.queryByRole('region',{name:'Primer chat'})).toBeNull();
 });

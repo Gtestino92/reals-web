@@ -2,6 +2,32 @@ import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+export function adbCandidates(env = process.env, platform = process.platform) {
+  const executable = platform === 'win32' ? 'adb.exe' : 'adb';
+  const candidates = [executable];
+  for (const root of [env.ANDROID_SDK_ROOT, env.ANDROID_HOME]) {
+    if (root?.trim()) candidates.push(join(root, 'platform-tools', executable));
+  }
+  if (platform === 'win32' && env.LOCALAPPDATA?.trim()) {
+    candidates.push(join(env.LOCALAPPDATA, 'Android', 'Sdk', 'platform-tools', executable));
+  }
+  return [...new Set(candidates)];
+}
+
+export function parseDevices(stdout, warning) {
+  const devices = new Set();
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim() || line.trim() === 'List of devices attached') continue;
+    // Prefer ADB's tab separator to preserve spaces in mDNS/other serials.
+    const match = line.match(/^(.+)\t(device|offline|unauthorized)\s*$/)
+      ?? line.match(/^(.+?)\s+(device|offline|unauthorized)\s*$/);
+    if (!match) warning('Skipped an unrecognized adb devices row. Inspect adb devices manually.');
+    else if (match[2] === 'device') devices.add(match[1]);
+    else warning(`Skipped an ${match[2]} device. Unlock/authorize it or reconnect wireless ADB.`);
+  }
+  return [...devices];
+}
+
 // Only this helper's children are bounded/killed; never stop the shared ADB server.
 export function setupAndroidTunnel({
   run = spawnSync,
@@ -28,15 +54,7 @@ export function setupAndroidTunnel({
   const succeeded = (result) => !result.error && result.status === 0;
 
   try {
-    const executable = platform === 'win32' ? 'adb.exe' : 'adb';
-    const candidates = [executable];
-    for (const root of [env.ANDROID_SDK_ROOT, env.ANDROID_HOME]) {
-      if (root?.trim()) candidates.push(join(root, 'platform-tools', executable));
-    }
-    if (platform === 'win32' && env.LOCALAPPDATA?.trim()) {
-      candidates.push(join(env.LOCALAPPDATA, 'Android', 'Sdk', 'platform-tools', executable));
-    }
-    const adb = [...new Set(candidates)].find((candidate) => succeeded(invoke(candidate, ['version'])));
+    const adb = adbCandidates(env, platform).find((candidate) => succeeded(invoke(candidate, ['version'])));
     if (!adb) {
       warning('ADB unavailable. Install Android SDK platform-tools and check PATH, ANDROID_SDK_ROOT or ANDROID_HOME, then run npm run android:tunnel.');
       return;
@@ -48,20 +66,7 @@ export function setupAndroidTunnel({
       return;
     }
 
-    const devices = [];
-    for (const line of result.stdout.split(/\r?\n/)) {
-      if (!line.trim() || line.trim() === 'List of devices attached') continue;
-      // Prefer ADB's tab separator to preserve spaces in mDNS/other serials.
-      const match = line.match(/^(.+)\t(device|offline|unauthorized)\s*$/)
-        ?? line.match(/^(.+?)\s+(device|offline|unauthorized)\s*$/);
-      if (!match) {
-        warning('Skipped an unrecognized adb devices row. Inspect adb devices manually.');
-      } else if (match[2] === 'device') {
-        devices.push(match[1]);
-      } else {
-        warning(`Skipped an ${match[2]} device. Unlock/authorize it or reconnect wireless ADB, then run npm run android:tunnel.`);
-      }
-    }
+    const devices = parseDevices(result.stdout, warning);
     if (devices.length === 0) {
       warning('No authorized Android device connected. Check adb devices, connect/authorize USB or reconnect wireless ADB, then run npm run android:tunnel.');
       return;

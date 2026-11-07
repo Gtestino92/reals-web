@@ -10,7 +10,19 @@ npm run build
 
 Use `npm run test:watch -- src/auth/LoginScreen.test.tsx` while editing. `npm test` runs all 101 tests across login presentation, mocked auth/session integration, HTTP contracts, modular Firebase adapter and the Android tunnel helper. The build includes another type-check so standalone builds cannot skip it. Login tests cover mode switching, argument forwarding, remember default/toggle, masking/autofill hints, recovery/Google callbacks, all busy states in both modes, owner-scoped errors, reset feedback, cooldown rounding/expiry/replacement, background resume, and StrictMode timer cleanup. No credentials or backend connection are required.
 
-Run `npm test -- tools/android-tunnel.test.mjs` for the helper's 18 focused tests. These use the Node test environment and mocked subprocess calls to cover discovery precedence, non-Windows paths, authorized/unauthorized/offline and malformed device rows, multiple USB/wireless devices, literal serial arguments, command failures and per-command/total time limits. They do not run ADB or verify a physical tunnel. See [local development](local-development.md#android-chrome-over-usb-or-wireless-adb) for manual connection checks. The `predev` hook is not invoked by CI's install, typecheck, test or build commands.
+Run `npm test -- tools/android-tunnel.test.mjs tools/android-tunnel-monitor.test.mjs` for the one-shot helper and lifecycle monitor tests. These use the Node environment, mocked subprocesses and fake timers to cover discovery, literal serial arguments, authorized/unauthorized/offline/malformed rows, multiple devices, late connection, disconnect/reconnect with the same serial, lost/incorrect mappings, failures, bounded async execution, no overlapping polls, shutdown and late responses. They do not verify a physical tunnel. See [local development](local-development.md#android-chrome-over-usb-or-wireless-adb) for manual checks. Typecheck and production build do not start ADB monitoring.
+
+Monitor invariants and mutation review:
+
+| Path | Invariant / response handling |
+| --- | --- |
+| Discovery / device enumeration | Rediscover each cycle; inspect only authorized devices. Failed enumeration never installs a tunnel. |
+| Mapping inspection / creation | Read actual device mappings each cycle; only successful inspection permits creation. Correct mappings are skipped; failed mutations wait for the next inspection before retrying. No other ports change. |
+| Poll completion / failure | One cycle owns the next timer; schedule only after completion. Warn on issue transitions; no raw subprocess output or device serials are logged. |
+| Server close / restart / shutdown | Abort only the owned client, clear the timer and detach the close listener. Aborted continuations cannot launch commands, log success or schedule another poll. Each server instance owns its cleanup. |
+
+Manual regression: start `npm run dev -- --host 127.0.0.1` without a phone; connect/authorize it, open Android Chrome at `http://127.0.0.1:5173/`, disconnect/reconnect and remove just the 5173 mapping to check restoration. Stop Vite and confirm monitoring stops. Hardware checks remain manual; no backend/session state is involved.
+
 
 ## Continuous integration
 

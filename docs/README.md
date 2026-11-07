@@ -4,6 +4,7 @@
 - [Local development](local-development.md): Vite, proxy and existing Docker services.
 - [Testing](testing.md): automated checks and manual smoke verification.
 - [Home D1](home-review.md): overview, queue lifecycle, refresh invariants and integration limitations.
+- [First Chat D2](first-chat-review.md): navigation, chat mutations, audio compatibility, validation and two-user integration protocol.
 - [Android reference](android-reference.md): source files, visual tokens and future parity.
 - [POC effort log](poc-log.md): task measurement template.
 
