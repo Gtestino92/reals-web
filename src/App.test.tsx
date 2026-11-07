@@ -98,7 +98,7 @@ it('sign out cancels pending fetch and rejects its late response', async () => {
 it('transient backend failure preserves Firebase and retry recovers existing profile', async () => {
   fetcher.mockRejectedValueOnce(new TypeError()).mockResolvedValueOnce(json({ id: 'u', status: 'ACTIVE' })).mockResolvedValueOnce(json({ id: 'p', userId: 'u', status: 'ACTIVE' }));
   mount(); act(() => observer(user)); await screen.findByRole('alert'); expect(auth.signOut).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); await screen.findByText('Perfil existente: ACTIVE');
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); await screen.findByRole('heading', { name: 'Inicio' });
 });
 it('Retry dispatches another backend request using receiver-sensitive default fetch', async () => {
   fetcher.mockRejectedValueOnce(new TypeError('Connection failed'));

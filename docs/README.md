@@ -3,6 +3,7 @@
 - [Architecture](architecture.md): current structure, ownership and deliberate limits.
 - [Local development](local-development.md): Vite, proxy and existing Docker services.
 - [Testing](testing.md): automated checks and manual smoke verification.
+- [Home D1](home-review.md): overview, queue lifecycle, refresh invariants and integration limitations.
 - [Android reference](android-reference.md): source files, visual tokens and future parity.
 - [POC effort log](poc-log.md): task measurement template.
 

@@ -1,10 +1,11 @@
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
 import { defaults } from './contracts';
+import { emptyHome, homeStatus } from '../home/fixtures';
 // Real canvas/export/cleanup behavior is covered in CropDialog tests.
 vi.mock('./CropDialog', () => ({ CropDialog: ({ file, onConfirm, onCancel }: { file: File; onConfirm: (blob: Blob) => Promise<void>; onCancel: () => void }) => <div role="dialog" aria-label={file.name}><button onClick={() => void onConfirm(new Blob(['jpeg'],{ type:'image/jpeg' }))}>Confirmar recorte</button><button onClick={onCancel}>Cancelar recorte</button></div> }));
 const initialProfile = { ...defaults, birthDate:'1995-01-01',displayName:'Ana',city:'Córdoba',countryCode:'AR',id:'p',userId:'u',status:'DRAFT',authenticityVerificationStatus:'STALE' };
@@ -20,6 +21,7 @@ beforeEach(() => {
   auth = { observe:vi.fn(next => { next(user); return vi.fn(); }),signIn:vi.fn(),signUp:vi.fn(),google:vi.fn(),verify:vi.fn().mockResolvedValue(undefined),signOut:vi.fn().mockResolvedValue(undefined) };
   fetcher = vi.fn<typeof fetch>().mockImplementation(async (input,options) => {
     const path = String(input), method = options?.method ?? 'GET';
+    if (path === '/api/matchmaking/queue') return json({ userId:'u', inQueue:false });
     if (path === '/api/me') return json({ id:'u',status:'ACTIVE' });
     if (path === '/api/reference/countries') return json([{ code:'AR',displayName:'Argentina' },{ code:'ES',displayName:'España' }]);
     if (path === '/api/me/legal-status') return json({ requirementsSatisfied:satisfied,documents:[document()] });
@@ -28,7 +30,8 @@ beforeEach(() => {
     if (path === '/api/me/profile' && method !== 'GET') { const body = JSON.parse(String(options?.body)); profile = { ...(profile ?? initialProfile),...body }; return json(profile,method === 'POST' ? 201 : 200); }
     if (path === '/api/me/profile') return profile ? json(profile) : json({ code:'PROFILE_NOT_FOUND' },404);
     if (path === '/api/me/profile/photos' && method === 'GET') return json(list);
-    if (path === '/api/me/home') return json({ pendingActions:[],nextSteps:[],passiveNotices:[],activeInteractionsSummary:{ hasPendingSchedulingConnection:false,activeInitialCount:0,activeConnectionCount:0,actionableConnectionCount:0 } });
+    if (path === '/api/me/home/status') return json(homeStatus());
+    if (path === '/api/me/home') return json({ ...emptyHome(), profileStatus:profile?.status ?? null, pendingActions:[],nextSteps:[],passiveNotices:[],activeInteractionsSummary:{ hasPendingSchedulingConnection:false,activeInitialCount:0,activeConnectionCount:0,actionableConnectionCount:0 } });
     if (path === '/api/me/profile/match-filters') { profile = { ...initialProfile,...profile,...JSON.parse(String(options?.body)) }; return json(profile); }
     if (path === '/api/me/profile/activation') { profile = { ...initialProfile,status:'ACTIVE' }; return json(profile); }
     if (path.endsWith('/photos/reorder')) { const placements: { photoId:string; position:number }[] = JSON.parse(String(options?.body)).placements; list = list.map(p => ({ ...p,position:placements.find(x => x.photoId === p.id)?.position ?? p.position })); return json(list); }
@@ -44,12 +47,129 @@ function reorderWithKeyboard(source: number,target: number) {
   fireEvent.keyDown(handle,{ key:'Enter' });
 }
 const writes = (method: string) => fetcher.mock.calls.filter(x => x[1]?.method === method);
+afterEach(() => vi.useRealTimers());
+async function openManagement(name: string) {
+  profile = { ...initialProfile, status:'ACTIVE', preferredMinAge:27, preferredMaxAge:43, maxDistanceKm:62 };
+  mount();
+  const entry = await screen.findByRole('button', { name });
+  await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+}
+it('offers compact management entries and ACTIVE profile editing with photos and a focused return', async () => {
+  profile = { ...initialProfile, status:'ACTIVE' }; mount();
+  for (const name of ['Tu perfil','Preferencias','Afinidades','Cuenta']) expect(await screen.findByRole('button',{ name })).toBeVisible();
+  const entry = screen.getByRole('button',{ name:'Tu perfil' }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  const form = await screen.findByRole('form',{ name:'Datos del perfil' });
+  expect(screen.getByRole('heading',{ name:'Tu perfil' })).toHaveFocus();
+  expect(screen.getByLabelText('Agregar foto 1')).toBeInTheDocument();
+  expect(screen.queryByRole('button',{ name:'Activar perfil' })).toBeNull();
+  expect(screen.queryByRole('form',{ name:'Preferencias de búsqueda' })).toBeNull();
+  fireEvent.change(within(form).getByLabelText('Bio opcional'),{ target:{ value:'Una bio nueva' } }); fireEvent.submit(form);
+  await screen.findByText('Cambios guardados.'); expect(profile?.bio).toBe('Una bio nueva');
+  fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' }));
+  await screen.findByRole('heading',{ name:'Inicio' }); expect(screen.getByRole('heading',{ name:'Inicio' })).toHaveFocus();
+});
+it('loads saved preferences and saves only the filter contract, surviving a remount', async () => {
+  await openManagement('Preferencias');
+  const form = await screen.findByRole('form',{ name:'Preferencias de búsqueda' });
+  expect(within(form).getByRole('slider',{ name:'Edad mínima' })).toHaveAttribute('aria-valuenow','27');
+  expect(within(form).getByRole('slider',{ name:'Edad máxima' })).toHaveAttribute('aria-valuenow','43');
+  expect(within(form).getByLabelText(/Distancia máxima/)).toHaveValue('62');
+  expect(screen.queryByLabelText('Agregar foto 1')).toBeNull();
+  fireEvent.change(within(form).getByLabelText('Intención'),{ target:{ value:'FRIENDSHIP' } }); fireEvent.submit(form);
+  await screen.findByText('Cambios guardados.');
+  expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body))).toEqual({ intention:'FRIENDSHIP', lookingForGenders:profile?.lookingForGenders, preferredMinAge:27, preferredMaxAge:43, maxDistanceKm:62 });
+  fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' }));
+  const entry = await screen.findByRole('button',{ name:'Preferencias' }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  await screen.findByRole('form',{ name:'Preferencias de búsqueda' }); expect(screen.getByLabelText('Intención')).toHaveValue('FRIENDSHIP');
+});
+it.each(['PATCH','DELETE','PUT'])('routes authoritative INACTIVE after ACTIVE mutation %s', async method => {
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (input, options) => {
+    const response = await original(input, options);
+    if (options?.method === method && profile) profile = { ...profile, status:'INACTIVE' };
+    return response;
+  });
+  list = [initialPhoto]; vi.spyOn(window,'confirm').mockReturnValue(true);
+  await openManagement(method === 'PUT' ? 'Preferencias' : 'Tu perfil');
+  await screen.findByRole('form',{ name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil' });
+  if (method === 'DELETE') fireEvent.click(screen.getByRole('button',{ name:'Eliminar foto 1' }));
+  else fireEvent.submit(screen.getByRole('form',{ name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil' }));
+  await screen.findByRole('heading',{ name:'Completá tu perfil' }); expect(screen.getByText('Estado: INACTIVE')).toBeVisible();
+});
+it('blocks back navigation during a pending mutation and retains input on failure', async () => {
+  const original = fetcher.getMockImplementation()!; let finish: ((response:Response) => void) | undefined;
+  fetcher.mockImplementation((input, options) => options?.method === 'PATCH' ? new Promise(resolve => { finish = resolve; }) : original(input, options));
+  await openManagement('Tu perfil'); const form = await screen.findByRole('form',{ name:'Datos del perfil' });
+  fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Rosario' } }); fireEvent.submit(form);
+  await waitFor(() => expect(finish).toBeDefined()); expect(screen.getByRole('button',{ name:'Volver a Inicio' })).toBeDisabled();
+  fireEvent(window,new PopStateEvent('popstate')); expect(form).toBeInTheDocument();
+  await act(async () => finish?.(json({ code:'INVALID_PROFILE_COUNTRY' },400)));
+  await screen.findByRole('alert'); expect(screen.getByLabelText('Ciudad')).toHaveValue('Rosario');
+  expect(screen.getByRole('button',{ name:'Volver a Inicio' })).toBeEnabled(); expect(writes('PATCH')).toHaveLength(1);
+});
+it.each([false,true])('ACTIVE photos reuse crop and add/replace contracts (replace=%s)', async replace => {
+  if (replace) list = [initialPhoto]; const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (input,options) => {
+    if (options?.body instanceof FormData) { expect(String(input)).toBe(replace ? '/api/me/profile/photos/photo/file' : '/api/me/profile/photos'); list = [initialPhoto]; return json(initialPhoto); }
+    return original(input,options);
+  });
+  await openManagement('Tu perfil'); await screen.findByRole('form',{ name:'Datos del perfil' });
+  fireEvent.change(screen.getByLabelText(`${replace ? 'Reemplazar' : 'Agregar'} foto 1`),{ target:{ files:[new File(['jpeg'],'photo.jpg',{ type:'image/jpeg' })] } });
+  expect(screen.getByRole('button',{ name:'Volver a Inicio' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{ name:'Confirmar recorte' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(list).toHaveLength(1); expect(screen.getByRole('button',{ name:'Eliminar foto 1' })).toBeEnabled();
+});
+it('ACTIVE photos retain keyboard reordering', async () => {
+  list = [initialPhoto,{ ...initialPhoto,id:'second',position:2 }]; await openManagement('Tu perfil');
+  await screen.findByRole('form',{ name:'Datos del perfil' }); reorderWithKeyboard(1,2);
+  await screen.findByText('Cambios guardados.'); expect(list[0]?.position).toBe(2);
+});
+it('returns to waiting if the editor admission read finds an active queue', async () => {
+  const original = fetcher.getMockImplementation()!; let queued = false;
+  fetcher.mockImplementation(async (input,options) => {
+    if (String(input).endsWith('/queue')) { queued = true; return json({ userId:'u',inQueue:true }); }
+    if (String(input).endsWith('/home') && queued) return json({ ...emptyHome(),matchmaking:{ canSearch:false,inQueue:true,blockedReason:null } });
+    return original(input,options);
+  });
+  await openManagement('Tu perfil'); await screen.findByRole('heading',{ name:'Buscando chat' });
+  expect(screen.queryByRole('form')).toBeNull(); expect(writes('DELETE')).toHaveLength(0);
+});
+it('shows honest unavailable surfaces and signs out once from Account', async () => {
+  await openManagement('Afinidades'); expect(screen.getByRole('heading',{ name:'Próximamente' })).toBeVisible();
+  expect(screen.queryByRole('progressbar')).toBeNull(); expect(screen.queryByRole('link')).toBeNull();
+  fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' })); const entry = await screen.findByRole('button',{ name:'Cuenta' });
+  await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  for (const name of ['Notificaciones','Cambiar contraseña','Eliminar cuenta']) { expect(screen.getByRole('heading',{ name })).toBeVisible(); expect(screen.queryByRole('button',{ name })).toBeNull(); }
+  expect(screen.getAllByRole('button',{ name:'Cerrar sesión' })).toHaveLength(1); fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' }));
+  await screen.findByRole('button',{ name:'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce();
+});
+it('stops Home polling while editing and reconciles on resume', async () => {
+  await openManagement('Preferencias'); await screen.findByRole('form',{ name:'Preferencias de búsqueda' });
+  vi.useFakeTimers(); fetcher.mockClear();
+  await act(async () => { await vi.advanceTimersByTimeAsync(15000); }); expect(fetcher).not.toHaveBeenCalled();
+  vi.useRealTimers(); profile = { ...profile!, status:'DRAFT' };
+  fireEvent(window.document,new Event('visibilitychange'));
+  await screen.findByRole('heading',{ name:'Completá tu perfil' }); expect(screen.getByText('Estado: DRAFT')).toBeVisible();
+});
+it('does not expose password changes for Google-only identities', async () => {
+  user = { ...user, providerData:[{ providerId:'google.com',uid:'g',displayName:null,email:null,phoneNumber:null,photoURL:null }] };
+  await openManagement('Cuenta');
+  expect(screen.queryByRole('heading',{ name:'Cambiar contraseña' })).toBeNull();
+  expect(screen.getByText(/proveedor de inicio de sesión/)).toBeVisible();
+});
+it('rejects pending editor reads after sign-out', async () => {
+  const original = fetcher.getMockImplementation()!; let finish: ((value:Response) => void) | undefined;
+  fetcher.mockImplementation((input,options) => String(input).endsWith('/photos') ? new Promise(resolve => { finish = resolve; }) : original(input,options));
+  await openManagement('Tu perfil'); await waitFor(() => expect(finish).toBeDefined());
+  fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' })); await screen.findByRole('button',{ name:'Ingresar' });
+  await act(async () => finish?.(json([]))); expect(screen.queryByRole('form',{ name:'Datos del perfil' })).toBeNull();
+});
 async function createForm() { await screen.findByRole('heading',{ name:'Crear perfil' }); const form = screen.getByRole('form',{ name:'Crear perfil' }); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'Ana' } }); fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } }); fireEvent.change(within(form).getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } }); return form; }
 it('creates once under StrictMode and duplicate submit, restores DRAFT and activates through backend', async () => {
   mount(); const form = await createForm(); fireEvent.submit(form); fireEvent.submit(form);
   await screen.findByRole('heading',{ name:'Completá tu perfil' }); expect(writes('POST')).toHaveLength(1); expect(profile?.status).toBe('DRAFT');
-  fireEvent.click(screen.getByRole('button',{ name:'Activar perfil' })); await screen.findByRole('heading',{ name:'Tu perfil está activo' }); expect(user.reload).toHaveBeenCalledOnce(); expect(user.getIdToken).toHaveBeenCalledWith(true);
-  fireEvent.click(screen.getByRole('button',{ name:'Ir a Inicio' })); expect(screen.getByRole('heading',{ name:'Inicio' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{ name:'Activar perfil' })); await screen.findByRole('heading',{ name:'Inicio' }); expect(user.reload).toHaveBeenCalledOnce(); expect(user.getIdToken).toHaveBeenCalledWith(true);
+  expect(screen.getByRole('heading',{ name:'Inicio' })).toBeInTheDocument();
 });
 it.each(['DRAFT','INACTIVE','ACTIVE'])('restores %s after reload', async status => { profile = { ...initialProfile,status }; mount(); await screen.findByRole('heading',{ name:status === 'ACTIVE' ? 'Inicio' : 'Completá tu perfil' }); expect(writes('POST')).toHaveLength(0); });
 it('records exactly the required legal action and version', async () => { satisfied = false; mount(); await screen.findByRole('heading',{ name:'Antes de continuar' }); fireEvent.click(screen.getByRole('button',{ name:'Confirmar lectura' })); await screen.findByRole('heading',{ name:'Crear perfil' }); expect(JSON.parse(String(writes('POST')[0]?.[1]?.body))).toEqual({ documentType:'PRIVACY_NOTICE',documentVersion:'v1',action:'ACKNOWLEDGED' }); });
@@ -61,7 +181,7 @@ it('updates details and filters using separate contracts', async () => { profile
 });
 it('reorders all placements and deletes by ID with confirmation', async () => { profile = { ...initialProfile }; list = [initialPhoto,{ ...initialPhoto,id:'second',position:2 }]; vi.spyOn(window,'confirm').mockReturnValue(true); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); reorderWithKeyboard(1,2); await waitFor(() => expect(list[0]?.position).toBe(2)); await waitFor(() => expect(screen.getByRole('button',{ name:'Actualizar estado' })).toBeEnabled()); expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body)).placements).toEqual([{ photoId:'second',position:1 },{ photoId:'photo',position:2 }]); fireEvent.click(screen.getByRole('button',{ name:'Eliminar foto 2' })); await waitFor(() => expect(list).toHaveLength(1)); expect(writes('DELETE')[0]?.[0]).toBe('/api/me/profile/photos/photo'); });
 it.each(['EMAIL_NOT_VERIFIED','PROFILE_PHOTOS_REQUIRED','PROFILE_PERSON_PHOTO_REQUIRED','PROFILE_FULL_BODY_PHOTO_REQUIRED','PROFILE_PHOTO_MODERATION_NOT_APPROVED','PROFILE_AUTHENTICITY_VERIFICATION_REQUIRED','LEGAL_ACTION_REQUIRED','PROFILE_NOT_ACTIVATABLE'])('retains draft after activation rejection %s', async code => {
-  profile = { ...initialProfile }; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/activation') ? Promise.resolve(json({ code },409)) : original(input,options)); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); fireEvent.click(screen.getByRole('button',{ name:'Activar perfil' })); await screen.findByRole('alert'); expect(screen.queryByRole('heading',{ name:'Tu perfil está activo' })).not.toBeInTheDocument(); expect(profile.status).toBe('DRAFT');
+  profile = { ...initialProfile }; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/activation') ? Promise.resolve(json({ code },409)) : original(input,options)); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); fireEvent.click(screen.getByRole('button',{ name:'Activar perfil' })); await screen.findByRole('alert'); expect(screen.queryByRole('heading',{ name:'Inicio' })).not.toBeInTheDocument(); expect(profile.status).toBe('DRAFT');
 });
 it('email resend and reload use Firebase with cooldown', async () => { profile = { ...initialProfile }; Object.defineProperty(user,'emailVerified',{ value:false,configurable:true }); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); fireEvent.click(screen.getByRole('button',{ name:'Reenviar correo' })); await waitFor(() => expect(screen.getByRole('button',{ name:/Reenviar correo/ })).toBeDisabled()); expect(auth.verify).toHaveBeenCalledOnce(); vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user,'emailVerified',{ value:true,configurable:true }); }); fireEvent.click(screen.getByRole('button',{ name:'Ya verifiqué' })); await screen.findByText('Email verificado.'); expect(screen.queryByRole('heading',{ name:'Verificá tu email' })).not.toBeInTheDocument(); });
 it('rejects stale domain results after sign-out', async () => { let finish: ((value: Response) => void) | undefined; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options)); mount(); await waitFor(() => expect(finish).toBeDefined()); fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' })); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => { finish?.(json({ requirementsSatisfied:true,documents:[] })); }); expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument(); });
@@ -258,7 +378,7 @@ it('enables activation after Firebase reload confirms email verification', async
   fireEvent.click(screen.getByRole('button',{ name:'Ya verifiqué' }));
   await waitFor(() => expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button',{ name:'Activar perfil' }));
-  await screen.findByRole('heading',{ name:'Tu perfil está activo' });
+  await screen.findByRole('heading',{ name:'Inicio' });
   expect(user.getIdToken).toHaveBeenCalledWith(true);
   expect(fetcher.mock.calls.filter(x => String(x[0]).endsWith('/activation'))).toHaveLength(1);
 });
@@ -296,7 +416,7 @@ it.each([
     await waitFor(() => expect(finishBootstrap).toBeDefined()); expectPreparing();
     expect(screen.getByRole('status')).toBe(statusElement);
     await act(async () => finishBootstrap?.(json({ id:'u',status:'ACTIVE' })));
-    await waitFor(() => expect(finishOnboarding).toBeDefined()); expectPreparing();
+    if (status !== 'ACTIVE') { await waitFor(() => expect(finishOnboarding).toBeDefined()); expectPreparing(); }
     expect(screen.getByRole('button',{ name:'Cerrar sesión' })).toBeEnabled();
     await act(async () => finishOnboarding?.(json({ requirementsSatisfied:satisfied,documents:[document()] })));
     await screen.findByRole('heading',{ name:heading });

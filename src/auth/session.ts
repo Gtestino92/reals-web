@@ -55,6 +55,7 @@ export class SessionController {
     return user.emailVerified;
   };
   get emailVerified() { return this.user?.emailVerified ?? false; }
+  get hasPasswordProvider() { return this.user?.providerData?.some(provider => provider.providerId === 'password') ?? null; }
   installProfile = (profile: Profile | null) => { if (this.snapshot.phase === 'ready') this.install({ profile }); };
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
