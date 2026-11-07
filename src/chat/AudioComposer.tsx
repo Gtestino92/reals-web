@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AudioPolicy } from './contracts';
 import { prepareRecording, recordingMime } from './audio';
@@ -6,14 +6,18 @@ import { ChatIcon } from './ChatIcon';
 
 type Phase = 'idle' | 'permission' | 'recording' | 'checking';
 type Draft = { file: Blob; url: string; duration: number };
-export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payloadLocked = false, confirmedFile, delivery, onRetry, children }: {
+export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payloadLocked = false, confirmedFile, delivery, onRetry, children, textConfirmationVersion = 0 }: {
   policy: AudioPolicy | null; disabled: boolean; onSend: (file: Blob) => Promise<void> | void;
   onDirtyChange: (dirty: boolean) => void; payloadLocked?: boolean; confirmedFile?: Blob | null;
   delivery?: 'pending' | 'failed' | 'uncertain' | null; onRetry?: () => Promise<void>;
   children?: (microphone: ReactNode) => ReactNode;
+  textConfirmationVersion?: number;
 }) {
   const [phase, setPhase] = useState<Phase>('idle'), [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState(''), [seconds, setSeconds] = useState(0), [incompatible, setIncompatible] = useState(false), [sending, setSending] = useState(false);
+  const [dismissed,setDismissed]=useState<string[]>([]), confirmedText=useRef(textConfirmationVersion), explanationId=useId();
+  const unavailable=policy?.remainingMessages===0?'LIMIT_REACHED':!policy?.enabled?policy?.unavailableReason ?? 'UNAVAILABLE':null;
+  useEffect(()=>{if(textConfirmationVersion>confirmedText.current){confirmedText.current=textConfirmationVersion;if(unavailable==='LIMIT_REACHED')setDismissed(current=>current.includes(unavailable)?current:[...current,unavailable]);}},[textConfirmationVersion,unavailable]);
   const preview = useRef<HTMLAudioElement>(null), stopIntent = useRef<((file: Blob) => Promise<void> | void) | null>(null);
   const callbacks = useRef({ onSend }); callbacks.current = { onSend };
   const settings = useRef({ policy, disabled, payloadLocked }); settings.current = { policy, disabled, payloadLocked };
@@ -37,7 +41,13 @@ export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payload
     if (owner.current.url) URL.revokeObjectURL(owner.current.url);
     owner.current.url = null; setDraft(null); setError('');
   };
-  useEffect(() => { onDirtyChange(!!draft || phase !== 'idle'); }, [draft, phase, onDirtyChange]);
+  useEffect(() => { onDirtyChange(!!draft || phase === 'recording' || phase === 'checking'); }, [draft, phase, onDirtyChange]);
+  useEffect(()=>{
+    if(phase!=='permission')return;
+    const generation=owner.current.generation;
+    const timeout=window.setTimeout(()=>{if(owner.current.alive && owner.current.generation===generation && owner.current.phase==='permission'){cancel();setError('El permiso de micrófono sigue sin respuesta. Podés escribir o volver a solicitarlo.');}},30000);
+    return ()=>clearTimeout(timeout);
+  },[phase]);
   useEffect(() => {
     const r = owner.current; r.alive = true; r.life++;
     const hide = () => { if (document.visibilityState !== 'visible') { cancel(); preview.current?.pause(); } };
@@ -114,16 +124,19 @@ export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payload
   };
   const compatible = !!recordingMime() && !!navigator.mediaDevices?.getUserMedia;
   const locked = payloadLocked || sending;
-  const microphone = compatible && policy?.enabled ? <button type="button" className="chat-icon-button" aria-label="Grabar audio" title="Grabar audio" disabled={disabled || incompatible || locked || policy.remainingMessages === 0} onClick={() => void start()}><ChatIcon name="mic" /></button> : null;
-  const reasons: Record<string, string> = { GUIDANCE_REQUIRED: 'Avancen en las preguntas guiadas para habilitar audios.', LIMIT_REACHED: 'Alcanzaste el límite de audios.', GUIDANCE_NOT_AVAILABLE: 'Este chat no tiene audios habilitados.' };
-  return <section aria-label="Audio y mensaje" className="chat-audio-composer">
+  const reasons: Record<string, string> = { GUIDANCE_REQUIRED: 'Avancen en las preguntas guiadas para habilitar audios.', LIMIT_REACHED: 'Alcanzaste el límite de audios.', GUIDANCE_NOT_AVAILABLE: 'Los audios se habilitarán al avanzar en las preguntas.', WAITING_FOR_BOTH: 'El audio se habilita cuando ambas personas hayan ingresado.', WAITING_DELAY: 'El audio todavía no está disponible.', CHAT_NOT_WRITABLE: 'Este chat no admite nuevos audios.' };
+  const explanation=unavailable?reasons[unavailable] ?? 'El servidor no habilitó los audios en este momento.':!compatible || incompatible?'Este navegador no puede grabar MP4/AAC compatible. Podés usar texto o Android.':disabled || locked?'El chat no permite grabar en este momento.':'Grabar un mensaje de audio.';
+  const microphone = policy && policy.unavailableReason!=='FEATURE_DISABLED' ? <button type="button" className="chat-icon-button" aria-label="Grabar audio" aria-describedby={explanationId} title={unavailable || !compatible || incompatible?explanation:'Grabar audio'} disabled={!compatible || !policy.enabled || disabled || incompatible || locked || phase==='permission' || policy.remainingMessages === 0} onClick={() => void start()}>{phase==='permission'?<span className="chat-spinner" aria-hidden="true"/>:<ChatIcon name="mic" />}</button> : null;
+  return <section aria-label="Audio y mensaje" className="chat-audio-composer" onKeyDown={event=>{if(event.key==='Escape' && phase==='permission'){event.preventDefault();cancel();}}}>
     {phase === 'recording' ? <div className="chat-recording"><span role="timer">Grabando: {seconds} s / {Math.ceil((policy?.maxDurationMillis ?? 0) / 1000)} s</span><progress aria-label="Duración de la grabación" value={seconds} max={(policy?.maxDurationMillis ?? 1000) / 1000} /><div className="chat-composer-row"><button type="button" className="chat-icon-button" aria-label="Cancelar grabación" onClick={cancel}><ChatIcon name="close" /></button><button type="button" className="chat-icon-button" aria-label="Detener" title="Detener y revisar" onClick={() => stop()}><ChatIcon name="stop" /></button><button type="button" className="chat-icon-button chat-send" aria-label="Enviar audio" onClick={() => stop(true)}><ChatIcon name="send" /></button></div></div>
-      : phase !== 'idle' ? <div className="chat-composer-row"><p role="status">{phase === 'permission' ? 'Esperando permiso de micrófono…' : 'Comprobando formato…'}</p><button type="button" className="chat-icon-button" aria-label="Cancelar grabación" onClick={cancel}><ChatIcon name="close"/></button></div>
+      : phase === 'checking' ? <div className="chat-composer-row"><p role="status">Comprobando formato…</p><button type="button" className="chat-icon-button" aria-label="Cancelar grabación" onClick={cancel}><ChatIcon name="close"/></button></div>
       : draft ? <div className="chat-audio-draft"><span>Audio listo para enviar · {Math.ceil(draft.duration / 1000)} s</span><div className="chat-composer-row"><audio ref={preview} controls preload="metadata" src={draft.url} aria-label="Vista previa del audio" onError={event => { if (event.currentTarget === preview.current && owner.current.url === draft.url) setError('No pudimos reproducir la vista previa. Podés eliminar la grabación y volver a intentar.'); }} onPlay={event => document.querySelectorAll('audio').forEach(audio => { if (audio !== event.currentTarget) audio.pause(); })}/><button type="button" className="chat-icon-button" aria-label="Eliminar grabación" disabled={payloadLocked || sending} onClick={discard}><ChatIcon name="close" /></button><button type="button" className="chat-icon-button chat-send" aria-label="Enviar audio" disabled={disabled || !policy?.enabled || policy.remainingMessages === 0 || locked} onClick={() => void send(draft.file)}><ChatIcon name="send" /></button></div>
         {(delivery === 'pending' || sending) && <div role="status">Enviando audio…<progress aria-label="Envío de audio" /></div>}
         {delivery && delivery !== 'pending' && <p role="status">{delivery === 'uncertain' ? 'Envío sin confirmar.' : 'No se pudo enviar el audio.'} {onRetry && <button type="button" disabled={sending} onClick={() => void performUpload(onRetry)}>Reconciliar y reintentar audio</button>}</p>}
       </div> : children ? children(microphone) : microphone}
+    {phase==='permission' && <div className={`chat-permission-notice ${children?'chat-permission-inline':''}`}><span role="status">Esperando permiso de micrófono…</span><button type="button" className="chat-text-action" onClick={cancel}>Cancelar solicitud</button></div>}
+    <span id={explanationId} className="chat-visually-hidden">{explanation}</span>
     {error && <p role="alert">{error}</p>}
-    {!compatible ? <p className="chat-composer-help">Este navegador no puede grabar MP4/AAC compatible. Podés usar texto o Android.</p> : !policy?.enabled && <p className="chat-composer-help">{reasons[policy?.unavailableReason ?? ''] ?? 'El servidor no habilitó los audios en este momento.'}</p>}
+    {policy && unavailable && policy.unavailableReason!=='FEATURE_DISABLED' && !dismissed.includes(unavailable) && <div className="chat-composer-support"><p>{explanation}</p><button type="button" className="chat-icon-button" aria-label="Ocultar aviso de audio" onClick={()=>setDismissed(current=>[...current,unavailable])}><ChatIcon name="close"/></button></div>}
   </section>;
 }

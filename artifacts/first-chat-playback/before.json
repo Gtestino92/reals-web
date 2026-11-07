@@ -1,0 +1,216 @@
+{
+  "evidence": [
+    {
+      "width": 390,
+      "geometry": [
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        },
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        },
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        },
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        }
+      ],
+      "playback": [
+        {
+          "playing": false,
+          "error": null
+        },
+        {
+          "playing": false,
+          "error": null
+        },
+        {
+          "playing": false,
+          "error": null
+        },
+        {
+          "playing": false,
+          "error": null
+        }
+      ],
+      "restored": [
+        {
+          "playing": true,
+          "error": null,
+          "duration": 0.681896
+        },
+        {
+          "playing": true,
+          "error": null,
+          "duration": 0.681896
+        },
+        {
+          "playing": false,
+          "error": 4
+        },
+        {
+          "playing": false,
+          "error": 4
+        }
+      ]
+    },
+    {
+      "width": 768,
+      "geometry": [
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        },
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        },
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        },
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        }
+      ],
+      "playback": [
+        {
+          "playing": false,
+          "error": null
+        },
+        {
+          "playing": false,
+          "error": null
+        },
+        {
+          "playing": false,
+          "error": null
+        },
+        {
+          "playing": false,
+          "error": null
+        }
+      ],
+      "restored": [
+        {
+          "playing": true,
+          "error": null,
+          "duration": 0.681896
+        },
+        {
+          "playing": true,
+          "error": null,
+          "duration": 0.681896
+        },
+        {
+          "playing": false,
+          "error": 4
+        },
+        {
+          "playing": false,
+          "error": 4
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "geometry": [
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        },
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        },
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        },
+        {
+          "width": 61.5,
+          "bubbleWidth": 83.5
+        }
+      ],
+      "playback": [
+        {
+          "playing": false,
+          "error": null
+        },
+        {
+          "playing": false,
+          "error": null
+        },
+        {
+          "playing": false,
+          "error": null
+        },
+        {
+          "playing": false,
+          "error": null
+        }
+      ],
+      "restored": [
+        {
+          "playing": true,
+          "error": null,
+          "duration": 0.681896
+        },
+        {
+          "playing": true,
+          "error": null,
+          "duration": 0.681896
+        },
+        {
+          "playing": false,
+          "error": 4
+        },
+        {
+          "playing": false,
+          "error": 4
+        }
+      ]
+    }
+  ],
+  "httpEvidence": [
+    {
+      "kind": "valid",
+      "status": 206,
+      "contentType": "audio/mp4",
+      "length": 12021,
+      "range": true
+    },
+    {
+      "kind": "legacy",
+      "status": 206,
+      "contentType": "audio/mp4",
+      "length": 12137,
+      "range": true
+    },
+    {
+      "kind": "invalid",
+      "status": 206,
+      "contentType": "audio/mp4",
+      "length": 34,
+      "range": true
+    },
+    {
+      "kind": "expired",
+      "status": 403
+    },
+    {
+      "kind": "expired",
+      "status": 403
+    },
+    {
+      "kind": "expired",
+      "status": 403
+    }
+  ]
+}

@@ -167,7 +167,7 @@ it('renders a compact question with an accessible chevron using the existing pro
   mount();await ready();const card=screen.getByRole('complementary',{name:'Conversación guiada'});
   expect(card).toHaveTextContent('Pregunta 1 de 3');expect(card).toHaveTextContent('¿Qué te inspira?');
   expect(card).not.toHaveTextContent('Sigan participando');expect(card).not.toHaveTextContent('Ya podés');
-  const next=screen.getByRole('button',{name:'Otra pregunta'});expect(next).toHaveTextContent('›');
+  const next=screen.getByRole('button',{name:'Otra pregunta'});expect(next.querySelector('svg')).not.toBeNull();expect(next).toHaveTextContent('');
   fireEvent.click(next);await waitFor(()=>expect(controller.request).toHaveBeenCalledWith('/chats/c/guidance/next-request',expect.any(AbortSignal),'POST',undefined));
 });
 it.each(['ineligible','waiting','completed','unknown','final-null'] as const)('does not expose a progression control for %s guidance',async mode=>{
@@ -262,4 +262,14 @@ it.each(['guidance','reaction','message'] as const)('keeps global presentation s
 it('reply selection focuses input without asking the browser to scroll ancestors',async()=>{
   mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'}),focus=vi.spyOn(input,'focus');
   fireEvent.click(screen.getByRole('button',{name:'Responder pregunta'}));expect(focus).toHaveBeenCalledWith({preventScroll:true});
+});
+it.each([true,false])('hides the quota notice only for a confirmed text send: %s',async success=>{
+  Object.assign(chat.audioPolicy,{enabled:false,remainingMessages:0,unavailableReason:'LIMIT_REACHED'});
+  const base=vi.mocked(controller.request).getMockImplementation()!;
+  if(!success)vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>path==='/chats/c/messages'&&method==='POST'?Promise.reject(new TypeError('Synthetic uncertain delivery')):base(path,signal,method,body));
+  mount();await ready();expect(screen.getByRole('button',{name:'Ocultar aviso de audio'})).toBeVisible();
+  const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Mensaje de texto'}});fireEvent.click(screen.getByRole('button',{name:'Enviar mensaje'}));
+  if(success){await waitFor(()=>expect(input).toHaveValue(''));expect(screen.queryByRole('button',{name:'Ocultar aviso de audio'})).toBeNull();}
+  else {await screen.findByRole('alert');expect(input).toHaveValue('Mensaje de texto');expect(screen.getByRole('button',{name:'Ocultar aviso de audio'})).toBeVisible();}
+  expect(screen.getByRole('button',{name:'Grabar audio'})).toBeDisabled();expect(screen.getByRole('button',{name:'Grabar audio'})).toHaveAccessibleDescription('Alcanzaste el límite de audios.');
 });

@@ -29,7 +29,7 @@ it('stops all microphone tracks on cancel',async()=>{mount();fireEvent.click(scr
 it('stops tracks on unmount and ignores late callbacks',async()=>{const view=mount();fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await screen.findByRole('timer');view.unmount();expect(stop).toHaveBeenCalled();expect(send).not.toHaveBeenCalled();});
 it('releases permission results arriving after unmount',async()=>{let resolve:((stream:unknown)=>void)|undefined;get.mockImplementation(()=>new Promise(r=>{resolve=r;}));const view=mount();fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));view.unmount();await act(async()=>resolve?.({getTracks:()=>[{stop}]}));expect(stop).toHaveBeenCalled();});
 it('does not claim that isTypeSupported proves actual byte compatibility',async()=>{mount();fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await screen.findByRole('timer');fireEvent.click(screen.getByRole('button',{name:'Detener'}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('no produjo MP4/AAC compatible'));expect(screen.getByRole('button',{name:'Grabar audio'})).toBeDisabled();expect(send).not.toHaveBeenCalled();});
-it('honors server guidance gate before asking for permissions',()=>{render(<AudioComposer policy={{...chatFixture().audioPolicy,enabled:false,unavailableReason:'GUIDANCE_REQUIRED'}} disabled={false} onSend={send} onDirtyChange={()=>{}}/>);expect(screen.getByText(/Avancen en las preguntas/)).toBeVisible();expect(screen.queryByRole('button',{name:'Grabar audio'})).toBeNull();expect(get).not.toHaveBeenCalled();});
+it('honors server guidance gate before asking for permissions',()=>{render(<AudioComposer policy={{...chatFixture().audioPolicy,enabled:false,unavailableReason:'GUIDANCE_REQUIRED'}} disabled={false} onSend={send} onDirtyChange={()=>{}}/>);expect(screen.getByRole('button',{name:'Grabar audio'})).toBeDisabled();expect(screen.getByRole('button',{name:'Grabar audio'})).toHaveAccessibleDescription(/Avancen en las preguntas/);expect(get).not.toHaveBeenCalled();});
 it('admits the structural fixture and exposes a preview only after byte inspection',async()=>{
   Recorder.output=admittedAudioFixture();expect(inspectAudio(Recorder.output,60000,2097152)).toBe(1000);
   mount();fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await screen.findByRole('timer');fireEvent.click(screen.getByRole('button',{name:'Detener'}));
@@ -58,7 +58,7 @@ it('cancels recording and stops tracks on background transition',async()=>{
 it('cancels a pending permission request and releases the late stream without recording',async()=>{
   let resolve:((stream:unknown)=>void)|undefined;get.mockImplementation(()=>new Promise(r=>{resolve=r;}));mount();
   fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));expect(screen.getByRole('status')).toHaveTextContent('Esperando permiso');
-  fireEvent.click(screen.getByRole('button',{name:'Cancelar grabación'}));await act(async()=>resolve?.({getTracks:()=>[{stop}]}));
+  expect(screen.queryByRole('button',{name:'Cancelar grabación'})).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Cancelar solicitud'}));await act(async()=>resolve?.({getTracks:()=>[{stop}]}));
   expect(stop).toHaveBeenCalled();expect(screen.queryByRole('timer')).toBeNull();expect(send).not.toHaveBeenCalled();
 });
 it('shows upload progress and rejects rapid repeated sends until completion',async()=>{
@@ -99,4 +99,37 @@ it('retains the send intent callback while stop/byte validation is asynchronous'
 it('reports preview playback errors without discarding the validated audio',async()=>{
   Recorder.output=admittedAudioFixture();mount();fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await screen.findByRole('timer');fireEvent.click(screen.getByRole('button',{name:'Detener'}));
   const audio=await screen.findByLabelText('Vista previa del audio');fireEvent.error(audio);expect(screen.getByRole('alert')).toHaveTextContent('No pudimos reproducir');expect(audio).toBeVisible();expect(screen.getByRole('button',{name:'Eliminar grabación'})).toBeEnabled();
+});
+it('keeps text messaging available during permission and lets Escape abandon it',async()=>{
+  get.mockImplementation(()=>new Promise(()=>{}));const dirty=vi.fn();
+  render(<AudioComposer policy={chatFixture().audioPolicy} disabled={false} onSend={send} onDirtyChange={dirty}>{mic=><div><input aria-label="Texto"/>{mic}</div>}</AudioComposer>);
+  fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));fireEvent.change(screen.getByRole('textbox'),{target:{value:'Texto pendiente'}});
+  expect(screen.getByRole('textbox')).toHaveValue('Texto pendiente');expect(dirty).not.toHaveBeenCalledWith(true);expect(screen.queryByRole('button',{name:'Cancelar grabación'})).toBeNull();
+  fireEvent.keyDown(screen.getByRole('textbox'),{key:'Escape'});expect(screen.queryByRole('status')).toBeNull();expect(screen.getByRole('textbox')).toHaveValue('Texto pendiente');
+});
+it('times out an unresolved permission request and releases a late grant without recording',async()=>{
+  vi.useFakeTimers();let grant:((stream:unknown)=>void)|undefined;get.mockImplementation(()=>new Promise(r=>{grant=r;}));mount();
+  fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await act(async()=>{await vi.advanceTimersByTimeAsync(30000);});
+  expect(screen.getByRole('alert')).toHaveTextContent('sin respuesta');expect(screen.getByRole('button',{name:'Grabar audio'})).toBeEnabled();
+  await act(async()=>grant?.({getTracks:()=>[{stop}]}));expect(stop).toHaveBeenCalled();expect(screen.queryByRole('timer')).toBeNull();
+});
+it('dismisses quota copy without changing eligibility and does not show it again on polling',()=>{
+  const policy={...chatFixture().audioPolicy,enabled:false,remainingMessages:0,unavailableReason:'LIMIT_REACHED'};
+  const view=render(<AudioComposer policy={policy} disabled={false} onSend={send} onDirtyChange={()=>{}}/>);
+  expect(screen.getByRole('button',{name:'Grabar audio'})).toHaveAccessibleDescription('Alcanzaste el límite de audios.');
+  fireEvent.click(screen.getByRole('button',{name:'Ocultar aviso de audio'}));
+  view.rerender(<AudioComposer policy={{...policy}} disabled={false} onSend={send} onDirtyChange={()=>{}}/>);
+  expect(screen.queryByRole('button',{name:'Ocultar aviso de audio'})).toBeNull();expect(screen.getByRole('button',{name:'Grabar audio'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));expect(get).not.toHaveBeenCalled();
+});
+it('hides quota information only after a subsequent text confirmation and preserves other policy copy',()=>{
+  const policy={...chatFixture().audioPolicy,enabled:false,remainingMessages:0,unavailableReason:'LIMIT_REACHED'};
+  const props={disabled:false,onSend:send,onDirtyChange:()=>{}};
+  const view=render(<AudioComposer {...props} policy={policy} textConfirmationVersion={2}/>);
+  expect(screen.getByRole('button',{name:'Ocultar aviso de audio'})).toBeVisible();
+  view.rerender(<AudioComposer {...props} policy={{...policy}} textConfirmationVersion={2}/>);expect(screen.getByRole('button',{name:'Ocultar aviso de audio'})).toBeVisible();
+  view.rerender(<AudioComposer {...props} policy={{...policy}} textConfirmationVersion={3}/>);expect(screen.queryByRole('button',{name:'Ocultar aviso de audio'})).toBeNull();
+  expect(screen.getByRole('button',{name:'Grabar audio'})).toBeDisabled();
+  view.rerender(<AudioComposer {...props} policy={{...policy,remainingMessages:1,unavailableReason:'GUIDANCE_REQUIRED'}} textConfirmationVersion={4}/>);
+  expect(screen.getByRole('button',{name:'Ocultar aviso de audio'})).toBeVisible();expect(screen.getByRole('button',{name:'Grabar audio'})).toBeDisabled();
 });
