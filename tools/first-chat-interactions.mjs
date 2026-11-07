@@ -39,6 +39,7 @@ try {
   if (fixture.result.value.overflow || fixture.result.value.messages !== 2 || !fixture.result.value.confirmed) throw Error('Synthetic chat smoke failed');
   console.log('Synthetic chat/mobile smoke:',JSON.stringify(fixture.result.value));
   const diagnose = process.argv.includes('--diagnose');
+  const evidenceRoot = process.argv.includes('--composer') ? 'artifacts/first-chat-composer' : 'artifacts/first-chat-interactions';
   const evidence={gestures:[],reactions:[]};
   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
   const delay=ms=>new Promise(r=>setTimeout(r,ms));
@@ -113,13 +114,13 @@ try {
       if(!success){
         assert(await evaluate(`!!document.querySelector('[role=alert] button')`),'failure exposes retry');
         if(mode==='older'){
-          await mkdir('artifacts/first-chat-interactions',{recursive:true});
-          await writeFile(`artifacts/first-chat-interactions/${width}-reaction-error.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+          await mkdir(evidenceRoot,{recursive:true});
+          await writeFile(`${evidenceRoot}/${width}-reaction-error.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
         }
         await click('[role=alert] button');assert(stable(before,await geometry()),'recovery preserves geometry too');
       }
     }
   }
-  await mkdir('artifacts/first-chat-interactions',{recursive:true});
-  await writeFile('artifacts/first-chat-interactions/regression-after.json',JSON.stringify(evidence,null,2));
+  await mkdir(evidenceRoot,{recursive:true});
+  await writeFile(evidenceRoot+'/regression-after.json',JSON.stringify(evidence,null,2));
 } finally { ws?.close(); chrome.kill(); await new Promise(r=>setTimeout(r,500)); if (!resolve(dir).startsWith(resolve(tmpdir())+sep) || !dir.includes('reals-chat-smoke-')) throw Error('Unsafe temporary directory'); await rm(dir,{recursive:true,force:true,maxRetries:5}).catch(()=>{}); }

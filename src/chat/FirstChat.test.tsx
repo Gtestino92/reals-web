@@ -1,12 +1,13 @@
 import { StrictMode } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { FirstChat } from './FirstChat';
 import { chatFixture, controllerFixture, messageFixture } from './fixtures';
 import type { Message } from './contracts';
 let controller:ReturnType<typeof controllerFixture>, chat:ReturnType<typeof chatFixture>, messages:Message[];
 let home:ReturnType<typeof vi.fn<(message?:string)=>void>>;
 beforeEach(()=>{
+  vi.stubGlobal('matchMedia',vi.fn(()=>({matches:true})));
   vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});
   vi.spyOn(HTMLMediaElement.prototype,'load').mockImplementation(()=>{});
   controller=controllerFixture();chat=chatFixture();messages=[messageFixture()];home=vi.fn();
@@ -21,6 +22,7 @@ beforeEach(()=>{
     return {};
   });
 });
+afterEach(()=>vi.unstubAllGlobals());
 const mount=()=>render(<StrictMode><FirstChat controller={controller} matchId="m" chatId="c" onHome={home}/></StrictMode>);
 const ready=async()=>{await screen.findByRole('heading',{name:'María'});await waitFor(()=>expect(screen.getByRole('textbox',{name:'Mensaje'})).toBeEnabled());};
 it('works under StrictMode and renders safe chronological messages without photos',async()=>{messages[0]!.content='<img src=x onerror=bad>';mount();await ready();expect(screen.getByText('<img src=x onerror=bad>')).toBeVisible();expect(document.querySelector('img')).toBeNull();expect(screen.getByRole('list',{name:'Mensajes'})).toBeVisible();});
@@ -94,7 +96,7 @@ it('swipes question and incoming audio with immutable direct target IDs',async()
   await waitFor(()=>expect(controller.request).toHaveBeenCalledWith('/chats/c/messages',expect.any(AbortSignal),'POST',expect.objectContaining({replyTo:{type:'GUIDANCE_QUESTION',targetId:'question-1'}})));
   await waitFor(()=>expect(screen.getByRole('textbox',{name:'Mensaje'})).toBeEnabled());
   swipe(screen.getByLabelText('Mensaje de audio').closest('.reply-swipe')!);
-  expect(screen.getByText(/Respondiendo: Mensaje de audio/)).toBeVisible();
+  expect(screen.getByText('Mensaje de audio')).toBeVisible();
   fireEvent.change(screen.getByRole('textbox',{name:'Mensaje'}),{target:{value:'Otra respuesta'}});fireEvent.click(screen.getByRole('button',{name:'Enviar mensaje'}));
   await waitFor(()=>expect(controller.request).toHaveBeenCalledWith('/chats/c/messages',expect.any(AbortSignal),'POST',expect.objectContaining({replyTo:{type:'MESSAGE',targetId:'1'}})));
 });
@@ -160,4 +162,87 @@ it.each(['success','failure'] as const)('reaction %s never scrolls or inserts a 
     fireEvent.click(screen.getByRole('button',{name:'Reintentar conexión'}));await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
     expect(vi.mocked(controller.request).mock.calls.filter(c=>c[0].endsWith('/reaction'))).toHaveLength(1);
   }
+});
+it('renders a compact question with an accessible chevron using the existing progression action',async()=>{
+  mount();await ready();const card=screen.getByRole('complementary',{name:'Conversación guiada'});
+  expect(card).toHaveTextContent('Pregunta 1 de 3');expect(card).toHaveTextContent('¿Qué te inspira?');
+  expect(card).not.toHaveTextContent('Sigan participando');expect(card).not.toHaveTextContent('Ya podés');
+  const next=screen.getByRole('button',{name:'Otra pregunta'});expect(next).toHaveTextContent('›');
+  fireEvent.click(next);await waitFor(()=>expect(controller.request).toHaveBeenCalledWith('/chats/c/guidance/next-request',expect.any(AbortSignal),'POST',undefined));
+});
+it.each(['ineligible','waiting','completed','unknown','final-null'] as const)('does not expose a progression control for %s guidance',async mode=>{
+  if(mode==='ineligible')chat.guidance.canRequestNext=false;
+  if(mode==='waiting')chat.guidance.myNextRequested=true;
+  if(mode==='completed')chat.guidance.completed=true;
+  if(mode==='unknown')chat.guidance.progressionAction='FUTURE_ACTION';
+  if(mode==='final-null')Object.assign(chat.guidance,{questionOrdinal:3,progressionAction:null});
+  mount();await ready();expect(screen.queryByRole('button',{name:'Otra pregunta'})).toBeNull();expect(screen.queryByRole('button',{name:'Completar etapa'})).toBeNull();
+  expect(screen.getByText('¿Qué te inspira?')).toBeVisible();
+});
+it('distinguishes completion from next and disables it while submitting',async()=>{
+  Object.assign(chat.guidance,{questionOrdinal:3,progressionAction:'COMPLETE'});
+  const original=vi.mocked(controller.request).getMockImplementation()!;
+  vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>path.endsWith('/guidance/next-request')?new Promise(()=>{}):original(path,signal,method,body));
+  mount();await ready();const complete=screen.getByRole('button',{name:'Completar etapa'});expect(complete).toHaveTextContent('Completar');expect(complete).not.toHaveTextContent('›');
+  fireEvent.click(complete);expect(complete).toBeDisabled();fireEvent.click(complete);expect(vi.mocked(controller.request).mock.calls.filter(c=>c[0].endsWith('/guidance/next-request'))).toHaveLength(1);
+});
+const enter=(input:HTMLElement,options:KeyboardEventInit={})=>fireEvent.keyDown(input,{key:'Enter',code:'Enter',...options});
+it('desktop Enter sends the existing message reply once through the form',async()=>{
+  mount();await ready();fireEvent.click(screen.getByRole('button',{name:/Responder mensaje de/}));
+  const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Respuesta por teclado'}});
+  expect(enter(input)).toBe(false);
+  await waitFor(()=>expect(controller.request).toHaveBeenCalledWith('/chats/c/messages',expect.any(AbortSignal),'POST',expect.objectContaining({content:'Respuesta por teclado',replyTo:{type:'MESSAGE',targetId:'1'}})));
+  expect(vi.mocked(controller.request).mock.calls.filter(c=>c[0]==='/chats/c/messages')).toHaveLength(1);
+});
+it.each([{shiftKey:true},{isComposing:true},{keyCode:229},{code:''},{code:'Unidentified'}])('preserves native input instead of sending for %j',async options=>{
+  mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Texto'}});
+  expect(enter(input,options)).toBe(true);expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
+});
+it('tracks IME composition until it ends',async()=>{
+  mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Texto'}});
+  fireEvent.compositionStart(input);expect(enter(input)).toBe(true);expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
+  fireEvent.compositionEnd(input);enter(input);await waitFor(()=>expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(true));
+});
+it.each(['','   ','<invalid>'])('does not submit empty or invalid text %j',async value=>{
+  mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value}});enter(input);
+  expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
+});
+it('keeps multiline Enter behavior for coarse/touch input capabilities regardless of width',async()=>{
+  vi.stubGlobal('matchMedia',vi.fn(()=>({matches:false})));
+  mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Texto'}});
+  expect(enter(input)).toBe(true);expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
+});
+it('prevents duplicates from repeated Enter and simultaneous form submission while pending',async()=>{
+  const original=vi.mocked(controller.request).getMockImplementation()!;
+  vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>path==='/chats/c/messages'&&method==='POST'?new Promise(()=>{}):original(path,signal,method,body));
+  mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Una vez'}});
+  enter(input,{repeat:true});expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
+  enter(input);enter(input);fireEvent.submit(input.closest('form')!);
+  expect(vi.mocked(controller.request).mock.calls.filter(c=>c[0]==='/chats/c/messages')).toHaveLength(1);expect(input).toBeDisabled();
+});
+it('never sends with Enter in decision-only mode',async()=>{
+  chat.partnerDecision='APPROVED';mount();await screen.findByRole('heading',{name:'María'});const input=screen.getByRole('textbox',{name:'Mensaje'});
+  fireEvent.change(input,{target:{value:'No permitido'}});enter(input);expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
+});
+it('keeps a labelled preview structurally above input and clearing it preserves typed text',async()=>{
+  mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Mi borrador'}});
+  fireEvent.click(screen.getByRole('button',{name:/Responder mensaje de/}));const preview=screen.getByRole('complementary',{name:'Respuesta seleccionada'});
+  expect(within(preview).getByText('María')).toBeVisible();expect(preview.compareDocumentPosition(input)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(input).toHaveFocus();
+  expect(preview.closest('form')).toBe(input.closest('form'));fireEvent.click(screen.getByRole('button',{name:'Quitar respuesta'}));expect(input).toHaveValue('Mi borrador');
+  const send=screen.getByRole('button',{name:'Enviar mensaje'});expect(send.querySelector('svg')).not.toBeNull();expect(send.textContent).toBe('');
+});
+it('labels history citations by quoted author, never by the replying author',async()=>{
+  messages=[{...messageFixture('1','them'),replyTo:{type:'MESSAGE',targetId:'x',previewText:'Texto mío',senderId:'me',messageType:'TEXT'}},
+    {...messageFixture('2','me'),replyTo:{type:'MESSAGE',targetId:'y',previewText:'Texto de María',senderId:'them',messageType:'TEXT'}},
+    {...messageFixture('3','me'),replyTo:{type:'GUIDANCE_QUESTION',targetId:'q',previewText:'Pregunta original'}},
+    {...messageFixture('4','them'),replyTo:{type:'MESSAGE',targetId:'a',previewText:null,senderId:'me',messageType:'AUDIO'}},
+    {...messageFixture('5','them'),replyTo:{type:'MESSAGE',targetId:'legacy',previewText:'Sin autor'}}];
+  mount();await ready();const quotes=document.querySelectorAll('blockquote');
+  expect(quotes[0]).toHaveTextContent('Vos');expect(quotes[1]).toHaveTextContent('María');expect(quotes[2]).toHaveTextContent('Pregunta');expect(quotes[3]).toHaveTextContent('Mensaje de audio');expect(quotes[4]).toHaveTextContent('Respuesta');expect(quotes[4]).not.toHaveTextContent('María');
+});
+it('preserves the text and quoted target when delivery is uncertain',async()=>{
+  const original=vi.mocked(controller.request).getMockImplementation()!;
+  vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>path==='/chats/c/messages'&&method==='POST'?Promise.reject(new TypeError('Synthetic failure')):original(path,signal,method,body));
+  mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Responder pregunta'}));const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Respuesta pendiente'}});enter(input);
+  await screen.findByText('Sin confirmar');expect(input).toHaveValue('Respuesta pendiente');expect(screen.getByRole('complementary',{name:'Respuesta seleccionada'})).toHaveTextContent('Pregunta');expect(screen.getByRole('button',{name:'Quitar respuesta'})).toBeDisabled();
 });

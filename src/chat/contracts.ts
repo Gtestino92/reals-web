@@ -9,7 +9,7 @@ export interface Reply { type: 'MESSAGE' | 'GUIDANCE_QUESTION'; targetId: string
 export interface Message {
   id: string; chatSessionId: string; senderId: string; clientMessageId: string | null; messageType: string;
   content: string | null; sentAt: string; reactionType: 'HEART' | null;
-  replyTo: (Reply & { previewText: string | null }) | null;
+  replyTo: (Reply & { previewText: string | null; senderId?: string | null; messageType?: string | null }) | null;
   audio: { url: string; durationMillis: number; sizeBytes: number; contentType: string } | null;
 }
 export interface Guidance {
@@ -44,7 +44,9 @@ export function parseMessage(v: unknown, chatId: string, participants: string[])
   let replyTo: Message['replyTo'] = null, audio: Message['audio'] = null;
   if (v.replyTo != null) {
     const r = v.replyTo; if (!object(r) || (r.type !== 'MESSAGE' && r.type !== 'GUIDANCE_QUESTION')) return invalid();
-    replyTo = { type: r.type, targetId: str(r.targetId), previewText: r.previewText == null ? null : str(r.previewText) };
+    const senderId = r.senderId == null ? null : str(r.senderId);
+    if (senderId !== null && !participants.includes(senderId)) return invalid();
+    replyTo = { type: r.type, targetId: str(r.targetId), previewText: r.previewText == null ? null : str(r.previewText), senderId, messageType: r.messageType == null ? null : str(r.messageType) };
   }
   if (v.audio != null) {
     const a = v.audio; if (!object(a)) return invalid();
@@ -63,7 +65,15 @@ export function parseExits(v: unknown, chatId: string, participants: string[]): 
 }
 export function mergeMessages(old: Message[], incoming: Message[]): Message[] {
   const map = new Map(old.map(m => [m.id,m]));
-  for (const m of incoming) { const prev = map.get(m.id); map.set(m.id, { ...m, reactionType: m.reactionType ?? prev?.reactionType ?? null, replyTo: m.replyTo ?? prev?.replyTo ?? null }); }
+  for (const m of incoming) {
+    const prev = map.get(m.id), previousReply = prev?.replyTo;
+    const sameTarget = m.replyTo && previousReply?.type === m.replyTo.type && previousReply.targetId === m.replyTo.targetId;
+    const replyTo = m.replyTo ? { ...m.replyTo,
+      senderId: m.replyTo.senderId ?? (sameTarget ? previousReply?.senderId ?? null : null),
+      messageType: m.replyTo.messageType ?? (sameTarget ? previousReply?.messageType ?? null : null),
+    } : previousReply ?? null;
+    map.set(m.id, { ...m, reactionType: m.reactionType ?? prev?.reactionType ?? null, replyTo });
+  }
   return [...map.values()].sort((a,b) => Date.parse(a.sentAt) - Date.parse(b.sentAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 export function reactable(messages: Message[], me: string): Set<string> {

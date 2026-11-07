@@ -1,16 +1,23 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { SessionController } from '../auth/session';
 import { ChatSession } from './ChatSession';
 import { plainText, policy, reactable } from './contracts';
-import type { Message, Reply } from './contracts';
+import type { Message } from './contracts';
 import { AudioComposer } from './AudioComposer';
 import './chat.css';
 import { ReplySwipe } from './ReplySwipe';
 import { ReactionLane } from './ReactionLane';
+import { ChatIcon } from './ChatIcon';
+import { replyPreview, ReplyQuote } from './ReplyQuote';
 
 function MessageAudio({ message, refresh }: { message: Message; refresh: () => void }) {
   const ref = useRef<HTMLAudioElement>(null), [failed,setFailed] = useState(false);
-  useEffect(() => { const audio = ref.current; setFailed(false); return () => { if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); } }; }, [message.audio?.url]);
+  useEffect(() => {
+    const audio = ref.current; setFailed(false);
+    const hide = () => { if (document.visibilityState !== 'visible') audio?.pause(); };
+    document.addEventListener('visibilitychange',hide);
+    return () => { document.removeEventListener('visibilitychange',hide); if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); } };
+  }, [message.audio?.url]);
   return <><audio ref={ref} controls preload="none" src={message.audio?.url} aria-label="Mensaje de audio" onError={() => setFailed(true)} onPlay={e => { document.querySelectorAll('audio').forEach(a => { if (a !== e.currentTarget) a.pause(); }); }} />{failed && <p role="alert">No pudimos reproducir el audio. El enlace puede haber vencido. <button onClick={refresh}>Renovar enlace</button></p>}</>;
 }
 function ConfirmDialog({ kind, busy, close, confirm }: { kind: string; busy: boolean; close: () => void; confirm: (body?: unknown) => void }) {
@@ -58,8 +65,30 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
   const [terminalNotice,setTerminalNotice] = useState(''), [audioDirty,setAudioDirty] = useState(false);
   const [session] = useState(() => new ChatSession(controller,matchId,chatId,controller.snapshot.account?.id ?? '',(message, closed) => { knownClosed.current = closed; terminalMessage.current = message; if (dirty.current) setTerminalNotice(message + ' Conservamos tu borrador hasta que vuelvas a Inicio.'); else onHome(message,closed); }));
   const state = useSyncExternalStore(session.subscribe,session.getSnapshot);
-  const [draft,setDraft] = useState(''), [reply,setReply] = useState<(Reply & { preview: string }) | null>(null), [dialog,setDialog] = useState<Parameters<ChatSession['action']>[0] | null>(null), [now,setNow] = useState(Date.now()), [unseen,setUnseen] = useState(false);
+  const [draft,setDraft] = useState(''), [reply,setReply] = useState<NonNullable<Message['replyTo']> | null>(null), [dialog,setDialog] = useState<Parameters<ChatSession['action']>[0] | null>(null), [now,setNow] = useState(Date.now()), [unseen,setUnseen] = useState(false);
   const timeline = useRef<HTMLOListElement>(null), nearBottom = useRef(true), text = useRef<HTMLTextAreaElement>(null), heading = useRef<HTMLHeadingElement>(null);
+  const composing = useRef(false), composer = useRef<HTMLFormElement>(null), observedHeight = useRef(0);
+  const resizeInput = useCallback(() => {
+    const input = text.current;
+    if (input) { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight,128)}px`; }
+  }, []);
+  const setText = useCallback((input: HTMLTextAreaElement | null) => { text.current = input; resizeInput(); }, [resizeInput]);
+  useLayoutEffect(resizeInput, [draft, resizeInput]);
+  useLayoutEffect(() => {
+    const list = timeline.current, form = composer.current;
+    if (!list || !form) return;
+    observedHeight.current = list.clientHeight;
+    if (typeof ResizeObserver === 'undefined') return;
+    let width = 0;
+    const observer = new ResizeObserver(() => {
+      if (text.current && text.current.clientWidth !== width) { width = text.current.clientWidth; resizeInput(); }
+      // Preserve the previous reading intent, never scroll reactions by metadata.
+      if (nearBottom.current) list.scrollTop = list.scrollHeight;
+      observedHeight.current = list.clientHeight;
+    });
+    observer.observe(form); observer.observe(list);
+    return () => observer.disconnect();
+  }, [resizeInput]);
   useEffect(() => {
     session.start(); void session.refresh(); heading.current?.focus();
     const timer = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.refresh(false,true); },5000);
@@ -73,21 +102,19 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
     const resize = () => { if (root && viewport) root.style.setProperty('--chat-viewport',`${viewport.height}px`); };
     resize(); viewport?.addEventListener('resize',resize); return () => viewport?.removeEventListener('resize',resize);
   }, []);
-  useEffect(() => { if (state.confirmationVersion > 0) { setDraft(d => d === state.confirmed ? '' : d); setReply(null); } }, [state.confirmationVersion]);
+  useEffect(() => { if (state.confirmationVersion > 0) { setDraft(d => d === state.confirmed ? '' : d); setReply(current => current?.type === state.confirmedReply?.type && current?.targetId === state.confirmedReply?.targetId ? null : current); } }, [state.confirmationVersion]);
   useEffect(() => {
     const list = timeline.current;
     if (nearBottom.current && list) { list.scrollTop = list.scrollHeight; setUnseen(false); } else setUnseen(true);
   }, [state.messages.length]);
   useEffect(() => { const warn = (e: BeforeUnloadEvent) => { if (dirty.current) { e.preventDefault(); } }; window.addEventListener('beforeunload',warn); return () => window.removeEventListener('beforeunload',warn); }, [draft,state.outgoing]);
-  useLayoutEffect(() => {
-    const list = timeline.current;
-    if (nearBottom.current && list) list.scrollTop = list.scrollHeight;
-  }, [reply?.targetId]);
   const chat = state.chat, p = policy(chat,state.exits,now+state.offset), me = session.me, eligible = reactable(state.messages,me), g = chat?.guidance;
   const disabled = state.busy || state.blocked, ordinary = p.ordinary && !disabled && !state.outgoing;
+  const canProgressGuidance = !!g && p.ordinary && g.canRequestNext && !g.completed && !g.myNextRequested &&
+    (g.progressionAction === 'COMPLETE' || g.progressionAction === 'NEXT_QUESTION' || (g.progressionAction === null && g.questionOrdinal < g.maxQuestions));
   const deadline = chat ? Math.min(Date.parse(chat.timeoutAt), !p.decisionOnly && chat.inactivityExpiresAt ? Date.parse(chat.inactivityExpiresAt) : Infinity) : Infinity;
   const remaining = Math.max(0,Math.ceil((deadline-now-state.offset)/1000));
-  const beginReply = (target: Reply, preview: string) => { setReply({ ...target,preview }); text.current?.focus(); };
+  const beginReply = (target: Omit<NonNullable<Message['replyTo']>, 'previewText'>, previewText: string) => { setReply({ ...target,previewText }); text.current?.focus(); };
   dirty.current = !!draft || !!state.outgoing || audioDirty;
   const home = () => { if (!dirty.current || window.confirm('Hay un borrador o envío pendiente. ¿Querés salir y descartarlo?')) onHome(terminalMessage.current,knownClosed.current); };
   useEffect(() => {
@@ -108,18 +135,19 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       { label: 'Bloquear', disabled: disabled || !p.safety, run: () => setDialog('block') },
     ]}/></header>
     <button className="chat-approve" disabled={disabled || audioDirty || !p.decide} onClick={() => setDialog('approve')}>Aprobar chat</button>
-    {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && state.reactionFeedback === null && <p className="chat-status" role="status">Actualizando…</p>}{state.error && <p className={state.reactionFeedback === 'error' ? 'chat-reaction-error' : undefined} role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
+    {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && state.reactionFeedback === null && !state.messagePending && <p className="chat-status" role="status">Actualizando…</p>}{state.error && !state.messageError && <p className={state.reactionFeedback === 'error' ? 'chat-reaction-error' : undefined} role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
     {chat && remaining <= 60 && <p role="status">{remaining ? `El plazo del chat termina en ${remaining} s.` : 'El plazo local terminó. Consultando el estado del servidor…'}</p>}
     {p.decisionOnly && <aside className="chat-panel">{chat?.myDecision === 'PENDING' ? 'La otra persona aprobó. La conversación está pausada mientras decidís.' : 'Guardamos tu aprobación. Esperando la otra decisión.'}</aside>}
-    {g && !p.decisionOnly && <ReplySwipe key={g.question.instanceId ?? g.question.text} enabled={ordinary && !audioDirty && !!g.question.instanceId} label="Responder pregunta" onReply={() => g.question.instanceId && beginReply({ type: 'GUIDANCE_QUESTION', targetId: g.question.instanceId }, g.question.text)}><aside className="chat-panel chat-guidance" aria-label="Conversación guiada"><p>Pregunta {g.questionOrdinal} de {g.maxQuestions}</p><p>{g.question.text}</p><p>{g.canRequestNext ? 'Ya podés pedir continuar.' : 'Sigan participando. Responder directamente a la pregunta ayuda a avanzar.'}</p>
-      {g.completed ? <p>Etapa guiada completada.</p> : g.myNextRequested ? <p>Esperando a la otra persona para continuar.</p> : <button disabled={!ordinary || !g.canRequestNext || (g.progressionAction !== null && !['NEXT_QUESTION','COMPLETE'].includes(g.progressionAction))} onClick={() => void session.action('guidance')}>{g.progressionAction === 'COMPLETE' ? 'Completar etapa' : 'Otra pregunta'}</button>}
+    {g && !p.decisionOnly && <ReplySwipe key={g.question.instanceId ?? g.question.text} enabled={ordinary && !audioDirty && !!g.question.instanceId} label="Responder pregunta" onReply={() => g.question.instanceId && beginReply({ type: 'GUIDANCE_QUESTION', targetId: g.question.instanceId }, g.question.text)}><aside className="chat-panel chat-guidance" aria-label="Conversación guiada"><div className="chat-guidance-copy"><p className="chat-guidance-ordinal">Pregunta {g.questionOrdinal} de {g.maxQuestions}</p><p>{g.question.text}</p>
+      {g.completed ? <p className="chat-guidance-state">Etapa guiada completada.</p> : g.myNextRequested && <p className="chat-guidance-state">Esperando a la otra persona para continuar.</p>}</div>
+      {canProgressGuidance && <button className={g.progressionAction === 'COMPLETE' ? 'chat-guidance-complete' : 'chat-guidance-next'} aria-label={g.progressionAction === 'COMPLETE' ? 'Completar etapa' : 'Otra pregunta'} disabled={!ordinary || audioDirty} onClick={() => void session.action('guidance')}>{g.progressionAction === 'COMPLETE' ? 'Completar' : <span aria-hidden="true">›</span>}</button>}
     </aside></ReplySwipe>}
     {p.pending && <aside className="chat-panel"><h3>Salida consensuada pendiente</h3><p>Los mensajes están pausados. Aceptar o rechazar cierra la conversación.</p>{p.pending.responderUserId === me ? <><button disabled={disabled} onClick={() => void session.action('acceptance')}>Aceptar salida</button><button disabled={disabled} onClick={() => void session.action('rejection')}>Rechazar salida</button></> : <p>Esperando la respuesta de la otra persona.</p>}<button disabled={disabled} onClick={() => void session.action('timeout')}>Consultar vencimiento de la solicitud</button></aside>}
     {state.historyLimited && <p>Se cargaron los últimos 500 mensajes. El servidor no ofrece acceso a páginas anteriores.</p>}
-    <ol className="chat-timeline" aria-label="Mensajes" ref={timeline} onScroll={() => { const l = timeline.current; if (l) nearBottom.current = l.scrollHeight-l.scrollTop-l.clientHeight < 100; if (nearBottom.current) setUnseen(false); }}>
+    <ol className="chat-timeline" aria-label="Mensajes" ref={timeline} onScroll={() => { const l = timeline.current; if (l && (observedHeight.current === 0 || observedHeight.current === l.clientHeight)) nearBottom.current = l.scrollHeight-l.scrollTop-l.clientHeight < 100; if (nearBottom.current) setUnseen(false); }}>
       {state.messages.map(m => <li key={m.id} className={m.senderId === me ? 'chat-message-row outgoing' : 'chat-message-row incoming'}>
-        <ReplySwipe enabled={ordinary && !audioDirty && m.senderId !== me && ((m.messageType === 'TEXT' && !!m.content) || (m.messageType === 'AUDIO' && !!m.audio))} label={`Responder mensaje de ${chat?.partner.displayName ?? 'tu match'}`} onReply={() => beginReply({ type: 'MESSAGE', targetId: m.id }, m.messageType === 'AUDIO' ? 'Mensaje de audio' : m.content ?? '')}><article className={m.senderId === me ? 'chat-message outgoing' : 'chat-message incoming'}>
-        {m.replyTo && <blockquote>{m.replyTo.type === 'GUIDANCE_QUESTION' ? 'Pregunta: ' : 'Respuesta a: '}{m.replyTo.previewText ?? 'Audio'}</blockquote>}
+        <ReplySwipe enabled={ordinary && !audioDirty && m.senderId !== me && ((m.messageType === 'TEXT' && !!m.content) || (m.messageType === 'AUDIO' && !!m.audio))} label={`Responder mensaje de ${chat?.partner.displayName ?? 'tu match'}`} onReply={() => beginReply({ type: 'MESSAGE', targetId: m.id, senderId: m.senderId, messageType: m.messageType }, m.messageType === 'AUDIO' ? 'Mensaje de audio' : m.content ?? '')}><article className={m.senderId === me ? 'chat-message outgoing' : 'chat-message incoming'}>
+        {m.replyTo && <blockquote className="chat-quote"><ReplyQuote {...replyPreview(m.replyTo,me,chat?.partner.userId,chat?.partner.displayName)}/></blockquote>}
         {m.messageType === 'TEXT' && m.content ? <p>{m.content}</p> : m.messageType === 'AUDIO' && m.audio ? <MessageAudio message={m} refresh={() => void session.refresh(true)}/> : <p>Mensaje no compatible.</p>}
         <time dateTime={m.sentAt}>{new Date(m.sentAt).toLocaleTimeString('es-AR',{ hour: '2-digit',minute:'2-digit' })}</time>
         </article></ReplySwipe>
@@ -128,12 +156,24 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       {state.outgoing && <li className="chat-message outgoing"><p>{state.outgoing.content ?? 'Audio pendiente'}</p><p role="status">{state.outgoing.phase === 'pending' ? 'Enviando…' : state.outgoing.phase === 'uncertain' ? 'Sin confirmar' : 'Falló el envío'}</p>{state.outgoing.phase !== 'pending' && <button disabled={disabled || !p.ordinary} onClick={() => void session.retry()}>Reconciliar y reintentar el mismo envío</button>}{state.outgoing.phase === 'failed' && <button disabled={disabled} onClick={session.editFailed}>Editar borrador</button>}</li>}
     </ol>
     {unseen && <button onClick={() => { const l = timeline.current; if (l) l.scrollTop=l.scrollHeight; nearBottom.current=true; setUnseen(false); }}>Ver mensajes nuevos</button>}
-    <form className="chat-composer" onSubmit={e => { e.preventDefault(); if (ordinary && !audioDirty) void session.send(draft,reply ? { type:reply.type,targetId:reply.targetId } : null); }}>
-      {reply && <aside>Respondiendo: {reply.preview}<button type="button" disabled={!!state.outgoing} onClick={() => setReply(null)}>Quitar respuesta</button></aside>}
-      <label htmlFor="chat-draft">Mensaje</label><textarea id="chat-draft" ref={text} maxLength={1000} value={draft} onChange={e => setDraft(e.target.value)} disabled={!ordinary || audioDirty} rows={2}/><span>{draft.length}/1000</span><button disabled={!ordinary || audioDirty || !plainText(draft)}>Enviar mensaje</button>
+    <form ref={composer} className="chat-composer" aria-busy={state.messagePending} onSubmit={e => { e.preventDefault(); if (ordinary && !audioDirty && plainText(draft)) void session.send(draft,reply ? { type:reply.type,targetId:reply.targetId } : null); }}>
+      {reply && <aside className="chat-reply-preview" aria-label="Respuesta seleccionada"><ReplyQuote {...replyPreview(reply,me,chat?.partner.userId,chat?.partner.displayName)}/><button type="button" className="chat-icon-button" aria-label="Quitar respuesta" disabled={!!state.outgoing} onClick={() => setReply(null)}><ChatIcon name="close"/></button></aside>}
+      <AudioComposer policy={chat?.audioPolicy ?? null} disabled={!ordinary || dialog !== null} payloadLocked={!!state.outgoing} confirmedFile={state.confirmedFile} delivery={state.outgoing?.file ? state.outgoing.phase : null} onRetry={session.retry} onDirtyChange={setAudioDirty} onSend={file => session.send('',reply ? { type:reply.type,targetId:reply.targetId } : null,file)}>{microphone => <>
+      <div className="chat-composer-row">
+      <label className="chat-visually-hidden" htmlFor="chat-draft">Mensaje</label><textarea placeholder="Mensaje" id="chat-draft" ref={setText} maxLength={1000} value={draft} onChange={e => setDraft(e.target.value)} disabled={!ordinary || audioDirty} rows={1}
+        onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onBlur={() => { composing.current = false; }}
+        onKeyDown={event => {
+          // No standard API identifies a physical keyboard. Use conservative
+          // desktop input capabilities plus a concrete key code, never viewport/UA.
+          if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 ||
+            !['Enter','NumpadEnter'].includes(event.code) || !window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) return;
+          event.preventDefault();
+          if (!event.repeat && ordinary && !audioDirty && plainText(draft)) event.currentTarget.form?.requestSubmit();
+        }}/>{microphone}<button className="chat-icon-button chat-send" aria-label="Enviar mensaje" disabled={!ordinary || audioDirty || !plainText(draft)}><ChatIcon name="send"/></button></div><span className="chat-character-count">{draft.length}/1000</span>
       {!!draft && !plainText(draft) && <p>Usá texto sin &lt;, &gt; ni caracteres de control. Máximo 1000 caracteres.</p>}
+      </>}</AudioComposer>
+      {state.error && state.messageError && <p className="chat-composer-error" role="alert">{state.error} <button type="button" disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexi?n</button></p>}
     </form>
-    <AudioComposer key={state.messages.filter(m => m.senderId === me && m.messageType === 'AUDIO').length} payloadLocked={!!state.outgoing} onDirtyChange={setAudioDirty} policy={chat?.audioPolicy ?? null} disabled={!ordinary || !!draft} onSend={file => void session.send('',reply ? { type:reply.type,targetId:reply.targetId } : null,file)} />
     {dialog && <ConfirmDialog kind={dialog} busy={state.busy} close={() => setDialog(null)} confirm={body => { void (async () => { await session.action(dialog,body); if (!session.getSnapshot().error) setDialog(null); })(); }}/> }
   </section>;
 }

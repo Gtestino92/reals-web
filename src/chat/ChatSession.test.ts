@@ -35,6 +35,18 @@ it('keeps a confirmed reaction authoritative when reconciliation fails and expos
 it.each(['id','matchId','chatType'])('rejects wrong snapshot %s',async field=>{Object.assign(chat,{[field]:'wrong'});await session.refresh();expect(session.getSnapshot().chat).toBeNull();expect(session.getSnapshot().blocked).toBe(true);});
 it('rejects nonparticipants before accessing chat',async()=>{request.mockResolvedValue({id:'m',userAId:'stranger',userBId:'other',state:'CHAT_ACTIVE'});await session.refresh();expect(session.getSnapshot().blocked).toBe(true);expect(request).toHaveBeenCalledTimes(1);});
 it('sends stable logical text once and confirms it',async()=>{await session.refresh();await Promise.all([session.send('¡Hola!',null),session.send('¡Hola!',null)]);expect(writes()).toHaveLength(1);expect(writes()[0]?.[3]).toMatchObject({content:'¡Hola!',clientMessageId:expect.any(String)});expect(session.getSnapshot().outgoing).toBeNull();expect(session.getSnapshot().messages).toHaveLength(2);});
+it('installs the exact confirmed reply and file with the confirmation version, retaining locks through reconciliation',async()=>{
+  await session.refresh();const base=request.getMockImplementation()!;const file=new Blob(['aac'],{type:'audio/mp4'}),reply={type:'MESSAGE' as const,targetId:'1'};
+  let release:(()=>void)|undefined;let afterPost=false;
+  request.mockImplementation((path,signal,method,body)=>{
+    if(path.endsWith('/audio-messages')){afterPost=true;return Promise.resolve({...messageFixture('2','me'),clientMessageId:body instanceof FormData?body.get('clientMessageId'):null,messageType:'AUDIO',content:null,audio:{url:'https://example.test/audio',durationMillis:1000,sizeBytes:3,contentType:'audio/mp4'}});}
+    if(afterPost&&path==='/matches/m')return new Promise(resolve=>{release=()=>{void base(path,signal,method,body).then(resolve);};});
+    return base(path,signal,method,body);
+  });
+  const pending=session.send('',reply,file);await vi.waitFor(()=>expect(session.getSnapshot().confirmationVersion).toBe(1));
+  expect(session.getSnapshot()).toMatchObject({busy:true,messagePending:true,confirmedReply:reply,confirmedFile:file,outgoing:null});
+  release?.();await pending;expect(session.getSnapshot()).toMatchObject({busy:false,messagePending:false,confirmedReply:reply,confirmedFile:file});
+});
 it.each(['','<b>hola</b>','a'.repeat(1001),'hola\t'])('rejects invalid text %s',async value=>{await session.refresh();await session.send(value,null);expect(writes()).toHaveLength(0);});
 it.each([{type:'MESSAGE' as const,targetId:'1'},{type:'GUIDANCE_QUESTION' as const,targetId:'question-1'}])('preserves direct reply %s',async reply=>{await session.refresh();await session.send('Respuesta',reply);expect(writes()[0]?.[3]).toMatchObject({replyTo:reply});});
 it('rejects obsolete guidance reply identities',async()=>{await session.refresh();await session.send('Respuesta',{type:'GUIDANCE_QUESTION',targetId:'old'});expect(writes()).toHaveLength(0);});
