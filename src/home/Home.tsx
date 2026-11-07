@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionController } from '../auth/session';
 import type { Activity } from './contracts';
+import { Onboarding } from '../onboarding/Onboarding';
 import { useHome } from './useHome';
 import { activityPresentation } from './presentation';
 import { SearchingScreen } from './SearchingScreen';
@@ -33,13 +34,64 @@ function ActivityCard({ item }: { item: Activity }) {
     {typeof when === 'string' && <p>{item.type === 'SCHEDULING' || item.type === 'VISUAL_REVIEW' ? 'Hasta: ' : 'Fecha: '}<time dateTime={when}>{new Date(when).toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' })}</time></p>}
   </article>;
 }
+type ManagementSurface = 'profile' | 'preferences' | 'affinities' | 'account';
+const managementEntries = [
+  ['profile', 'Tu perfil', 'Datos personales, bio y fotos'],
+  ['preferences', 'Preferencias', 'Tus filtros para encontrar personas'],
+  ['affinities', 'Afinidades', 'Preguntas de compatibilidad'],
+  ['account', 'Cuenta', 'Notificaciones, seguridad y sesión'],
+] as const;
+
 export function Home({ controller, onCompleteProfile }: { controller: SessionController; onCompleteProfile?: () => void }) {
+  const [surface, setSurface] = useState<ManagementSurface | null>(null);
+  const locked = useRef(false), root = useRef<HTMLDivElement>(null);
+  const open = (next: ManagementSurface) => {
+    locked.current = next === 'profile' || next === 'preferences';
+    window.history.pushState(null, '');
+    setSurface(next);
+  };
+  const returnHome = () => { locked.current = false; setSurface(null); };
+  useEffect(() => {
+    if (!surface) return;
+    const pop = () => {
+      if (locked.current) window.history.pushState(null, '');
+      else setSurface(null);
+    };
+    window.addEventListener('popstate', pop);
+    return () => window.removeEventListener('popstate', pop);
+  }, [surface]);
+  useEffect(() => {
+    const heading = root.current?.querySelector('h2');
+    if (heading) { heading.tabIndex = -1; heading.focus(); }
+  }, [surface]);
+  if (!surface) return <HomeOverview controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} />;
+  return <div className="home" ref={root}>
+    <header className="home-heading"><h2>{managementEntries.find(entry => entry[0] === surface)?.[1]}</h2></header>
+    {surface === 'profile' || surface === 'preferences' ? <Onboarding controller={controller} management={surface === 'profile' ? 'details' : 'filters'} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; }} /> : <>
+      <button className="login-button login-outlined" onClick={() => window.history.back()}>Volver a Inicio</button>
+      {surface === 'affinities' ? <section className="home-card"><h3>Próximamente</h3><p>Las preguntas de compatibilidad y su progreso todavía no están disponibles en la Web.</p></section> : <>
+        <section className="home-card"><h3>Notificaciones</h3><p>Próximamente: preferencias de notificaciones en la Web.</p></section>
+        {controller.hasPasswordProvider !== false && <section className="home-card"><h3>Cambiar contraseña</h3><p>Próximamente en la Web para cuentas con contraseña.</p></section>}
+        {controller.hasPasswordProvider === false && <p>La seguridad de tu acceso se administra desde tu proveedor de inicio de sesión.</p>}
+        <section className="home-card"><h3>Eliminar cuenta</h3><p>Próximamente en la Web. Esta acción todavía no está disponible.</p></section>
+      </>}
+    </>}
+  </div>;
+}
+
+function HomeOverview({ controller, onCompleteProfile, onManage }: { controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void }) {
   const { model, busy, blocked, error, refresh, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller);
   const [surface, setSurface] = useState<'overview' | 'activity'>('overview');
   const root = useRef<HTMLDivElement>(null);
   const home = model?.home, m = home?.matchmaking;
   const waiting = !!m?.inQueue || searchPhase !== 'idle';
   const screen = waiting ? 'search' : surface;
+  useEffect(() => {
+    if (surface !== 'activity') return;
+    const pop = () => setSurface('overview');
+    window.addEventListener('popstate', pop);
+    return () => window.removeEventListener('popstate', pop);
+  }, [surface]);
   useEffect(() => {
     if (waiting) setSurface('overview');
     const heading = root.current?.querySelector('h2');
@@ -48,7 +100,7 @@ export function Home({ controller, onCompleteProfile }: { controller: SessionCon
   const presentation = home ? activityPresentation(home) : null;
   if (waiting) return <div ref={root}><SearchingScreen phase={searchPhase === 'idle' ? 'queued' : searchPhase} error={error} busy={busy} blocked={blocked} inQueue={!!m?.inQueue} onCancel={cancel} onRefresh={refresh} onBack={backFromSearch} canRetryLocation={canRetryLocation} onRetryLocation={retryLocation}/></div>;
   if (surface === 'activity' && home && presentation) return <div ref={root} className="home" aria-busy={busy}>
-    <header className="home-heading"><h2>Actividad</h2><button className="login-button login-outlined" onClick={() => setSurface('overview')}>Volver a Inicio</button></header>
+    <header className="home-heading"><h2>Actividad</h2><button className="login-button login-outlined" onClick={() => window.history.back()}>Volver a Inicio</button></header>
     <p>Descubrimientos, próximos pasos y conversaciones en un solo lugar.</p>
     {error && <p className="home-error" role="alert">{error}</p>}
     <button className="login-button login-outlined" disabled={busy} onClick={refresh}>Actualizar</button>
@@ -70,7 +122,10 @@ export function Home({ controller, onCompleteProfile }: { controller: SessionCon
           <p>Usamos tu ubicación actual para buscar personas cerca. Puede ser aproximada. El navegador te pedirá permiso al iniciar.</p>
           <button className="login-button login-primary" disabled={busy || blocked || !m?.canSearch || home.profileStatus !== 'ACTIVE'} onClick={search}>Buscar chat</button>
       </section>
-      {presentation?.hasActivity && <button className="home-card home-activity-entry" onClick={() => setSurface('activity')} aria-label="Ver Actividad"><span className="home-entry-title">Actividad</span><span>{presentation.required ? `${presentation.required} requieren tu acción` : 'Tus conversaciones y próximos pasos'}</span><span aria-hidden="true">Ver actividad →</span></button>}
+      {presentation?.hasActivity && <button className="home-card home-activity-entry" onClick={() => { window.history.pushState(null, ''); setSurface('activity'); }} aria-label="Ver Actividad"><span className="home-entry-title">Actividad</span><span>{presentation.required ? `${presentation.required} requieren tu acción` : 'Tus conversaciones y próximos pasos'}</span><span aria-hidden="true">Ver actividad →</span></button>}
+      {home.profileStatus === 'ACTIVE' && <nav aria-label="Administrar tu perfil y cuenta" className="home-grid home-management">
+        {managementEntries.map(([target, title, description]) => <button type="button" className="home-card home-activity-entry" key={target} aria-label={title} disabled={busy || blocked} onClick={() => onManage(target)}><span className="home-entry-title">{title}</span><span>{description}</span><span aria-hidden="true">Abrir →</span></button>)}
+      </nav>}
       {home.passiveNotices.map((notice, i) => <aside className="home-notice" key={`${notice}-${i}`}>{notice === 'SCHEDULING_PREPARING' ? 'Estamos preparando tus próximos pasos para coordinar horarios.' : 'Hay novedades sobre tus interacciones. Consultalas desde Android.'}</aside>)}
     </>}
   </div>;

@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
@@ -21,6 +21,7 @@ beforeEach(() => {
   auth = { observe:vi.fn(next => { next(user); return vi.fn(); }),signIn:vi.fn(),signUp:vi.fn(),google:vi.fn(),verify:vi.fn().mockResolvedValue(undefined),signOut:vi.fn().mockResolvedValue(undefined) };
   fetcher = vi.fn<typeof fetch>().mockImplementation(async (input,options) => {
     const path = String(input), method = options?.method ?? 'GET';
+    if (path === '/api/matchmaking/queue') return json({ userId:'u', inQueue:false });
     if (path === '/api/me') return json({ id:'u',status:'ACTIVE' });
     if (path === '/api/reference/countries') return json([{ code:'AR',displayName:'Argentina' },{ code:'ES',displayName:'España' }]);
     if (path === '/api/me/legal-status') return json({ requirementsSatisfied:satisfied,documents:[document()] });
@@ -46,6 +47,123 @@ function reorderWithKeyboard(source: number,target: number) {
   fireEvent.keyDown(handle,{ key:'Enter' });
 }
 const writes = (method: string) => fetcher.mock.calls.filter(x => x[1]?.method === method);
+afterEach(() => vi.useRealTimers());
+async function openManagement(name: string) {
+  profile = { ...initialProfile, status:'ACTIVE', preferredMinAge:27, preferredMaxAge:43, maxDistanceKm:62 };
+  mount();
+  const entry = await screen.findByRole('button', { name });
+  await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+}
+it('offers compact management entries and ACTIVE profile editing with photos and a focused return', async () => {
+  profile = { ...initialProfile, status:'ACTIVE' }; mount();
+  for (const name of ['Tu perfil','Preferencias','Afinidades','Cuenta']) expect(await screen.findByRole('button',{ name })).toBeVisible();
+  const entry = screen.getByRole('button',{ name:'Tu perfil' }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  const form = await screen.findByRole('form',{ name:'Datos del perfil' });
+  expect(screen.getByRole('heading',{ name:'Tu perfil' })).toHaveFocus();
+  expect(screen.getByLabelText('Agregar foto 1')).toBeInTheDocument();
+  expect(screen.queryByRole('button',{ name:'Activar perfil' })).toBeNull();
+  expect(screen.queryByRole('form',{ name:'Preferencias de búsqueda' })).toBeNull();
+  fireEvent.change(within(form).getByLabelText('Bio opcional'),{ target:{ value:'Una bio nueva' } }); fireEvent.submit(form);
+  await screen.findByText('Cambios guardados.'); expect(profile?.bio).toBe('Una bio nueva');
+  fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' }));
+  await screen.findByRole('heading',{ name:'Inicio' }); expect(screen.getByRole('heading',{ name:'Inicio' })).toHaveFocus();
+});
+it('loads saved preferences and saves only the filter contract, surviving a remount', async () => {
+  await openManagement('Preferencias');
+  const form = await screen.findByRole('form',{ name:'Preferencias de búsqueda' });
+  expect(within(form).getByRole('slider',{ name:'Edad mínima' })).toHaveAttribute('aria-valuenow','27');
+  expect(within(form).getByRole('slider',{ name:'Edad máxima' })).toHaveAttribute('aria-valuenow','43');
+  expect(within(form).getByLabelText(/Distancia máxima/)).toHaveValue('62');
+  expect(screen.queryByLabelText('Agregar foto 1')).toBeNull();
+  fireEvent.change(within(form).getByLabelText('Intención'),{ target:{ value:'FRIENDSHIP' } }); fireEvent.submit(form);
+  await screen.findByText('Cambios guardados.');
+  expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body))).toEqual({ intention:'FRIENDSHIP', lookingForGenders:profile?.lookingForGenders, preferredMinAge:27, preferredMaxAge:43, maxDistanceKm:62 });
+  fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' }));
+  const entry = await screen.findByRole('button',{ name:'Preferencias' }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  await screen.findByRole('form',{ name:'Preferencias de búsqueda' }); expect(screen.getByLabelText('Intención')).toHaveValue('FRIENDSHIP');
+});
+it.each(['PATCH','DELETE','PUT'])('routes authoritative INACTIVE after ACTIVE mutation %s', async method => {
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (input, options) => {
+    const response = await original(input, options);
+    if (options?.method === method && profile) profile = { ...profile, status:'INACTIVE' };
+    return response;
+  });
+  list = [initialPhoto]; vi.spyOn(window,'confirm').mockReturnValue(true);
+  await openManagement(method === 'PUT' ? 'Preferencias' : 'Tu perfil');
+  await screen.findByRole('form',{ name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil' });
+  if (method === 'DELETE') fireEvent.click(screen.getByRole('button',{ name:'Eliminar foto 1' }));
+  else fireEvent.submit(screen.getByRole('form',{ name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil' }));
+  await screen.findByRole('heading',{ name:'Completá tu perfil' }); expect(screen.getByText('Estado: INACTIVE')).toBeVisible();
+});
+it('blocks back navigation during a pending mutation and retains input on failure', async () => {
+  const original = fetcher.getMockImplementation()!; let finish: ((response:Response) => void) | undefined;
+  fetcher.mockImplementation((input, options) => options?.method === 'PATCH' ? new Promise(resolve => { finish = resolve; }) : original(input, options));
+  await openManagement('Tu perfil'); const form = await screen.findByRole('form',{ name:'Datos del perfil' });
+  fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Rosario' } }); fireEvent.submit(form);
+  await waitFor(() => expect(finish).toBeDefined()); expect(screen.getByRole('button',{ name:'Volver a Inicio' })).toBeDisabled();
+  fireEvent(window,new PopStateEvent('popstate')); expect(form).toBeInTheDocument();
+  await act(async () => finish?.(json({ code:'INVALID_PROFILE_COUNTRY' },400)));
+  await screen.findByRole('alert'); expect(screen.getByLabelText('Ciudad')).toHaveValue('Rosario');
+  expect(screen.getByRole('button',{ name:'Volver a Inicio' })).toBeEnabled(); expect(writes('PATCH')).toHaveLength(1);
+});
+it.each([false,true])('ACTIVE photos reuse crop and add/replace contracts (replace=%s)', async replace => {
+  if (replace) list = [initialPhoto]; const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (input,options) => {
+    if (options?.body instanceof FormData) { expect(String(input)).toBe(replace ? '/api/me/profile/photos/photo/file' : '/api/me/profile/photos'); list = [initialPhoto]; return json(initialPhoto); }
+    return original(input,options);
+  });
+  await openManagement('Tu perfil'); await screen.findByRole('form',{ name:'Datos del perfil' });
+  fireEvent.change(screen.getByLabelText(`${replace ? 'Reemplazar' : 'Agregar'} foto 1`),{ target:{ files:[new File(['jpeg'],'photo.jpg',{ type:'image/jpeg' })] } });
+  expect(screen.getByRole('button',{ name:'Volver a Inicio' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{ name:'Confirmar recorte' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(list).toHaveLength(1); expect(screen.getByRole('button',{ name:'Eliminar foto 1' })).toBeEnabled();
+});
+it('ACTIVE photos retain keyboard reordering', async () => {
+  list = [initialPhoto,{ ...initialPhoto,id:'second',position:2 }]; await openManagement('Tu perfil');
+  await screen.findByRole('form',{ name:'Datos del perfil' }); reorderWithKeyboard(1,2);
+  await screen.findByText('Cambios guardados.'); expect(list[0]?.position).toBe(2);
+});
+it('returns to waiting if the editor admission read finds an active queue', async () => {
+  const original = fetcher.getMockImplementation()!; let queued = false;
+  fetcher.mockImplementation(async (input,options) => {
+    if (String(input).endsWith('/queue')) { queued = true; return json({ userId:'u',inQueue:true }); }
+    if (String(input).endsWith('/home') && queued) return json({ ...emptyHome(),matchmaking:{ canSearch:false,inQueue:true,blockedReason:null } });
+    return original(input,options);
+  });
+  await openManagement('Tu perfil'); await screen.findByRole('heading',{ name:'Buscando chat' });
+  expect(screen.queryByRole('form')).toBeNull(); expect(writes('DELETE')).toHaveLength(0);
+});
+it('shows honest unavailable surfaces and signs out once from Account', async () => {
+  await openManagement('Afinidades'); expect(screen.getByRole('heading',{ name:'Próximamente' })).toBeVisible();
+  expect(screen.queryByRole('progressbar')).toBeNull(); expect(screen.queryByRole('link')).toBeNull();
+  fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' })); const entry = await screen.findByRole('button',{ name:'Cuenta' });
+  await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  for (const name of ['Notificaciones','Cambiar contraseña','Eliminar cuenta']) { expect(screen.getByRole('heading',{ name })).toBeVisible(); expect(screen.queryByRole('button',{ name })).toBeNull(); }
+  expect(screen.getAllByRole('button',{ name:'Cerrar sesión' })).toHaveLength(1); fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' }));
+  await screen.findByRole('button',{ name:'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce();
+});
+it('stops Home polling while editing and reconciles on resume', async () => {
+  await openManagement('Preferencias'); await screen.findByRole('form',{ name:'Preferencias de búsqueda' });
+  vi.useFakeTimers(); fetcher.mockClear();
+  await act(async () => { await vi.advanceTimersByTimeAsync(15000); }); expect(fetcher).not.toHaveBeenCalled();
+  vi.useRealTimers(); profile = { ...profile!, status:'DRAFT' };
+  fireEvent(window.document,new Event('visibilitychange'));
+  await screen.findByRole('heading',{ name:'Completá tu perfil' }); expect(screen.getByText('Estado: DRAFT')).toBeVisible();
+});
+it('does not expose password changes for Google-only identities', async () => {
+  user = { ...user, providerData:[{ providerId:'google.com',uid:'g',displayName:null,email:null,phoneNumber:null,photoURL:null }] };
+  await openManagement('Cuenta');
+  expect(screen.queryByRole('heading',{ name:'Cambiar contraseña' })).toBeNull();
+  expect(screen.getByText(/proveedor de inicio de sesión/)).toBeVisible();
+});
+it('rejects pending editor reads after sign-out', async () => {
+  const original = fetcher.getMockImplementation()!; let finish: ((value:Response) => void) | undefined;
+  fetcher.mockImplementation((input,options) => String(input).endsWith('/photos') ? new Promise(resolve => { finish = resolve; }) : original(input,options));
+  await openManagement('Tu perfil'); await waitFor(() => expect(finish).toBeDefined());
+  fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' })); await screen.findByRole('button',{ name:'Ingresar' });
+  await act(async () => finish?.(json([]))); expect(screen.queryByRole('form',{ name:'Datos del perfil' })).toBeNull();
+});
 async function createForm() { await screen.findByRole('heading',{ name:'Crear perfil' }); const form = screen.getByRole('form',{ name:'Crear perfil' }); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'Ana' } }); fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } }); fireEvent.change(within(form).getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } }); return form; }
 it('creates once under StrictMode and duplicate submit, restores DRAFT and activates through backend', async () => {
   mount(); const form = await createForm(); fireEvent.submit(form); fireEvent.submit(form);

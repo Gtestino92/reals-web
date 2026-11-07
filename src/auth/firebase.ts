@@ -2,7 +2,7 @@ import { getApps, initializeApp } from 'firebase/app';
 import { browserLocalPersistence, browserSessionPersistence, setPersistence, browserPopupRedirectResolver, createUserWithEmailAndPassword, GoogleAuthProvider, initializeAuth, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 
-export type Identity = Pick<User, 'uid' | 'emailVerified' | 'getIdToken' | 'reload'>;
+export type Identity = Pick<User, 'uid' | 'emailVerified' | 'getIdToken' | 'reload'> & Partial<Pick<User, 'providerData'>>;
 export interface AuthService {
   observe: (next: (user: Identity | null) => void, error: (error: unknown) => void) => () => void;
   signIn: (email: string, password: string, keepSignedIn: boolean) => Promise<Identity>;

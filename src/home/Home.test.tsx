@@ -172,7 +172,7 @@ it('opens Activity and returns with heading focus without fetching again', async
   expect(screen.getByRole('heading', { name: 'Actividad', level: 2 })).toHaveFocus();
   for (const name of ['Requiere tu acción','En curso','Próximamente','Recientes','Otros']) expect(screen.getByRole('region', { name })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
-  expect(screen.getByRole('heading', { name: 'Inicio' })).toHaveFocus(); expect(fetcher).not.toHaveBeenCalled();
+  expect(await screen.findByRole('heading', { name: 'Inicio' })).toHaveFocus(); expect(fetcher).not.toHaveBeenCalled();
 });
 it('can cancel location acquisition, reconcile and ignore a late position', async () => {
   let done: PositionCallback | undefined; geo.mockImplementation(ok => { done = ok; });

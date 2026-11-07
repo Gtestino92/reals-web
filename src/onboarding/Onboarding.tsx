@@ -11,6 +11,7 @@ import { photoPlacements } from './photoReorder';
 import { photoFileError } from './photoFiles';
 import './onboarding.css';
 import { SessionLoading } from '../SessionLoading';
+import { parseQueue } from '../home/contracts';
 import { Home } from '../home/Home';
 
 export function onboardingError(error: unknown) {
@@ -30,7 +31,7 @@ export function onboardingError(error: unknown) {
   return error instanceof ApiError ? messages[error.code] ?? (error.status === 400 && error.kind === 'invalid' ? 'El servidor rechazó los datos. Revisá los campos y usá texto simple, sin etiquetas HTML.' : error.kind === 'invalid' ? 'La respuesta del servidor no es válida. Actualizá el estado antes de continuar.' : error.kind === 'network' ? 'No pudimos confirmar el resultado. Revisá tu conexión y actualizá el estado.' : `No se pudo completar la operación${error.code ? ` (${error.code})` : ''}. Revisá los datos y actualizá el estado.`) : 'No pudimos completar la operación. Actualizá el estado y volvé a intentar.';
 }
 interface Model { profile: FullProfile | null; photos: Photo[]; legal: { satisfied: boolean; documents: LegalDocument[] }; interactions: boolean | null }
-export function Onboarding({ controller }: { controller: SessionController }) {
+export function Onboarding({ controller, management, onBack, onNavigationBlockedChange }: { controller: SessionController; management?: 'details' | 'filters'; onBack?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
   const [model, setModel] = useState<Model | null>(null), [catalog, setCatalog] = useState<Country[]>([]), [countryError,setCountryError] = useState('');
   const [busy, setBusy] = useState(true), [blocked,setBlocked] = useState(true), [error,setError] = useState(''), [message,setMessage] = useState('');
   const [verified,setVerified] = useState(controller.emailVerified), [success,setSuccess] = useState(false);
@@ -45,16 +46,19 @@ export function Onboarding({ controller }: { controller: SessionController }) {
     catch { if (!signal.aborted) setCountryError('No se pudo cargar el catálogo de países.'); }
   };
   const reconcile = async (signal: AbortSignal) => {
-    let status = await controller.request('/me/legal-status',signal);
-    let current = await controller.request('/legal/documents/current',signal);
-    let requirements;
-    try { requirements = legal(status,current); }
-    catch { status = await controller.request('/me/legal-status',signal); current = await controller.request('/legal/documents/current',signal); requirements = legal(status,current); }
     let profile: FullProfile | null = null;
     const account = controller.snapshot.account;
     if (!account) throw new Error('Sesión no disponible');
     try { profile = fullProfile(await controller.request('/me/profile',signal),account.id); }
     catch (e) { if (!(e instanceof ApiError) || e.code !== 'PROFILE_NOT_FOUND' || e.status !== 404) throw e; }
+    signal.throwIfAborted();
+    controller.installProfile(profile);
+    if (management && parseQueue(await controller.request('/matchmaking/queue', signal), account.id)) { signal.throwIfAborted(); onBack?.(); throw new DOMException('Búsqueda activa', 'AbortError'); }
+    let status = await controller.request('/me/legal-status',signal);
+    let current = await controller.request('/legal/documents/current',signal);
+    let requirements;
+    try { requirements = legal(status,current); }
+    catch { status = await controller.request('/me/legal-status',signal); current = await controller.request('/legal/documents/current',signal); requirements = legal(status,current); }
     const list = profile ? photos(await controller.request('/me/profile/photos',signal)) : [];
     let interactions: boolean | null = false;
     if (profile?.status === 'DRAFT' || profile?.status === 'INACTIVE') {
@@ -71,19 +75,20 @@ export function Onboarding({ controller }: { controller: SessionController }) {
     }
     signal.throwIfAborted();
     const result = { profile, photos: list, legal: requirements, interactions };
-    setModel(result); controller.installProfile(profile); setBlocked(false); setVerified(controller.emailVerified);
+    setModel(result); setBlocked(false); setVerified(controller.emailVerified);
     return result;
   };
   const run = async (task?: (signal: AbortSignal) => Promise<void>, activation = false) => {
     const resource = owner.current;
     if (!resource || resource.locked) return false;
-    resource.locked = true; setBusy(true); setError(''); setMessage(''); setPhotoError('');
+    resource.locked = true; onNavigationBlockedChange?.(true); setBusy(true); setError(''); setMessage(''); setPhotoError('');
     const signal = resource.abort.signal;
     let failure: unknown;
     try { if (task) await task(signal); }
     catch (e) { failure = e; }
     try {
       const result = await reconcile(signal);
+      if (management && task && !failure && !signal.aborted) setMessage('Cambios guardados.');
       if (activation && !failure && result.profile?.status === 'ACTIVE') setSuccess(true);
       if (failure && !signal.aborted) {
         setError(onboardingError(failure));
@@ -138,28 +143,30 @@ export function Onboarding({ controller }: { controller: SessionController }) {
     : !verified ? 'Verificá tu email antes de subir fotos. Usá «Reenviar correo» y «Ya verifiqué» en la sección anterior.'
     : crop ? 'Terminá o cancelá el recorte actual antes de elegir otra foto.'
     : 'Elegí o arrastrá una sola foto JPEG o PNG de hasta 15 MB. Podés recortarla antes de subirla.';
+  useEffect(() => { onNavigationBlockedChange?.(busy || !!crop); }, [busy, crop, onNavigationBlockedChange]);
   if (!model && busy) return <SessionLoading />;
   return <div className="onboarding" aria-busy={busy}>
+    {management && <button type="button" disabled={busy || !!crop} onClick={() => window.history.back()}>Volver a Inicio</button>}
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     {busy && <p role="status">Actualizando estado…</p>}
     <button type="button" disabled={busy || !!crop} onClick={() => void run()}>Actualizar estado</button>
     {model && !model.legal.satisfied ? <><h2>Antes de continuar</h2><p>Revisá los documentos vigentes. Algunas acciones de participación requieren que completes la acción indicada.</p>
       {model.legal.documents.map(doc => <article key={doc.type}><h3>{({ TERMS_OF_USE: 'Términos de uso', PRIVACY_NOTICE: 'Aviso de privacidad', COMMUNITY_GUIDELINES: 'Normas de la comunidad' } as Record<string,string>)[doc.type] ?? doc.type}</h3><p>Versión {doc.version} · {doc.requiredAction} · {doc.satisfied ? 'Completado' : 'Pendiente'}</p><a href={doc.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Ver documento</a>{!doc.satisfied && <button disabled={disabled} onClick={() => void run(async signal => { await controller.request('/me/legal-document-actions',signal,'POST',{ documentType: doc.type, documentVersion: doc.version, action: doc.requiredAction }); })}>{doc.requiredAction === 'ACCEPTED' ? 'Aceptar' : 'Confirmar lectura'}</button>}</article>)}
-    </> : model && success && model.profile?.status === 'ACTIVE' ? <><h2>Tu perfil está activo</h2><p>Ya podés entrar a Inicio y buscar un chat cuando quieras.</p><p>Tus fotos quedaron guardadas. Si más adelante las cambiás, puede que revisemos tu perfil otra vez.</p><button onClick={() => setSuccess(false)}>Ir a Inicio</button></> : model?.profile?.status === 'ACTIVE' ? <Home controller={controller} /> : model && !model.profile ? <><h2>Crear perfil</h2><p>Completá tus datos principales. Después vas a poder sumar fotos y activar tu perfil.</p><ProfileForm catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled} submit={writeProfile}/></> : model?.profile ? <>
-      <h2>Completá tu perfil</h2><p>Estado: {model.profile.status}</p>
+    </> : model && success && model.profile?.status === 'ACTIVE' ? <><h2>Tu perfil está activo</h2><p>Ya podés entrar a Inicio y buscar un chat cuando quieras.</p><p>Tus fotos quedaron guardadas. Si más adelante las cambiás, puede que revisemos tu perfil otra vez.</p><button onClick={() => setSuccess(false)}>Ir a Inicio</button></> : model?.profile?.status === 'ACTIVE' && !management ? <Home controller={controller} /> : model && !model.profile ? <><h2>Crear perfil</h2><p>Completá tus datos principales. Después vas a poder sumar fotos y activar tu perfil.</p><ProfileForm catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled} submit={writeProfile}/></> : model?.profile ? <>
+      {!management && <><h2>Completá tu perfil</h2><p>Estado: {model.profile.status}</p></>}
       {model.interactions === true && <aside><h3>Inicio: interacciones vigentes</h3><p>Tenés interacciones en curso. Se conservan en el backend. Este punto de consulta es de solo lectura; usá Android para continuarlas.</p></aside>}
       {model.interactions === true && <Home controller={controller} />}
       {model.interactions === null && <aside><h3>Inicio no disponible</h3><p>No pudimos consultar tus interacciones. Su estado es desconocido. Podés seguir completando el perfil o consultarlas desde Android.</p><button disabled={disabled || !!crop} onClick={() => void run()}>Reintentar Inicio</button></aside>}
       {!verified && <section id="email-verification" tabIndex={-1}><h3>Verificá tu email</h3><p>Abrí el link del correo de verificación y volvé para continuar.</p><button disabled={disabled || sendAt > now} onClick={() => { if (Date.now() < sendAt) return; void run(async () => { await controller.verifyEmail(true); setSendAt(Date.now()+60000); setMessage('Te enviamos un nuevo correo de verificación.'); }); }}>Reenviar correo{sendAt > now ? ` (${Math.ceil((sendAt-now)/1000)} s)` : ''}</button><button disabled={disabled || checkAt > now} onClick={() => { if (Date.now() < checkAt) return; void run(async () => { const value = await controller.verifyEmail(false); setVerified(value); setCheckAt(Date.now()+10000); setMessage(value ? 'Email verificado.' : 'Todavía no vemos el email verificado. Abrí el link del correo y volvé a intentar.'); }); }}>Ya verifiqué</button></section>}
-      <details open><summary>Fotos</summary><p>Hasta nueve fotos. Para la configuración local se suelen requerir cuatro fotos validadas, una de persona y una de cuerpo completo. El servidor decide si podés activar el perfil.</p>
+      {management !== 'filters' && <details open><summary>Fotos</summary><p>{management ? 'Hasta nueve fotos. Los cambios pueden requerir una nueva revisión del perfil. Revisá los estados de validación y moderación de cada foto.' : 'Hasta nueve fotos. Para la configuración local se suelen requerir cuatro fotos validadas, una de persona y una de cuerpo completo. El servidor decide si podés activar el perfil.'}</p>
         <p id="photo-upload-guidance" role="status">{uploadGuidance}</p>
         {!verified && <p><a href="#email-verification">Ir a la verificación de email</a></p>}
         {photoError && <p role="alert">{photoError}</p>}
         <PhotoGrid photos={list} disabled={disabled || !!crop} uploadsDisabled={disabled || !verified || !!crop} onSelect={selectFiles} onMove={reorderPhoto}
           onDelete={photo => { if (window.confirm('¿Eliminar esta foto?')) mutatePhoto(`/${encodeURIComponent(photo.id)}`,'DELETE'); }}/>
-      </details>
-      {(['details','filters'] as const).map(mode => <details key={mode}><summary>{mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'}</summary><ProfileForm key={`${model.profile!.id}-${mode}`} profile={model.profile!} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled || !!crop} mode={mode} submit={writeProfile}/></details>)}
-      <section><h3>Activar perfil</h3><p>Autenticidad: {authenticityLabels[model.profile.authenticityVerificationStatus] ?? 'Estado no disponible'}</p><p>La validación de fotos revisa cada imagen. La verificación de autenticidad del perfil es un proceso separado. El servidor determina si es necesaria para activar tu perfil.</p>{!verified && <p id="activation-email-guidance">Verificá tu email y presioná «Ya verifiqué» antes de activar el perfil.</p>}<button aria-describedby={!verified ? 'activation-email-guidance' : undefined} disabled={disabled || !!crop || !verified} onClick={() => void run(async signal => { await controller.verifyEmail(false); const result = fullProfile(await controller.request('/me/profile/activation',signal,'POST'),controller.snapshot.account?.id ?? ''); if (result.status !== 'ACTIVE') throw new ApiError('invalid'); },true)}>Activar perfil</button></section>
+      </details>}
+      {(['details','filters'] as const).filter(mode => !management || management === mode).map(mode => <details key={mode} open={management ? true : undefined}><summary>{mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'}</summary><ProfileForm key={`${model.profile!.id}-${mode}`} profile={model.profile!} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled || !!crop} mode={mode} submit={writeProfile}/></details>)}
+      {!management && <section><h3>Activar perfil</h3><p>Autenticidad: {authenticityLabels[model.profile.authenticityVerificationStatus] ?? 'Estado no disponible'}</p><p>La validación de fotos revisa cada imagen. La verificación de autenticidad del perfil es un proceso separado. El servidor determina si es necesaria para activar tu perfil.</p>{!verified && <p id="activation-email-guidance">Verificá tu email y presioná «Ya verifiqué» antes de activar el perfil.</p>}<button aria-describedby={!verified ? 'activation-email-guidance' : undefined} disabled={disabled || !!crop || !verified} onClick={() => void run(async signal => { await controller.verifyEmail(false); const result = fullProfile(await controller.request('/me/profile/activation',signal,'POST'),controller.snapshot.account?.id ?? ''); if (result.status !== 'ACTIVE') throw new ApiError('invalid'); },true)}>Activar perfil</button></section>}
     </> : null}
     {crop && <CropDialog file={crop.file} onCancel={closeCrop} onConfirm={async blob => { if (blocked) return; const data = new FormData(); data.append('file',blob,'profile.jpg'); if (!crop.photo) data.append('position',String(crop.position)); const attempted = await run(async signal => { await controller.request(crop.photo ? `/me/profile/photos/${encodeURIComponent(crop.photo.id)}/file` : '/me/profile/photos',signal,crop.photo ? 'PUT' : 'POST',data); }); if (!attempted) throw new Error('Hay una operación en curso. Volvé a intentar.'); if (owner.current && !owner.current.abort.signal.aborted) closeCrop(); }}/ >}
   </div>;
