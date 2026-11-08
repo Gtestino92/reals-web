@@ -11,6 +11,7 @@ export class ChatSession {
   private read: AbortController | null = null;
   private serial = 0;
   private writing = false;
+  private decisionStarted = 0;
   private reconcileReactions = false;
   private partner = '';
   private terminal = false;
@@ -22,6 +23,17 @@ export class ChatSession {
   private install(patch: Partial<State>) { if (!this.lifetime.signal.aborted) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); } }
   start() { if (this.lifetime.signal.aborted) { this.lifetime = new AbortController(); this.read = null; this.writing = false; this.serial++; } }
   dispose() { this.lifetime.abort(); this.read?.abort(); }
+  private async presentDecision(signal: AbortSignal) {
+    const remaining = 300 - (Date.now() - this.decisionStarted);
+    if (!this.state.decisionPending || remaining <= 0 || document.visibilityState !== 'visible') return;
+    await new Promise<void>(resolve => {
+      const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); document.removeEventListener('visibilitychange', done); resolve(); };
+      const timer = setTimeout(done, remaining);
+      signal.addEventListener('abort', done, { once: true });
+      document.addEventListener('visibilitychange', done, { once: true });
+      if (signal.aborted) done();
+    });
+  }
   private finish(message: string, closed = true) { this.terminal = true; this.install({ blocked: true, busy: false }); this.onTerminal(this.terminalNotice ?? message, closed); }
   private terminalError(error: unknown) {
     if (error instanceof ApiError && ['CHAT_EXPIRED','CHAT_ABANDONED'].includes(error.code)) {
@@ -51,7 +63,7 @@ export class ChatSession {
     if (!object(match) || match.id !== this.matchId || (match.userAId !== this.me && match.userBId !== this.me)) throw new ApiError('invalid');
     this.partner = str(match.userAId === this.me ? match.userBId : match.userAId);
     if (match.state !== 'CHAT_ACTIVE' && !['VISUAL_PHASE','VISUAL_APPROVED','CHAT_REJECTED','VISUAL_REJECTED','EXPIRED'].includes(str(match.state))) throw new ApiError('invalid');
-    if (match.state !== 'CHAT_ACTIVE') { if (this.current(serial)) this.finish(match.state === 'VISUAL_PHASE' ? 'Ambas personas aprobaron. Revisá tu Actividad.' : 'El chat terminó. Actualizamos Inicio.'); return; }
+    if (match.state !== 'CHAT_ACTIVE') { await this.presentDecision(signal); if (this.current(serial)) this.finish(this.state.decisionPending ? 'Tu decisión quedó registrada.' : 'El chat terminó.'); return; }
     const started = Date.now();
     const raw = await this.request(`/matches/${this.matchId}/chat`, signal);
     const received = Date.now();
@@ -64,12 +76,13 @@ export class ChatSession {
       this.messages(signal, cursor), this.request(`/chats/${this.chatId}/exit-requests`, signal).then(v => parseExits(v, this.chatId, [this.me, this.partner])),
     ]);
     if (!this.current(serial)) return;
+    if (chat.myDecision !== 'PENDING') { await this.presentDecision(signal); if (!this.current(serial)) return; }
     const merged = mergeMessages(this.state.messages, messages);
     const outgoing = this.state.outgoing;
     const confirmed = outgoing && merged.some(m => m.clientMessageId === outgoing.clientMessageId && m.senderId === this.me);
     this.install({ chat, messages: merged, exits, offset: Date.parse(chat.serverTime) - (started + received) / 2, blocked: false,
       ...(confirmed ? { outgoing: null, confirmed: outgoing.content, confirmedReply: outgoing.replyTo, confirmedFile: outgoing.file, confirmationVersion: this.state.confirmationVersion + 1 } : {}), historyLimited: this.state.historyLimited || (!cursor && messages.length >= 500) });
-    if (chat.myDecision !== 'PENDING') this.finish('Guardamos tu decisión. Revisá tu Actividad.', false);
+    if (chat.myDecision !== 'PENDING') this.finish('Tu decisión quedó registrada.', false);
   }
   private current(serial: number) { return !this.lifetime.signal.aborted && serial === this.serial; }
   resume = () => {
@@ -92,6 +105,7 @@ export class ChatSession {
     this.writing = true; this.read?.abort(); this.read = null;
     const serial = ++this.serial, signal = this.lifetime.signal;
     let accepted = false;
+    this.decisionStarted = Date.now();
     this.install({ busy: true, decisionPending: path.endsWith('/chat-decision') && object(body) ? body.decision==='APPROVED'?'approve':body.decision==='REJECTED'?'reject':null : null, guidancePending: path.endsWith('/guidance/next-request'), messageError: false, messagePending: !!outgoing, reactionFeedback: method === 'PUT' ? 'pending' : null, error: '', ...(outgoing ? { outgoing: { ...outgoing, phase: 'pending' } } : {}) });
     try {
       const result = await this.request(path, signal, method, body);

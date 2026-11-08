@@ -19,7 +19,10 @@ export function App({ firebase = setup(), api }: { firebase?: FirebaseSetup; api
 function SessionApp({ controller }: { controller: SessionController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [chatActive, setChatActive] = useState(false);
-  const chatShell = chatActive && state.phase === 'ready' && state.profile?.status === 'ACTIVE';
+  const [managementActive, setManagementActive] = useState(false);
+  const [setupAccountAvailable, setSetupAccountAvailable] = useState(false);
+  const homeReady = state.phase === 'ready' && (state.profile?.status === 'ACTIVE' || managementActive);
+  const chatShell = chatActive && homeReady;
   if (state.phase === 'login' || state.phase === 'authenticating') return <LoginScreen
     loading={state.operation === 'signIn' || state.operation === 'signUp'}
     googleLoading={state.operation === 'google'} passwordResetLoading={state.operation === 'reset'}
@@ -36,10 +39,10 @@ function SessionApp({ controller }: { controller: SessionController }) {
     </div></header>}
     {(state.phase === 'checking' || state.phase === 'loading') && <SessionLoading />}
     {state.phase === 'signingOut' && <p role="status">Cerrando sesión…</p>}
-    {state.phase === 'ready' && (state.profile?.status === 'ACTIVE' ? <Home key={`${state.account?.id}-${state.profile.id}`} controller={controller} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding key={state.account?.id} controller={controller} />)}
+    {state.phase === 'ready' && (homeReady ? <Home key={`${state.account?.id}-${state.profile?.id}`} controller={controller} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding key={state.account?.id} controller={controller} onAccountAvailableChange={setSetupAccountAvailable} />)}
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
-    {!chatShell && state.phase !== 'checking' && <div className="session-actions"><button className="login-button login-outlined" disabled={state.phase === 'signingOut'} onClick={controller.signOut}>Cerrar sesión</button></div>}
+    {!chatShell && !homeReady && !setupAccountAvailable && state.phase !== 'checking' && <div className="session-actions"><button className="login-button login-outlined" disabled={state.phase === 'signingOut'} onClick={controller.signOut}>Cerrar sesión</button></div>}
   </section></main>;
 }

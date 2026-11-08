@@ -1,5 +1,8 @@
 .login-panel:has(.home) { width: min(100%, 960px); max-width: 960px; }
+html:has(.home) { scrollbar-gutter: stable; }
+.login-page:has(.home) > .login-panel { width: min(100%, 960px); max-width: 960px; margin: 0 auto; }
 .home { text-align: left; display: grid; gap: 24px; min-width: 0; }
+.home[hidden] { display: none; }
 .home h2, .home h3, .home h4 { font-family: var(--font-display); font-weight: var(--font-weight-display); margin: 0 0 12px; }
 .home h2 { font-size: var(--type-screen-title-size); line-height: var(--type-screen-title-line-height); }
 .home h3 { font-size: var(--type-section-title-size); line-height: var(--type-section-title-line-height); }
@@ -17,6 +20,8 @@
 .home-error { color: var(--color-on-error-container); background: var(--color-error-container); padding: 16px; border-radius: var(--radius-extra-small); }
 .home button { min-height: var(--control-min-height); }
 .home button:focus-visible { outline: 3px solid var(--color-secondary); outline-offset: 3px; }
+.home-reconciling .login-button:disabled { opacity: 1; }
+.home-reconciling .home-search-ready.login-primary:disabled { background: var(--color-primary); color: var(--color-on-primary); }
 @media (min-width: 700px) { .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 400px) { .home-card { padding: 16px; } }
 .home-activity-entry { display: grid; gap: 8px; text-align: left; color: inherit; font: inherit; cursor: pointer; }
@@ -40,3 +45,14 @@
 .search-dots-paused span { animation: none; }
 @keyframes search-pulse { 0%, 80%, 100% { opacity: .35; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-5px); } }
 @media (prefers-reduced-motion: reduce) { .search-dots span { animation: none; } }
+.home-account { display: grid; gap: 24px; }
+.onboarding .home-account { margin-block-start: 20px; }
+.onboarding > .home-heading .login-button { margin: 0; min-height: var(--control-min-height); padding: 10px 24px; background: transparent; font-size: .875rem; font-weight: 600; }
+.onboarding:has(.first-chat) > .home-account { display: none; }
+.home-account #account-options, .home-account form { display: grid; gap: 12px; }
+.home-account label { display: grid; gap: 8px; }
+.home-account input[type=checkbox] { width: 22px; height: 22px; }
+.home-account input[type=password] { width: 100%; min-height: 48px; }
+.home-account dialog { width: min(440px, 90vw); max-height: 90dvh; overflow: auto; padding: 24px; border: 1px solid var(--color-outline); border-radius: 16px; color: var(--color-on-surface); background: var(--color-surface); }
+.home-account dialog::backdrop { background: rgb(0 0 0 / 50%); }
+@media (max-width: 340px) { .home-account .home-heading { flex-direction: column; align-items: stretch; } }

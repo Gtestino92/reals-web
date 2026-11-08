@@ -5,6 +5,7 @@ const sdk = vi.hoisted(() => ({
   initializeApp: vi.fn(() => ({})), initializeAuth: vi.fn(), onAuthStateChanged: vi.fn(),
   setPersistence: vi.fn<(_auth: unknown, persistence: string) => Promise<void>>(), signInWithEmailAndPassword: vi.fn(),
   createUserWithEmailAndPassword: vi.fn(), signInWithPopup: vi.fn(), sendEmailVerification: vi.fn(), signOut: vi.fn(),
+  reauthenticateWithCredential: vi.fn(), updatePassword: vi.fn(), EmailAuthProvider: { credential: vi.fn() },
 }));
 vi.mock('firebase/app', () => ({ getApps: () => [], initializeApp: sdk.initializeApp }));
 vi.mock('firebase/auth', () => ({ ...sdk, browserLocalPersistence: 'local', browserSessionPersistence: 'session', browserPopupRedirectResolver: 'popup', GoogleAuthProvider: class {} }));
@@ -21,6 +22,27 @@ function service() {
   return setup.service;
 }
 const flush = async () => { await new Promise<void>(resolve => queueMicrotask(resolve)); await Promise.resolve(); };
+it('uses correctly encoded Spanish when the password access method is unavailable', async () => {
+  await expect(service().changePassword!(user, 'current-secret', 'next-secret')).rejects.toThrow('Método de acceso no disponible.');
+  expect(sdk.reauthenticateWithCredential).not.toHaveBeenCalled();
+});
+it('reauthenticates before updating password and refreshes the token', async () => {
+  const identity = { ...user, email: 'fixture@example.com', providerData: [{ providerId: 'password', uid: 'f', displayName: null, email: null, phoneNumber: null, photoURL: null }] };
+  sdk.auth.currentUser = identity;
+  sdk.EmailAuthProvider.credential.mockReturnValue({ providerId: 'password' });
+  await service().changePassword!(identity, 'current-secret', 'next-secret');
+  expect(sdk.reauthenticateWithCredential).toHaveBeenCalledExactlyOnceWith(identity, { providerId: 'password' });
+  expect(sdk.updatePassword).toHaveBeenCalledExactlyOnceWith(identity, 'next-secret');
+  expect(user.getIdToken).toHaveBeenCalledWith(true);
+});
+it.each(['failure', 'identity-switch'])('never updates password after reauthentication %s', async scenario => {
+  const identity = { ...user, email: 'fixture@example.com', providerData: [{ providerId: 'password', uid: 'f', displayName: null, email: null, phoneNumber: null, photoURL: null }] };
+  sdk.auth.currentUser = identity;
+  if (scenario === 'failure') sdk.reauthenticateWithCredential.mockRejectedValueOnce(new Error('credential rejected'));
+  else sdk.reauthenticateWithCredential.mockImplementationOnce(async () => { sdk.auth.currentUser = { ...user, uid: 'different' }; });
+  await expect(service().changePassword!(identity, 'current-secret', 'next-secret')).rejects.toThrow();
+  expect(sdk.updatePassword).not.toHaveBeenCalled();
+});
 beforeEach(() => {
   vi.resetAllMocks(); sdk.auth.currentUser = null;
   sdk.initializeAuth.mockReturnValue(sdk.auth);

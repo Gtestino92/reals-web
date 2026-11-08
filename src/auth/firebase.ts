@@ -1,5 +1,5 @@
 import { getApps, initializeApp } from 'firebase/app';
-import { browserLocalPersistence, browserSessionPersistence, setPersistence, browserPopupRedirectResolver, createUserWithEmailAndPassword, GoogleAuthProvider, initializeAuth, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut } from 'firebase/auth';
+import { browserLocalPersistence, browserSessionPersistence, setPersistence, browserPopupRedirectResolver, createUserWithEmailAndPassword, GoogleAuthProvider, initializeAuth, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 
 export type Identity = Pick<User, 'uid' | 'emailVerified' | 'getIdToken' | 'reload'> & Partial<Pick<User, 'providerData'>>;
@@ -9,6 +9,7 @@ export interface AuthService {
   signUp: (email: string, password: string, keepSignedIn: boolean) => Promise<Identity>;
   google: () => Promise<Identity>;
   verify: (user: Identity) => Promise<void>;
+  changePassword?: (identity: Identity, current: string, next: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 export type FirebaseSetup = { service: AuthService; localVerification: boolean } | { error: string };
@@ -50,6 +51,16 @@ export function configureFirebase(env: ImportMetaEnv = import.meta.env): Firebas
     return {
       localVerification: localVerificationEnabled(env.DEV, env.VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION, window.location.hostname),
       service: {
+        changePassword: async (identity, current, next) => {
+          const user = auth.currentUser;
+          const valid = () => auth.currentUser === user && user?.uid === identity.uid;
+          if (!user || !valid() || !user.email || !user.providerData.some(p => p.providerId === 'password')) throw new Error('Método de acceso no disponible.');
+          await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, current));
+          if (!valid()) throw new DOMException('Sesión obsoleta', 'AbortError');
+          await updatePassword(user, next);
+          if (!valid()) throw new DOMException('Sesión obsoleta', 'AbortError');
+          await user.getIdToken(true);
+        },
         observe: (next, error) => {
           let active = true;
           let revision = 0;
