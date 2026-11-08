@@ -52,7 +52,47 @@ try {
   const wait = async (p, expression) => { for (let i = 0; i < 150; i++) { if (await p.evaluate(expression)) return; await new Promise(r => setTimeout(r, 100)); } throw Error('Timeout ' + expression + ' ' + await p.evaluate('document.body.innerText')); };
   const click = async (p, text) => p.evaluate(`Array.from(document.querySelectorAll('button')).find(b=>(b.getAttribute('aria-label')===${JSON.stringify(text)}||b.textContent===${JSON.stringify(text)})&&!b.closest('[hidden]'))?.click()`);
   const results = [];
-  if (process.argv.includes('--opt-in')) {
+  if (process.argv.includes('--search-only')) {
+    inQueue = false; delay = 250;
+    const p = await page('tab-ownership-fixture.html?kind=home&ownership=auto&geo=1');
+    await p.call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+    await wait(p, "!!document.querySelector('.home-search button:not(:disabled)')");
+    const from = requests.length;
+    await click(p, 'Buscar chat'); await wait(p, "!!document.querySelector('.search-screen')");
+    await wait(p, "[...document.querySelectorAll('.search-dots span')].flatMap(n=>n.getAnimations()).filter(a=>a.startTime!==null).length===3");
+    await p.evaluate(`(() => {
+      const root=document.querySelector('.search-screen'), title=root.querySelector('h2'), body=root.querySelector('[role=status]'), logo=root.querySelector('img'), dots=root.querySelector('.search-dots');
+      const animations=[...dots.children].flatMap(n=>n.getAnimations()), starts=animations.map(a=>a.startTime);
+      const cancel=root.querySelector('button'); cancel.focus(); const scroll=scrollY;
+      window.stableSamples=0; window.stabilityError=null;
+      window.checkSearch=()=>{
+        if (!root.isConnected) { if(document.querySelector('.search-screen')) throw Error('Search remounted'); return; }
+        if(root!==document.querySelector('.search-screen')||root.querySelector('h2')!==title||root.querySelector('[role=status]')!==body||root.querySelector('img')!==logo||root.querySelector('.search-dots')!==dots) throw Error('Search nodes replaced');
+        if(title.textContent!=='Buscando chat'||body.textContent!=='Estamos buscando a alguien compatible. Te avisaremos cuando encontremos una persona para conversar.'||body.hasAttribute('aria-label')) throw Error('Processing phase announced');
+        const current=[...dots.children].flatMap(n=>n.getAnimations());
+        if(current.length!==3||current.some((a,i)=>a!==animations[i]||a.startTime!==starts[i])) throw Error('Animation restarted');
+        if(scrollY!==scroll) throw Error('Search scroll reset');
+        if(!cancel.disabled&&document.activeElement!==cancel) throw Error('Search focus reset');
+        window.stableSamples++;
+      };
+      window.searchWatch=setInterval(()=>{try{window.checkSearch();}catch(error){window.stabilityError=error.message;}},25);
+      window.checkSearch();
+    })()`);
+    await wait(p, "document.querySelector('.search-screen')?.getAttribute('aria-busy')==='false'");
+    await p.evaluate('window.checkSearch()');
+    await click(p, 'Cancelar búsqueda');
+    await wait(p, "document.querySelector('.search-screen button')?.disabled===true");
+    await p.evaluate('window.checkSearch()');
+    await new Promise(r => setTimeout(r, 100));
+    if (!await p.evaluate("!!document.querySelector('.search-screen') && !document.querySelector('.home-search')")) throw Error('Optimistic return Home');
+    await wait(p, "!!document.querySelector('.home-search button:not(:disabled)')");
+    const evidence = await p.evaluate('clearInterval(window.searchWatch); ({samples:window.stableSamples,error:window.stabilityError})');
+    if(evidence.error) throw Error(evidence.error);
+    const writes=requests.slice(from).filter(r=>r.method!=='GET').map(r=>r.method);
+    if(JSON.stringify(writes)!==JSON.stringify(['POST','DELETE'])) throw Error('Duplicate or reordered writes');
+    results.push({ stableSearch: true, animationInstancesPreserved: true, cancelDisabledPending: true, authoritativeReturnHome: true, ...evidence, writes });
+    await p.call('Page.close');
+  } else if (process.argv.includes('--opt-in')) {
     const a = await page('tab-ownership-fixture.html?kind=login&ownership=auto'); await wait(a, "!!document.querySelector('form')");
     const b = await page('tab-ownership-fixture.html?kind=login&ownership=auto'); await wait(b, "!!document.querySelector('form')");
     await wait(a, "!!document.querySelector('#tab-heading') && !document.querySelector('form')");
@@ -65,7 +105,7 @@ try {
     const p = await page(`queue-latency-fixture.html?run=1${before ? '&before=1' : ''}`);
     await wait(p, "document.querySelector('#search')?.disabled===false"); const from = requests.length;
     await p.evaluate("document.querySelector('#search').click()");
-    await wait(p, `!!document.querySelector('[aria-label="Búsqueda confirmada"]')`);
+    await wait(p, "window.queuePhase==='queued'");
     const data = await p.evaluate('({trace,startAt,clickedAt,total:performance.now()-startAt})');
     const posts = requests.slice(from).filter(r => r.method === 'POST'); if (posts.length !== 1) throw Error('Duplicate admission');
     const post = data.trace.find(x => x.kind === 'POST /api/matchmaking/queue');
@@ -90,8 +130,8 @@ try {
   results.push({ enabledTakeover: true, focusDoesNotSteal: true }); await a.call('Page.close'); await b.call('Page.close');
   const p = await page('tab-ownership-fixture.html?kind=home&ownership=auto&geo=1&signout=1');
   await wait(p, "!!document.querySelector('.home-search button:not(:disabled)')");
-  await click(p, 'Buscar chat'); await wait(p, "document.body.innerText.includes('Obteniendo ubicación')");
-  await wait(p, `!!document.querySelector('[aria-label="Búsqueda confirmada"]')`);
+  await click(p, 'Buscar chat'); await wait(p, "!!document.querySelector('.search-screen')");
+  await wait(p, "document.querySelector('.search-screen')?.getAttribute('aria-busy')==='false'");
   await click(p, 'Cancelar búsqueda'); await wait(p, "!!document.querySelector('.home-search button:not(:disabled)')");
   await click(p, 'Cuenta'); await wait(p, "history.state?.trail.at(-1)==='account'"); await click(p, 'Cerrar sesión');
   await wait(p, "!!document.querySelector('.reals-sign-out-dialog[open]')");

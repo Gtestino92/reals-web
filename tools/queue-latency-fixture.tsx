@@ -26,6 +26,7 @@ const useModel: typeof useHome = params.has('before') ? (await import(/* @vite-i
 Object.assign(window, { trace, startAt: 0 });
 function Probe() {
   const model = useModel(controller);
+  Object.assign(window, { queuePhase: model.searchPhase });
   return <><button id="search" disabled={model.busy || model.blocked} onClick={() => { trace.length = 0; Object.assign(window, { startAt: performance.now(), clickedAt: Date.now() }); model.search(); }}>Buscar chat</button>
     <SearchingScreen phase={model.searchPhase} busy={model.busy} blocked={model.blocked} error={model.error} inQueue={!!model.model?.home.matchmaking.inQueue} onCancel={model.cancel} onRefresh={model.refresh} onBack={model.backFromSearch} canRetryLocation={model.canRetryLocation} onRetryLocation={model.retryLocation} /></>;
 }

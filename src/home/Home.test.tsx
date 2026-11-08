@@ -14,7 +14,7 @@ let geo: ReturnType<typeof vi.fn<Geolocation['getCurrentPosition']>>;
 const json = (v: unknown, code = 200) => new Response(JSON.stringify(v), { status: code });
 const position = (overrides = {}) => ({ coords: { latitude: 12, longitude: -21, accuracy: 25, altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}) }, timestamp: Date.now(), toJSON: () => ({}), ...overrides });
 function mount() { return render(<App firebase={{ service: auth, localVerification: false }} api={new ApiClient(fetcher)} />); }
-const confirmed = async () => { await screen.findByRole('status', { name: 'Búsqueda confirmada' }); };
+const confirmed = async () => { await waitFor(() => { expect(document.querySelector('.search-screen')).toHaveAttribute('aria-busy', 'false'); expect(screen.getByRole('button', { name: 'Cancelar búsqueda' })).toBeEnabled(); expect(screen.queryByRole('alert')).toBeNull(); }); };
 const search = () => screen.getByRole('button', { name: 'Buscar chat' });
 const ready = async () => { await waitFor(() => { expect(document.querySelector('.home')).toHaveAttribute('aria-busy', 'false'); expect(screen.queryByText('Hola, Lucía') ?? screen.queryByRole('heading', { name: 'Buscando chat' })).toBeTruthy(); }); };
 const writes = () => fetcher.mock.calls.filter(([url, o]) => String(url).endsWith('/queue') && o?.method !== 'GET');
@@ -223,7 +223,7 @@ it('opens Activity and returns with heading focus without fetching again', async
 it('can cancel location acquisition, reconcile and ignore a late position', async () => {
   let done: PositionCallback | undefined; geo.mockImplementation(ok => { done = ok; });
   mount(); await ready(); fireEvent.click(search());
-  expect(screen.getByRole('heading', { name: 'Obteniendo ubicación' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible();
   expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' }));
   await waitFor(() => expect(search()).toBeEnabled());
@@ -234,40 +234,51 @@ it('serializes cancellation after an in-flight admission and suppresses duplicat
   const original = fetcher.getMockImplementation()!; let admit: ((response: Response) => void) | undefined;
   fetcher.mockImplementation((url, options) => options?.method === 'POST' ? new Promise(resolve => { admit = resolve; }) : original(url, options));
   mount(); await ready(); fireEvent.click(search());
-  await screen.findByRole('heading', { name: 'Ingresando a la búsqueda' }); await waitFor(() => expect(admit).toBeDefined());
+  await screen.findByRole('heading', { name: 'Buscando chat' }); await waitFor(() => expect(admit).toBeDefined());
   const cancel = screen.getByRole('button', { name: 'Cancelar búsqueda' }); fireEvent.click(cancel); fireEvent.click(cancel);
-  expect(screen.getByRole('heading', { name: 'Cancelando búsqueda' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible();
   expect(writes().map(([, o]) => o?.method)).toEqual(['POST']);
   home.matchmaking.inQueue = true;
   await act(async () => admit?.(json({ userId: 'u', inQueue: true })));
   await waitFor(() => expect(search()).toBeEnabled());
   expect(writes().map(([, o]) => o?.method)).toEqual(['POST','DELETE']); expect(home.matchmaking.inQueue).toBe(false);
 });
-it('keeps one stable preparation surface through location, admission and reconciliation', async () => {
-  let located: PositionCallback | undefined, admit: ((response: Response) => void) | undefined, queueRead: ((response: Response) => void) | undefined;
+it('keeps the same search DOM, copy, focus and scroll through admission and pending cancellation', async () => {
+  let located: PositionCallback | undefined, admit: ((response: Response) => void) | undefined, queueRead: ((response: Response) => void) | undefined, leave: ((response: Response) => void) | undefined;
+  let holdQueue = true;
   geo.mockImplementation(ok => { located = ok; });
   const original = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => {
     if (options?.method === 'POST') return new Promise(resolve => { admit = resolve; });
-    if (url === '/api/matchmaking/queue') return new Promise(resolve => { queueRead = resolve; });
+    if (options?.method === 'DELETE') return new Promise(resolve => { leave = resolve; });
+    if (url === '/api/matchmaking/queue' && holdQueue) { holdQueue = false; return new Promise(resolve => { queueRead = resolve; }); }
     return original(url, options);
   });
   mount(); await ready(); fireEvent.click(search());
-  const heading = screen.getByRole('heading', { name: 'Obteniendo ubicación' }), status = screen.getByRole('status');
-  const seal = screen.getByRole('img', { name: 'Reals' }), dots = document.querySelector('.search-dots');
-  await act(async () => located?.(position())); await waitFor(() => expect(admit).toBeDefined());
-  expect(heading).toHaveTextContent('Ingresando a la búsqueda'); expect(status).not.toHaveAccessibleName('Búsqueda confirmada');
+  const heading = screen.getByRole('heading', { name: 'Buscando chat' }), status = screen.getByRole('status');
+  const body = status.textContent, container = heading.parentElement, seal = screen.getByRole('img', { name: 'Reals' }), dots = document.querySelector('.search-dots');
+  const pulses = Array.from(dots?.children ?? []), cancel = screen.getByRole('button', { name: 'Cancelar b\u00fasqueda' });
+  act(() => cancel.focus()); document.documentElement.scrollTop = 41;
+  const stable = () => {
+    expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBe(heading);
+    expect(heading.parentElement).toBe(container); expect(screen.getByRole('status')).toBe(status); expect(status.textContent).toBe(body);
+    expect(status).not.toHaveAttribute('aria-label'); expect(screen.getByRole('img', { name: 'Reals' })).toBe(seal);
+    expect(document.querySelector('.search-dots')).toBe(dots); expect(dots).toHaveClass('search-dots', { exact: true });
+    pulses.forEach((pulse, index) => expect(dots?.children[index]).toBe(pulse));
+    expect(document.documentElement.scrollTop).toBe(41); expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
+  };
+  stable();
+  await act(async () => located?.(position())); await waitFor(() => expect(admit).toBeDefined()); stable(); expect(cancel).toHaveFocus();
   home.matchmaking.inQueue = true; await act(async () => admit?.(json({ userId: 'u', inQueue: true })));
-  await waitFor(() => expect(queueRead).toBeDefined());
-  expect(heading).toHaveTextContent('Confirmando búsqueda'); expect(status).not.toHaveAccessibleName('Búsqueda confirmada');
-  expect(screen.getByRole('button', { name: 'Cancelar búsqueda' })).toBeEnabled();
-  await act(async () => queueRead?.(json({ userId: 'u', inQueue: true })));
-  await confirmed();
-  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBe(heading);
-  expect(screen.getByRole('status')).toBe(status); expect(screen.getByRole('img', { name: 'Reals' })).toBe(seal); expect(document.querySelector('.search-dots')).toBe(dots);
-  expect(writes()).toHaveLength(1);
+  await waitFor(() => expect(queueRead).toBeDefined()); stable(); expect(cancel).toBeEnabled();
+  await act(async () => queueRead?.(json({ userId: 'u', inQueue: true }))); await confirmed(); stable(); expect(cancel).toHaveFocus();
+  fireEvent.click(cancel); fireEvent.click(cancel); await waitFor(() => expect(leave).toBeDefined());
+  stable(); expect(cancel).toBeDisabled(); expect(writes().map(([, options]) => options?.method)).toEqual(['POST', 'DELETE']);
+  home.matchmaking.inQueue = false; await act(async () => leave?.(json({ userId: 'u', inQueue: false })));
+  await waitFor(() => expect(search()).toBeEnabled()); expect(container).not.toBeInTheDocument();
+  expect(writes()).toHaveLength(2); expect(screen.queryByRole('alert')).toBeNull();
 });
-it('accepts cancellation during admission reconciliation and keeps cancellation copy until it finishes', async () => {
+it('accepts cancellation during admission reconciliation and keeps searching copy until it finishes', async () => {
   let queueRead: ((response: Response) => void) | undefined; let held = false;
   const original = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => {
@@ -279,7 +290,7 @@ it('accepts cancellation during admission reconciliation and keeps cancellation 
   mount(); await ready(); fireEvent.click(search()); await waitFor(() => expect(queueRead).toBeDefined());
   const cancel = screen.getByRole('button', { name: 'Cancelar búsqueda' });
   expect(cancel).toBeEnabled(); fireEvent.click(cancel); fireEvent.click(cancel);
-  expect(screen.getByRole('heading', { name: 'Cancelando búsqueda' })).toBeVisible(); expect(cancel).toBeDisabled();
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(cancel).toBeDisabled();
   await act(async () => queueRead?.(json({ userId: 'u', inQueue: true })));
   await waitFor(() => expect(search()).toBeEnabled());
   expect(writes().map(([, options]) => options?.method)).toEqual(['POST','DELETE']); expect(home.matchmaking.inQueue).toBe(false);
@@ -307,7 +318,7 @@ it('waits for first permission grant and slow acquisition before sending exactly
   vi.useFakeTimers(); mount(); await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   fireEvent.click(search());
   await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
-  expect(screen.getByRole('heading', { name: 'Obteniendo ubicación' })).toBeVisible(); expect(writes()).toHaveLength(0);
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(writes()).toHaveLength(0);
   await act(async () => { granted?.(position()); await vi.advanceTimersByTimeAsync(0); });
   expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(writes()).toHaveLength(1); expect(geo).toHaveBeenCalledOnce();
 });
@@ -351,11 +362,11 @@ it('fallback admits once with actual accuracy and retains the screen while updat
   let coarse: PositionCallback | undefined;
   geo.mockImplementationOnce((_ok, fail) => fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 })).mockImplementation(ok => { coarse = ok; });
   mount(); await ready(); fireEvent.click(search()); await waitFor(() => expect(geo).toHaveBeenCalledTimes(2));
-  const heading = screen.getByRole('heading', { name: 'Obteniendo ubicación' }), status = screen.getByRole('status');
+  const heading = screen.getByRole('heading', { name: 'Buscando chat' }), status = screen.getByRole('status');
   const waitingSurface = heading.parentElement;
-  expect(status).toHaveAccessibleName('Preparando búsqueda; ingreso todavía no confirmado'); expect(writes()).toHaveLength(0);
+  expect(status).not.toHaveAttribute('aria-label'); expect(writes()).toHaveLength(0);
   await act(async () => coarse?.(position({ coords: { ...position().coords, accuracy: 4200 } }))); await confirmed();
-  expect(heading).toHaveTextContent('Buscando chat'); expect(heading.parentElement).toBe(waitingSurface); expect(status).toHaveAccessibleName('Búsqueda confirmada');
+  expect(heading).toHaveTextContent('Buscando chat'); expect(heading.parentElement).toBe(waitingSurface); expect(status).not.toHaveAttribute('aria-label');
   expect(writes()).toHaveLength(1); expect(JSON.parse(String(writes()[0]?.[1]?.body)).accuracyMeters).toBe(4200);
   expect(geo.mock.calls[1]?.[2]?.enableHighAccuracy).toBe(true);
 });
@@ -386,6 +397,7 @@ it('leaves waiting for authoritative new activity using the same poller', async 
   home.matchmaking.inQueue = false; home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }]; status.version++;
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(screen.getByRole('region', { name: 'Primer chat' })).toBeVisible();
+  expect(document.querySelector('.search-screen')).toBeNull(); expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
   expect(fetcher.mock.calls.filter(([url]) => url === '/api/me/home')).toHaveLength(1);
   fetcher.mockClear();
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });

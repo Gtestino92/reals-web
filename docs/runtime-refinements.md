@@ -1,5 +1,7 @@
 # Queue latency, environment ownership and sign-out review
 
+Current search presentation (review at `6e8ef9b`): normal location/admission/reconciliation/queued/canceling phases now share the unchanged Buscando chat screen and body, without phase-specific live-region labels or admission announcements. This supersedes the earlier preparation-copy descriptions below; internal phases, API coordination and the optimizations remain unchanged. Errors retain their existing retry/refresh content. Run only `node tools/runtime-refinements-browser.mjs --search-only` for the focused stability smoke (Vite loopback with ownership opt-in false): real DOM/focus/scroll and CSS animation identity, pending cancel and authoritative Home return, one POST/DELETE. Validation: focused Home tests 69/69, one final full suite 780/780, typecheck/build/diff check passed. Chromium passed 74 stability samples; physical devices/screen readers remain unverified.
+
 Base: main `298f131`; task HEAD `a6864fe`, clean tree on `feature/single-active-tab`. Sibling repositories are read-only. This is a scoped Web change; no backend or Android mutation is authorized.
 
 ## Async/mutation review
