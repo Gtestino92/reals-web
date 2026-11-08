@@ -11,16 +11,19 @@ import { SessionLoading } from './SessionLoading';
 import seal from './assets/reals-seal.png';
 import { Home } from './home/Home';
 
-let defaultSetup: FirebaseSetup | undefined;
-function setup(ownership?: TabOwnershipManager) { return defaultSetup ??= configureFirebase(import.meta.env, ownership); }
 type AppProps = { firebase?: FirebaseSetup; api?: ApiClient; ownership?: TabOwnershipManager };
 export function App(props: AppProps) {
   return <TabGate manager={props.ownership}>{ownership => <OperationalApp {...props} ownership={ownership} />}</TabGate>;
 }
 export function OperationalApp({ firebase, api, ownership }: AppProps) {
-  firebase ??= setup(ownership);
-  const [controller] = useState(() => 'service' in firebase ? new SessionController(firebase.service, (api ?? new ApiClient()).withOwnership(ownership), firebase.localVerification, ownership) : null);
-  if (!controller) return <main className="login-page"><section className="login-panel"><h1>Reals</h1><p role="alert">{'error' in firebase ? firebase.error : 'Firebase no está configurado.'}</p></section></main>;
+  const [{ controller, firebaseSetup }] = useState(() => {
+    // SDK app/auth initialization is idempotent; the service wrapper belongs to
+    // this operational mount and must never retain a previous gate's manager.
+    const firebaseSetup = firebase ?? configureFirebase(import.meta.env, ownership);
+    const controller = 'service' in firebaseSetup ? new SessionController(firebaseSetup.service, (api ?? new ApiClient()).withOwnership(ownership), firebaseSetup.localVerification, ownership) : null;
+    return { controller, firebaseSetup };
+  });
+  if (!controller) return <main className="login-page"><section className="login-panel"><h1>Reals</h1><p role="alert">{'error' in firebaseSetup ? firebaseSetup.error : 'Firebase no está configurado.'}</p></section></main>;
   return <SessionApp controller={controller} />;
 }
 function SessionApp({ controller }: { controller: SessionController }) {

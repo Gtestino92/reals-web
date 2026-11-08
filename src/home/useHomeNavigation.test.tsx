@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { useHomeNavigation } from './useHomeNavigation';
 
 it('consumes owned returns and restores destinations with Back and Forward without growing history', async () => {
@@ -30,8 +30,14 @@ it('restores a blocked Back instead of adding history entries', async () => {
   const { result } = renderHook(() => useHomeNavigation(() => !blocked));
   act(() => result.current.open('profile')); const length = history.length;
   blocked = true; act(() => result.current.backTo('home')); expect(result.current.destination).toBe('profile');
-  act(() => history.back());
-  await waitFor(() => expect(history.state.trail).toEqual(['home', 'profile']));
+  // State already equals this trail before the asynchronous Back starts.
+  // Wait for both the attempted traversal and its restoring Forward event.
+  const traversed = vi.fn(); window.addEventListener('popstate', traversed);
+  try {
+    act(() => history.back());
+    await waitFor(() => expect(traversed).toHaveBeenCalledTimes(2));
+  } finally { window.removeEventListener('popstate', traversed); }
+  expect(history.state.trail).toEqual(['home', 'profile']);
   expect(result.current.destination).toBe('profile'); expect(history.length).toBe(length);
   blocked = false; act(() => result.current.backTo('home')); await waitFor(() => expect(result.current.destination).toBe('home'));
 });
