@@ -1,3 +1,5 @@
+import { TabGate } from './tabs/TabGate';
+import type { TabOwnershipManager } from './tabs/TabOwnershipManager';
 import { useState, useSyncExternalStore } from 'react';
 import { LoginScreen } from './auth/LoginScreen';
 import { configureFirebase } from './auth/firebase';
@@ -10,9 +12,14 @@ import seal from './assets/reals-seal.png';
 import { Home } from './home/Home';
 
 let defaultSetup: FirebaseSetup | undefined;
-function setup() { return defaultSetup ??= configureFirebase(); }
-export function App({ firebase = setup(), api }: { firebase?: FirebaseSetup; api?: ApiClient }) {
-  const [controller] = useState(() => 'service' in firebase ? new SessionController(firebase.service, api ?? new ApiClient(), firebase.localVerification) : null);
+function setup(ownership?: TabOwnershipManager) { return defaultSetup ??= configureFirebase(import.meta.env, ownership); }
+type AppProps = { firebase?: FirebaseSetup; api?: ApiClient; ownership?: TabOwnershipManager };
+export function App(props: AppProps) {
+  return <TabGate manager={props.ownership}>{ownership => <OperationalApp {...props} ownership={ownership} />}</TabGate>;
+}
+export function OperationalApp({ firebase, api, ownership }: AppProps) {
+  firebase ??= setup(ownership);
+  const [controller] = useState(() => 'service' in firebase ? new SessionController(firebase.service, (api ?? new ApiClient()).withOwnership(ownership), firebase.localVerification, ownership) : null);
   if (!controller) return <main className="login-page"><section className="login-panel"><h1>Reals</h1><p role="alert">{'error' in firebase ? firebase.error : 'Firebase no está configurado.'}</p></section></main>;
   return <SessionApp controller={controller} />;
 }

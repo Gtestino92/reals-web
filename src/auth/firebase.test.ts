@@ -1,3 +1,4 @@
+import { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Identity } from './firebase';
 const sdk = vi.hoisted(() => ({
@@ -169,4 +170,26 @@ it('reports signout persistence preparation failure and blocks Google', async ()
 it('initialization failure becomes a safe configuration error', () => {
   sdk.initializeAuth.mockImplementationOnce(() => { throw new Error('private diagnostic'); });
   const setup = configureFirebase(env); expect(setup).toEqual({ error: expect.stringContaining('.env.local') }); expect(JSON.stringify(setup)).not.toContain('private diagnostic');
+});
+
+it.each(['signIn', 'signUp'] as const)('ownership loss while selecting persistence prevents SDK %s and preserves identity', async operation => {
+  const ownership = new TabOwnershipManager();
+  vi.spyOn(ownership, 'assert').mockImplementation(() => {});
+  const setup = configureFirebase(env, ownership);
+  if (!('service' in setup)) throw Error('configuration');
+  let finish!: () => void;
+  sdk.setPersistence.mockImplementationOnce(() => new Promise<void>(done => { finish = done; }));
+  const pending = setup.service[operation]('fixture@example.test', 'synthetic', false);
+  ownership.stop(); finish();
+  await expect(pending).rejects.toHaveProperty('name', 'AbortError');
+  expect(sdk.signInWithEmailAndPassword).not.toHaveBeenCalled(); expect(sdk.createUserWithEmailAndPassword).not.toHaveBeenCalled(); expect(sdk.signOut).not.toHaveBeenCalled();
+});
+it('ownership loss between reauthentication and update prevents password mutation', async () => {
+  const ownership = new TabOwnershipManager(); vi.spyOn(ownership, 'assert').mockImplementation(() => {});
+  const identity = { ...user, email: 'fixture@example.test', providerData: [{ providerId: 'password', uid: 'f', displayName: null, email: null, phoneNumber: null, photoURL: null }] };
+  sdk.auth.currentUser = identity;
+  const setup = configureFirebase(env, ownership); if (!('service' in setup)) throw Error('configuration');
+  sdk.reauthenticateWithCredential.mockImplementationOnce(async () => { ownership.stop(); });
+  await expect(setup.service.changePassword!(identity, 'synthetic', 'synthetic-next')).rejects.toHaveProperty('name', 'AbortError');
+  expect(sdk.updatePassword).not.toHaveBeenCalled(); expect(sdk.auth.currentUser).toBe(identity); expect(sdk.signOut).not.toHaveBeenCalled();
 });

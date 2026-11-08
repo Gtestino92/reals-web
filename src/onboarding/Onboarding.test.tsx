@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { App } from '../App';
+import { OperationalApp as App } from '../App';
 import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
 import { defaults } from './contracts';

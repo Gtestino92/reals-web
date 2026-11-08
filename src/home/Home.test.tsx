@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { App } from '../App';
+import { OperationalApp as App } from '../App';
 import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
 import { emptyHome, homeStatus } from './fixtures';

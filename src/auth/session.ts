@@ -1,3 +1,4 @@
+import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { ApiClient, bootstrap } from './api';
 import type { BackendUser, Profile } from './api';
 import { errorCode, safeMessage, terminalCodes } from './errors';
@@ -26,11 +27,19 @@ export class SessionController {
   private controller = new AbortController();
   private locked = false;
   private pendingVerification: Identity | null = null;
-  constructor(private readonly auth: AuthService, private readonly api: ApiClient, private readonly localVerification: boolean) {}
+  private readonly ownershipSignal: AbortSignal | undefined;
+  constructor(private readonly auth: AuthService, private readonly api: ApiClient, private readonly localVerification: boolean, private readonly ownership?: TabOwnershipManager) { this.ownershipSignal = ownership?.signal; }
+  private available() { return !this.ownership || (!this.ownershipSignal?.aborted && this.ownership.getSnapshot() === 'active'); }
+  private suspend = () => {
+    this.observerEpoch++; this.unsubscribe?.(); this.unsubscribe = undefined;
+    this.invalidate(); this.locked = false; this.user = null; this.pendingVerification = null;
+    this.snapshot = initial;
+  };
   private install(patch: Partial<SessionSnapshot>) { this.snapshot = { ...this.snapshot, ...patch }; this.listeners.forEach(listener => listener()); }
   getSnapshot = () => this.snapshot;
   // Domain requests share the existing identity, cancellation and restriction handling.
   request = async (path: string, signal: AbortSignal, method = 'GET', body?: unknown) => {
+    this.ownership?.assert();
     const generation = this.generation;
     const user = this.user;
     if (!user || this.snapshot.phase !== 'ready') throw new DOMException('Sesión obsoleta', 'AbortError');
@@ -46,6 +55,7 @@ export class SessionController {
     }
   };
   verifyEmail = async (send: boolean) => {
+    this.ownership?.assert();
     const generation = this.generation;
     const user = this.user;
     if (!user) throw new DOMException('Sesión obsoleta', 'AbortError');
@@ -57,7 +67,7 @@ export class SessionController {
   get emailVerified() { return this.user?.emailVerified ?? false; }
   get hasPasswordProvider() { return this.user?.providerData?.some(provider => provider.providerId === 'password') ?? null; }
   changePassword = async (current: string, next: string) => {
-    if (this.locked || !this.user || !this.hasPasswordProvider || !this.auth.changePassword || this.snapshot.phase !== 'ready') throw new Error('Cambio no disponible.');
+    if (!this.available() || this.locked || !this.user || !this.hasPasswordProvider || !this.auth.changePassword || this.snapshot.phase !== 'ready') throw new Error('Cambio no disponible.');
     const generation = this.generation, user = this.user;
     this.locked = true;
     try {
@@ -65,14 +75,17 @@ export class SessionController {
       if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
     } finally { if (this.current(generation)) this.locked = false; }
   };
-  installProfile = (profile: Profile | null) => { if (this.snapshot.phase === 'ready') this.install({ profile }); };
+  installProfile = (profile: Profile | null) => { if (this.available() && this.snapshot.phase === 'ready') this.install({ profile }); };
   subscribe = (listener: () => void) => {
+    if (!this.available()) return () => {};
     this.listeners.add(listener);
+    const lease = this.ownership?.signal;
+    lease?.addEventListener('abort', this.suspend, { once: true });
     if (this.listeners.size === 1) {
       const epoch = ++this.observerEpoch;
       this.unsubscribe = this.auth.observe(user => {
         if (epoch !== this.observerEpoch || !this.listeners.size) return;
-        if (this.snapshot.phase === 'signingOut') return;
+        if (!this.available() || this.snapshot.phase === 'signingOut') return;
         if (this.snapshot.phase === 'authenticating' && user) { this.user = user; return; }
         if (this.user?.uid === user?.uid && ['loading', 'ready', 'restricted', 'recoverable'].includes(this.snapshot.phase)) return;
         this.replace(user);
@@ -83,6 +96,7 @@ export class SessionController {
       });
     }
     return () => {
+      lease?.removeEventListener('abort', this.suspend);
       this.listeners.delete(listener);
       if (!this.listeners.size) {
         this.observerEpoch++;
@@ -92,11 +106,12 @@ export class SessionController {
     };
   };
   private invalidate() { this.controller.abort(); this.controller = new AbortController(); return ++this.generation; }
-  private current(generation: number) { return this.listeners.size > 0 && generation === this.generation; }
+  private current(generation: number) { return this.available() && this.listeners.size > 0 && generation === this.generation; }
   private replace(user: Identity | null) {
     this.invalidate(); this.locked = false; this.user = user;
     if (this.pendingVerification?.uid !== user?.uid) this.pendingVerification = null;
     this.install({ phase: user ? 'loading' : 'login', operation: null, account: null, profile: null, error: null, verificationMessage: null });
+    this.ownership?.assert();
     const generation = this.generation;
     // StrictMode's synchronous cleanup cancels the first scheduled bootstrap.
     if (user) queueMicrotask(() => { if (this.current(generation)) void this.load(); });
@@ -105,6 +120,7 @@ export class SessionController {
     const user = this.user;
     if (!user || this.locked) return;
     this.locked = true;
+    this.ownership?.assert();
     const generation = this.generation;
     const signal = this.controller.signal;
     this.install({ phase: 'loading', operation: null, error: null, account: null, profile: null });
@@ -132,12 +148,12 @@ export class SessionController {
     } finally { if (this.current(generation)) this.locked = false; }
   }
   retry = () => {
-    if (this.locked) return;
+    if (!this.available() || this.locked) return;
     if (this.user) void this.load();
     else this.install({ phase: 'login', error: null });
   };
   authenticate = (operation: 'signIn' | 'signUp' | 'google', email = '', password = '', keepSignedIn = false) => {
-    if (this.locked || this.snapshot.phase !== 'login') return;
+    if (!this.available() || this.locked || this.snapshot.phase !== 'login') return;
     const owner = operation === 'google' ? 'shared' : operation;
     if (operation !== 'google' && (!email.trim() || !password.trim())) {
       this.install({ error: { message: 'Ingresá email y contraseña.', owner } }); return;
@@ -163,12 +179,13 @@ export class SessionController {
     });
   };
   reset = (email: string) => {
-    if (this.locked || (this.snapshot.resetAt ?? 0) > Date.now()) return;
+    if (!this.available() || this.locked || (this.snapshot.resetAt ?? 0) > Date.now()) return;
     const clean = email.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(clean)) {
       this.install({ error: { message: 'El email no tiene un formato válido.', owner: 'signIn' }, resetMessage: null }); return;
     }
     this.locked = true;
+    this.ownership?.assert();
     const generation = this.generation;
     this.install({ operation: 'reset', error: null, resetMessage: null });
     void this.api.request('/auth/password-reset', this.controller.signal, undefined, 'POST', { email: clean }, 202).then(() => {
@@ -178,7 +195,7 @@ export class SessionController {
     }).finally(() => { if (this.current(generation)) { this.locked = false; this.install({ operation: null }); } });
   };
   signOut = () => {
-    if (this.snapshot.phase === 'signingOut') return;
+    if (!this.available() || this.snapshot.phase === 'signingOut') return;
     const generation = this.invalidate();
     this.locked = true;
     this.install({ phase: 'signingOut', operation: null, account: null, profile: null, error: null });
