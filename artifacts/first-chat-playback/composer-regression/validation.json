@@ -1,0 +1,436 @@
+{
+  "layouts": [
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "overflow": false,
+      "form": {
+        "x": 12,
+        "y": 758,
+        "width": 366,
+        "height": 82,
+        "top": 758,
+        "right": 378,
+        "bottom": 840,
+        "left": 12
+      },
+      "input": {
+        "x": 19,
+        "y": 765,
+        "width": 256,
+        "height": 44,
+        "top": 765,
+        "right": 275,
+        "bottom": 809,
+        "left": 19
+      },
+      "mic": {
+        "x": 279,
+        "y": 765,
+        "width": 44,
+        "height": 44,
+        "top": 765,
+        "right": 323,
+        "bottom": 809,
+        "left": 279
+      },
+      "send": {
+        "x": 327,
+        "y": 765,
+        "width": 44,
+        "height": 44,
+        "top": 765,
+        "right": 371,
+        "bottom": 809,
+        "left": 327
+      },
+      "guidance": {
+        "x": 12,
+        "y": 127,
+        "width": 366,
+        "height": 66,
+        "top": 127,
+        "right": 378,
+        "bottom": 193,
+        "left": 12
+      }
+    },
+    {
+      "width": 390,
+      "fixturePlayback": {
+        "playable": true,
+        "duration": 0.011111
+      }
+    },
+    {
+      "viewport": {
+        "width": 768,
+        "height": 1024
+      },
+      "overflow": false,
+      "form": {
+        "x": 24,
+        "y": 926,
+        "width": 720,
+        "height": 82,
+        "top": 926,
+        "right": 744,
+        "bottom": 1008,
+        "left": 24
+      },
+      "input": {
+        "x": 31,
+        "y": 933,
+        "width": 610,
+        "height": 44,
+        "top": 933,
+        "right": 641,
+        "bottom": 977,
+        "left": 31
+      },
+      "mic": {
+        "x": 645,
+        "y": 933,
+        "width": 44,
+        "height": 44,
+        "top": 933,
+        "right": 689,
+        "bottom": 977,
+        "left": 645
+      },
+      "send": {
+        "x": 693,
+        "y": 933,
+        "width": 44,
+        "height": 44,
+        "top": 933,
+        "right": 737,
+        "bottom": 977,
+        "left": 693
+      },
+      "guidance": {
+        "x": 24,
+        "y": 139,
+        "width": 720,
+        "height": 66,
+        "top": 139,
+        "right": 744,
+        "bottom": 205,
+        "left": 24
+      }
+    },
+    {
+      "width": 768,
+      "fixturePlayback": {
+        "playable": true,
+        "duration": 0.011111
+      }
+    },
+    {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "overflow": false,
+      "form": {
+        "x": 112,
+        "y": 798,
+        "width": 1216,
+        "height": 82,
+        "top": 798,
+        "right": 1328,
+        "bottom": 880,
+        "left": 112
+      },
+      "input": {
+        "x": 119,
+        "y": 805,
+        "width": 1106,
+        "height": 44,
+        "top": 805,
+        "right": 1225,
+        "bottom": 849,
+        "left": 119
+      },
+      "mic": {
+        "x": 1229,
+        "y": 805,
+        "width": 44,
+        "height": 44,
+        "top": 805,
+        "right": 1273,
+        "bottom": 849,
+        "left": 1229
+      },
+      "send": {
+        "x": 1277,
+        "y": 805,
+        "width": 44,
+        "height": 44,
+        "top": 805,
+        "right": 1321,
+        "bottom": 849,
+        "left": 1277
+      },
+      "guidance": {
+        "x": 112,
+        "y": 143,
+        "width": 1216,
+        "height": 66,
+        "top": 143,
+        "right": 1328,
+        "bottom": 209,
+        "left": 112
+      }
+    },
+    {
+      "width": 1440,
+      "fixturePlayback": {
+        "playable": true,
+        "duration": 0.011111
+      }
+    }
+  ],
+  "keyboard": [
+    {
+      "width": 1440,
+      "touch": false,
+      "fine": true
+    },
+    {
+      "width": 390,
+      "touch": true,
+      "fine": false
+    },
+    {
+      "width": 390,
+      "touch": false,
+      "fine": true
+    },
+    {
+      "width": 1440,
+      "touch": true,
+      "fine": false
+    }
+  ],
+  "scroll": [
+    {
+      "width": 390,
+      "older": {
+        "top": 100,
+        "height": 551,
+        "scrollHeight": 4818,
+        "bubbleY": 1178,
+        "gap": 4167
+      },
+      "expanded": {
+        "top": 100,
+        "height": 403,
+        "scrollHeight": 4818,
+        "bubbleY": 1178,
+        "gap": 4315
+      },
+      "recording": {
+        "top": 100,
+        "height": 463,
+        "scrollHeight": 4818,
+        "bubbleY": 1178,
+        "gap": 4255
+      },
+      "beforeSend": {
+        "top": 100,
+        "height": 529,
+        "scrollHeight": 4818,
+        "bubbleY": 1178,
+        "gap": 4189
+      },
+      "pendingSend": {
+        "top": 100,
+        "height": 529,
+        "scrollHeight": 4910,
+        "bubbleY": 1178,
+        "gap": 4281
+      },
+      "failedSend": {
+        "top": 100,
+        "height": 417,
+        "scrollHeight": 4976,
+        "bubbleY": 1178,
+        "gap": 4459
+      },
+      "beforeIncoming": {
+        "top": 100,
+        "height": 551,
+        "scrollHeight": 4818,
+        "bubbleY": 1178,
+        "gap": 4167
+      },
+      "incoming": {
+        "top": 100,
+        "height": 501,
+        "scrollHeight": 4892,
+        "bubbleY": 1178,
+        "gap": 4291
+      },
+      "bottom": {
+        "top": 4405,
+        "height": 487,
+        "scrollHeight": 4892,
+        "bubbleY": -3127,
+        "gap": 0
+      }
+    },
+    {
+      "width": 768,
+      "older": {
+        "top": 100,
+        "height": 703,
+        "scrollHeight": 3790,
+        "bubbleY": 1132,
+        "gap": 2987
+      },
+      "expanded": {
+        "top": 100,
+        "height": 555,
+        "scrollHeight": 3790,
+        "bubbleY": 1132,
+        "gap": 3135
+      },
+      "recording": {
+        "top": 100,
+        "height": 615,
+        "scrollHeight": 3790,
+        "bubbleY": 1132,
+        "gap": 3075
+      },
+      "beforeSend": {
+        "top": 100,
+        "height": 703,
+        "scrollHeight": 3790,
+        "bubbleY": 1132,
+        "gap": 2987
+      },
+      "pendingSend": {
+        "top": 100,
+        "height": 703,
+        "scrollHeight": 3894,
+        "bubbleY": 1132,
+        "gap": 3091
+      },
+      "failedSend": {
+        "top": 100,
+        "height": 639,
+        "scrollHeight": 3938,
+        "bubbleY": 1132,
+        "gap": 3199
+      },
+      "beforeIncoming": {
+        "top": 100,
+        "height": 703,
+        "scrollHeight": 3790,
+        "bubbleY": 1132,
+        "gap": 2987
+      },
+      "incoming": {
+        "top": 100,
+        "height": 651,
+        "scrollHeight": 3868,
+        "bubbleY": 1132,
+        "gap": 3117
+      },
+      "bottom": {
+        "top": 3229,
+        "height": 639,
+        "scrollHeight": 3868,
+        "bubbleY": -1997,
+        "gap": 0
+      }
+    },
+    {
+      "width": 1440,
+      "older": {
+        "top": 100,
+        "height": 571,
+        "scrollHeight": 3790,
+        "bubbleY": 1136,
+        "gap": 3119
+      },
+      "expanded": {
+        "top": 100,
+        "height": 423,
+        "scrollHeight": 3790,
+        "bubbleY": 1136,
+        "gap": 3267
+      },
+      "recording": {
+        "top": 100,
+        "height": 483,
+        "scrollHeight": 3790,
+        "bubbleY": 1136,
+        "gap": 3207
+      },
+      "beforeSend": {
+        "top": 100,
+        "height": 571,
+        "scrollHeight": 3790,
+        "bubbleY": 1136,
+        "gap": 3119
+      },
+      "pendingSend": {
+        "top": 100,
+        "height": 571,
+        "scrollHeight": 3894,
+        "bubbleY": 1136,
+        "gap": 3223
+      },
+      "failedSend": {
+        "top": 100,
+        "height": 507,
+        "scrollHeight": 3938,
+        "bubbleY": 1136,
+        "gap": 3331
+      },
+      "beforeIncoming": {
+        "top": 100,
+        "height": 571,
+        "scrollHeight": 3790,
+        "bubbleY": 1136,
+        "gap": 3119
+      },
+      "incoming": {
+        "top": 100,
+        "height": 519,
+        "scrollHeight": 3868,
+        "bubbleY": 1136,
+        "gap": 3249
+      },
+      "bottom": {
+        "top": 3361,
+        "height": 507,
+        "scrollHeight": 3868,
+        "bubbleY": -2125,
+        "gap": 0
+      }
+    }
+  ],
+  "mediaSimulated": true,
+  "nativeAudio": {
+    "supported": true,
+    "admitted": false,
+    "size": 12485,
+    "boxes": [
+      "ftyp",
+      "moov",
+      "moof",
+      "mdat"
+    ]
+  },
+  "nativeFinalized": {
+    "duration": 704,
+    "decodedDuration": 0.703208,
+    "size": 12365,
+    "playable": true
+  }
+}

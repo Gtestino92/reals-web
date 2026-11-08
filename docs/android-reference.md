@@ -1,6 +1,6 @@
 # Android reference and parity plan
 
-Inspected during scaffolding on 2026-11-03: Android revision `565e7d9`, backend revision `1bf015c`. Source links target the local sibling checkout and may evolve. Android behavior is a reference; backend contracts remain authoritative.
+Inspected during scaffolding on 2026-11-03: Android revision `565e7d9`, backend revision `1bf015c`. Source links target the local sibling checkout and may evolve. Android is the canonical functional and visual product reference; backend contracts and domain state remain authoritative. Follow the mandatory migration requirements in [AGENTS.md](../AGENTS.md) and maintain the existing [parity matrix](android-parity-matrix.md).
 
 ## Source map
 

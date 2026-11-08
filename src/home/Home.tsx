@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionController } from '../auth/session';
 import type { Activity } from './contracts';
 import { Onboarding } from '../onboarding/Onboarding';
 import { useHome } from './useHome';
 import { activityPresentation } from './presentation';
 import { SearchingScreen } from './SearchingScreen';
+import { FirstChat } from '../chat/FirstChat';
+import { ChatIcon } from '../chat/ChatIcon';
+import { reconcileHiddenFirstChats, visibleHome } from './hiddenFirstChats';
 import './home.css';
 
 const labels: Record<string, string> = {
@@ -20,7 +23,7 @@ const blockedLabels: Record<string, string> = {
   ACTIVE_CONNECTION_LIMIT_REACHED: 'Ya tenés conexiones activas. Terminá una antes de buscar otra.',
   VISUAL_ADVANCEMENT_LIMIT_REACHED: 'Alcanzaste el límite de perfiles por descubrir. Volvé a consultar más adelante.',
 };
-function ActivityCard({ item }: { item: Activity }) {
+function ActivityCard({ item, onOpen }: { item: Activity; onOpen: (item: Activity) => void }) {
   const when = item.type === 'SCHEDULING' ? item.schedulingExpiresAt : item.type === 'VISUAL_REVIEW' ? item.visualExpiresAt : item.secondChat?.availableAt;
   const body: Record<string, string> = {
     FIRST_CHAT: 'Tenés una conversación inicial para continuar.', VISUAL_REVIEW: 'Tenés un perfil por descubrir.',
@@ -30,6 +33,7 @@ function ActivityCard({ item }: { item: Activity }) {
   };
   return <article className="home-card"><h4>{labels[item.type] ?? 'Actividad pendiente'}</h4>
     {item.partnerName && <p>Con {item.partnerName}</p>}
+    {item.type === 'FIRST_CHAT' && item.chatId && <button className="login-button login-primary" onClick={() => onOpen(item)}>Abrir primer chat</button>}
     <p>{body[item.type] ?? 'Consultá esta actividad desde Android.'}</p>
     {typeof when === 'string' && <p>{item.type === 'SCHEDULING' || item.type === 'VISUAL_REVIEW' ? 'Hasta: ' : 'Fecha: '}<time dateTime={when}>{new Date(when).toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' })}</time></p>}
   </article>;
@@ -42,10 +46,28 @@ const managementEntries = [
   ['account', 'Cuenta', 'Notificaciones, seguridad y sesión'],
 ] as const;
 
-export function Home({ controller, onCompleteProfile }: { controller: SessionController; onCompleteProfile?: () => void }) {
+export function Home({ controller, onCompleteProfile, onChatActiveChange }: { onChatActiveChange?: (active: boolean) => void; controller: SessionController; onCompleteProfile?: () => void }) {
+  const [chat, setChat] = useState<Activity | null>(null), [notice, setNotice] = useState('');
+  const retireNotice = useCallback(() => setNotice(''), []);
+  useEffect(() => { onChatActiveChange?.(!!chat); return () => onChatActiveChange?.(false); }, [chat, onChatActiveChange]);
+  const suppressed = useRef(new Set<string>());
+  const hidden = useRef(new Set<string>());
+  // A terminal match cannot become active again. Keep this session-only guard
+  // even after a clean Home retires its currently-stale suppression entry.
+  const knownClosed = useRef(new Set<string>());
+  const openChat = (item: Activity, automatic = false) => {
+    if (!item.chatId || knownClosed.current.has(item.matchId) || (automatic && suppressed.current.has(item.chatId))) return;
+    window.history.pushState(null, ''); setNotice(''); setChat(item);
+  };
+  const closeChat = (message = '', closed = false) => {
+    if (chat?.chatId) suppressed.current.add(chat.chatId);
+    if (closed && chat) { hidden.current.add(chat.matchId); knownClosed.current.add(chat.matchId); }
+    setChat(null); setNotice(message);
+  };
   const [surface, setSurface] = useState<ManagementSurface | null>(null);
   const locked = useRef(false), root = useRef<HTMLDivElement>(null);
   const open = (next: ManagementSurface) => {
+    retireNotice();
     locked.current = next === 'profile' || next === 'preferences';
     window.history.pushState(null, '');
     setSurface(next);
@@ -64,7 +86,8 @@ export function Home({ controller, onCompleteProfile }: { controller: SessionCon
     const heading = root.current?.querySelector('h2');
     if (heading) { heading.tabIndex = -1; heading.focus(); }
   }, [surface]);
-  if (!surface) return <HomeOverview controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} />;
+  if (chat?.chatId) return <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>;
+  if (!surface) return <HomeOverview notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current}/>;
   return <div className="home" ref={root}>
     <header className="home-heading"><h2>{managementEntries.find(entry => entry[0] === surface)?.[1]}</h2></header>
     {surface === 'profile' || surface === 'preferences' ? <Onboarding controller={controller} management={surface === 'profile' ? 'details' : 'filters'} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; }} /> : <>
@@ -79,13 +102,19 @@ export function Home({ controller, onCompleteProfile }: { controller: SessionCon
   </div>;
 }
 
-function HomeOverview({ controller, onCompleteProfile, onManage }: { controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void }) {
+function HomeOverview({ notice, retireNotice, controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed }: { notice: string; retireNotice: () => void; controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
   const { model, busy, blocked, error, refresh, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller);
   const [surface, setSurface] = useState<'overview' | 'activity'>('overview');
   const root = useRef<HTMLDivElement>(null);
-  const home = model?.home, m = home?.matchmaking;
+  const home = model ? visibleHome(model.home, knownClosed) : undefined, m = home?.matchmaking;
+  useEffect(() => { if (model && !busy && !blocked) reconcileHiddenFirstChats(model.home, hidden, knownClosed); }, [model, busy, blocked, hidden, knownClosed]);
+  useEffect(() => {
+    const item = home?.pendingActions.find(i => i.type === 'FIRST_CHAT' && i.chatId && !suppressed.has(i.chatId));
+    if (item && !busy && !blocked) onOpenChat(item, true);
+  }, [home, busy, blocked, onOpenChat, suppressed]);
   const waiting = !!m?.inQueue || searchPhase !== 'idle';
   const screen = waiting ? 'search' : surface;
+  useEffect(() => { if (screen !== 'overview') retireNotice(); }, [screen, retireNotice]);
   useEffect(() => {
     if (surface !== 'activity') return;
     const pop = () => setSurface('overview');
@@ -104,13 +133,14 @@ function HomeOverview({ controller, onCompleteProfile, onManage }: { controller:
     <p>Descubrimientos, próximos pasos y conversaciones en un solo lugar.</p>
     {error && <p className="home-error" role="alert">{error}</p>}
     <button className="login-button login-outlined" disabled={busy} onClick={refresh}>Actualizar</button>
-    {presentation.groups.map(section => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3><div className="home-grid">{section.items.map((item, index) => <ActivityCard key={`${item.matchId}-${item.connectionId}-${item.type}-${index}`} item={item}/>)}</div></section>)}
+    {presentation.groups.map(section => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3><div className="home-grid">{section.items.map((item, index) => <ActivityCard key={`${item.matchId}-${item.connectionId}-${item.type}-${index}`} item={item} onOpen={onOpenChat}/>)}</div></section>)}
     {presentation.groups.length === 0 && <p>{home.summary.hasPendingSchedulingConnection ? 'Estamos preparando una coordinación de horarios.' : presentation.hasActivity ? 'Hay actividad en curso. Los detalles aparecerán cuando el servidor los informe.' : 'No tenés pendientes por ahora.'}</p>}
     {home.passiveNotices.map((notice, index) => <aside className="home-notice" key={`${notice}-${index}`}>{notice === 'SCHEDULING_PREPARING' ? 'Estamos preparando tus próximos pasos para coordinar horarios.' : 'Hay novedades sobre tus interacciones. Consultalas desde Android.'}</aside>)}
-    <p className="home-notice">Estos resúmenes son de solo lectura. Continuar chats, descubrir perfiles y coordinar horarios todavía no está disponible en la Web POC. Podés continuar desde Android.</p>
+    <p className="home-notice">Podés continuar tu primer chat desde acá. Descubrir perfiles y coordinar horarios sigue disponible desde Android.</p>
   </div>;
   return <div ref={root} className="home" aria-busy={busy}>
     <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><button className="login-button login-outlined" disabled={busy} onClick={refresh}>Actualizar</button></header>
+    {notice && <p className="home-notice home-terminal-notice" role="status"><span>{notice}</span><button type="button" onClick={retireNotice} aria-label="Ocultar aviso del chat"><ChatIcon name="close"/></button></p>}
     {busy && <p role="status">Actualizando Inicio…</p>}
     {error && <p className="home-error" role="alert">{error}</p>}
     {home && <>

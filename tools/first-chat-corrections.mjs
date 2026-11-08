@@ -1,0 +1,66 @@
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve, sep } from 'node:path';
+const dir = await mkdtemp(join(tmpdir(),'reals-chat-smoke-'));
+const chrome = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--remote-debugging-port=0',`--user-data-dir=${dir}`,'--autoplay-policy=no-user-gesture-required','about:blank'],{ windowsHide:true, stdio:'ignore' });
+let ws;
+try {
+  let target;
+  for(let i=0;i<60;i++) { try { const port=(await readFile(join(dir,'DevToolsActivePort'),'utf8')).split('\n')[0].trim(); const list=await (await fetch(`http://127.0.0.1:${port}/json`)).json(); target=list.find(t=>t.type==='page'); if(target) break; } catch {} await new Promise(r=>setTimeout(r,100)); }
+  if(!target) throw new Error('Chrome did not start');
+  ws=new WebSocket(target.webSocketDebuggerUrl); await new Promise(r=>ws.addEventListener('open',r,{once:true}));
+  let id=0; const pending=new Map(); ws.addEventListener('message',e=>{const m=JSON.parse(e.data); if(m.id){const p=pending.get(m.id); pending.delete(m.id); m.error?p.reject(new Error(m.error.message)):p.resolve(m.result);}});
+  const call=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});ws.send(JSON.stringify({id:key,method,params}));});
+  await call('Page.navigate',{url:'http://127.0.0.1:5174'}); await new Promise(r=>setTimeout(r,1800));
+  const evaluate = async expression => {const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
+  const delay=ms=>new Promise(r=>setTimeout(r,ms));
+  const evidence=[]; const baseline=process.argv.includes("--baseline");
+  const check=(value,label)=>{if(!value)throw Error(label);console.log('PASS',label);};
+  await evaluate("(async()=>{"+
+    "const {default:React}=await import('/node_modules/.vite/deps/react.js'),{default:ReactDOM}=await import('/node_modules/.vite/deps/react-dom_client.js');"+
+    "const {FirstChat}=await import('/src/chat/FirstChat.tsx'),{inspectAudio,recordingMime}=await import('/src/chat/audio.ts');"+
+    "window.NativeRecorder=window.MediaRecorder;window.inspectNativeAudio=inspectAudio;window.nativeMime=recordingMime();"+
+    "window.syntheticBytes=await(await fetch('/src/chat/fixtures/valid-aac-short.m4a')).arrayBuffer();inspectAudio(syntheticBytes,60000,2097152);window.stoppedTracks=0;window.denyMicrophone=false;window.posts=[];window.holdSend=false;"+
+    "class Recorder{static output=syntheticBytes;static isTypeSupported=()=>true;mimeType='audio/mp4';state='inactive';constructor(){window.recorder=this;}start(){this.state='recording';}stop(){this.state='inactive';queueMicrotask(()=>{this.ondataavailable?.({data:new Blob([Recorder.output])});this.onstop?.();});}}"+
+    "window.SyntheticRecorder=Recorder;window.MediaRecorder=Recorder;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>{if(denyMicrophone)throw new DOMException('Synthetic denial','NotAllowedError');return {getTracks:()=>[{stop:()=>stoppedTracks++}]};}}});"+
+    "document.getElementById('root').style.display='none';const el=document.createElement('div');document.body.append(el);let root;"+
+    "window.guidance={question:{id:'q',instanceId:'q1',text:'¿Qué te inspira?'},questionOrdinal:1,maxQuestions:3,requiredParticipationScore:100,directQuestionReplyMultiplier:2,progressionAction:'NEXT_QUESTION',canRequestNext:true,myNextRequested:false,completed:false};"+
+    "window.renderFixture=(count=6,longQuote=false)=>{root?.unmount();posts=[];holdSend=false;denyMicrophone=false;Recorder.output=syntheticBytes;Object.assign(guidance,{questionOrdinal:1,progressionAction:'NEXT_QUESTION',canRequestNext:true,myNextRequested:false,completed:false});"+
+    "const m=(id,senderId,content,replyTo=null)=>({id:String(id),chatSessionId:'c',senderId,clientMessageId:null,messageType:'TEXT',content,replyTo,reactionType:null,audio:null,sentAt:new Date(1000000+id*1000).toISOString()});"+
+    "const partnerText=longQuote ? 'Texto extenso para medir el recorte visual. '.repeat(20) : 'Todo bien, \u00bfy vos?';window.fixtureMessages=[m(1,'me','Hola, ¿cómo estás?'),m(2,'them',partnerText,{type:'MESSAGE',targetId:'1',senderId:'me',messageType:'TEXT',previewText:'Hola, ¿cómo estás?'}),m(3,'me','Bien, gracias.',{type:'MESSAGE',targetId:'2',senderId:'them',messageType:'TEXT',previewText:partnerText}),m(4,'me','Caminar por el barrio.',{type:'GUIDANCE_QUESTION',targetId:'q1',previewText:'¿Qué te inspira?'}),m(5,'them','Escuché tu audio.',{type:'MESSAGE',targetId:'a',senderId:'me',messageType:'AUDIO',previewText:null}),m(6,'them','Mensaje antiguo.',{type:'MESSAGE',targetId:'legacy',previewText:'Cita sin autor'})];"+
+    "for(let i=7;i<=count;i++)fixtureMessages.push(m(i,'them','Mensaje largo para comprobar desplazamiento y lectura. '.repeat(3)));"+
+    "const quote=reply=>!reply?null:reply.type==='GUIDANCE_QUESTION'?{...reply,previewText:guidance.question.text}:({...reply,senderId:fixtureMessages.find(m=>m.id===reply.targetId)?.senderId,messageType:fixtureMessages.find(m=>m.id===reply.targetId)?.messageType,previewText:fixtureMessages.find(m=>m.id===reply.targetId)?.content});"+
+    "const controller={snapshot:{account:{id:'me'}},request:async(path,signal,method='GET',body)=>{signal.throwIfAborted();"+
+    "if(path==='/matches/m')return{id:'m',userAId:'me',userBId:'them',state:'CHAT_ACTIVE'};"+
+    "if(path==='/matches/m/chat')return{id:'c',matchId:'m',chatType:'FIRST_CHAT',status:'ACTIVE',partner:{userId:'them',displayName:'Marcus'},myDecision:'PENDING',partnerDecision:'PENDING',timeoutAt:new Date(Date.now()+600000).toISOString(),inactivityExpiresAt:new Date(Date.now()+300000).toISOString(),serverTime:new Date().toISOString(),guidance,audioPolicy:{enabled:true,remainingMessages:10,maxDurationMillis:60000,maxFileSizeBytes:2097152,unavailableReason:null}};"+
+    "if(path.endsWith('/reaction')){const m=fixtureMessages.find(m=>m.id===path.split('/').at(-2));return new Promise(resolve=>{window.finishReaction=()=>{m.reactionType='HEART';resolve(m);};});}if(path.endsWith('/exit-requests'))return[];if(path.includes('/messages?'))return [...fixtureMessages];"+
+    "if(path.endsWith('/guidance/next-request')){window.guidanceCalls=(window.guidanceCalls??0)+1;return new Promise(resolve=>{window.finishGuidance=()=>{guidance.myNextRequested=true;resolve(guidance);};});}"+
+    "if(method==='POST'&&(path==='/chats/c/messages'||path==='/chats/c/audio-messages')){const audio=body instanceof FormData;const data=audio?{clientMessageId:body.get('clientMessageId'),replyTo:body.get('replyToType')?{type:body.get('replyToType'),targetId:body.get('replyToTargetId')}:null}:body;posts.push({audio,clientMessageId:data.clientMessageId,replyTo:data.replyTo});"+
+    "const finish=success=>{if(!success)throw new TypeError('Synthetic lost response');const message={...m(fixtureMessages.length+1,'me',audio?null:data.content,quote(data.replyTo)),clientMessageId:data.clientMessageId,...(audio?{messageType:'AUDIO',audio:{url:'http://127.0.0.1:5174/synthetic-audio.m4a',durationMillis:1000,sizeBytes:body.get('file').size,contentType:'audio/mp4'}}:{})};fixtureMessages.push(message);return message;};"+
+    "if(holdSend)return new Promise((resolve,reject)=>{window.finishSend=success=>{try{resolve(finish(success));}catch(e){reject(e);}};});return finish(true);}throw Error('Unexpected synthetic endpoint '+path);}};"+
+    "root=ReactDOM.createRoot(el);root.render(React.createElement(React.StrictMode,null,React.createElement(FirstChat,{controller,matchId:'m',chatId:'c',onHome:()=>{}})));};renderFixture();})()");
+  await delay(350);
+  const click=async selector=>{const p=await evaluate("(()=>{const e=document.querySelector("+JSON.stringify(selector)+");const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");await call('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',clickCount:1});await call('Input.dispatchMouseEvent',{type:'mouseReleased',...p,button:'left',clickCount:1});await delay(80);};
+  const setText=async value=>{await evaluate("(()=>{const e=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,"+JSON.stringify(value)+");e.dispatchEvent(new Event('input',{bubbles:true}));e.focus();})()");await delay(80);};
+
+  const sample=()=>evaluate(`(()=>{const l=document.querySelector('.chat-timeline'),a=document.querySelector('.chat-approve'),g=document.querySelector('.chat-guidance'),n=document.querySelector('.chat-guidance-next'),t=document.querySelector('textarea');return {approvalOpacity:getComputedStyle(a).opacity,inputDisabled:t?.disabled,rootScroll:document.querySelector('.first-chat').scrollLeft,timelineTop:l.getBoundingClientRect().top,scrollTop:l.scrollTop,next:n&&{opacity:getComputedStyle(n).opacity,width:n.offsetWidth,height:n.offsetHeight},frame:getComputedStyle(t).borderWidth,status:!!document.querySelector('.chat-status')};})()`);
+  for(const [width,height] of [[390,844],[1440,900]]) {
+    await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<768});
+    await evaluate('renderFixture(30);window.guidanceCalls=0');await delay(250);
+    await evaluate("document.querySelector('.chat-timeline').scrollTop=200");await delay(60);
+    const before=await sample();
+    await click('.chat-heart');const reaction=await sample();await evaluate('finishReaction()');await delay(200);
+    await click('.chat-guidance-next');const guidancePending=await sample();await click('.chat-guidance-next');check(await evaluate('guidanceCalls===1'),'guidance duplicate write blocked');await evaluate('finishGuidance()');await delay(200);check(await evaluate("document.querySelector('.chat-guidance-state').textContent.includes('otra persona')"),'authoritative waiting state is visible');
+    const beforeSending=await sample();await evaluate('holdSend=true');await setText('Mensaje nuevo');await click('[aria-label="Enviar mensaje"]');const sending=await sample();await evaluate('finishSend(true)');await delay(200);
+    await evaluate('renderFixture(30)');await delay(250);await evaluate("document.querySelector('.chat-timeline').scrollTop=200");await delay(60);
+    const swipeBefore=await sample();const p=await evaluate("(()=>{const r=document.querySelector('.chat-guidance-copy p:last-child').getBoundingClientRect();return{x:r.x+20,y:r.y+r.height/2}})()");
+    await call('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',clickCount:1});await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x+85,y:p.y,button:'left',buttons:1});await delay(30);const duringSwipe=await sample();await call('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x+85,y:p.y,button:'left',clickCount:1});await delay(250);const afterSwipe=await sample();
+    await call('Emulation.setTouchEmulationEnabled',{enabled:true});await evaluate('renderFixture(30)');await delay(250);await evaluate("document.querySelector('.chat-timeline').scrollTop=200");await delay(60);const touchBefore=await sample();
+    await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,...p}]});await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,x:p.x+85,y:p.y}]});await delay(40);const touchDuring=await sample();await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await delay(250);const touchAfter=await sample();
+    check(touchDuring.rootScroll===0&&touchAfter.rootScroll===0&&touchAfter.scrollTop===touchBefore.scrollTop,'touch question swipe preserves chat position');check(await evaluate("!!document.querySelector('.chat-reply-preview')"),'touch question swipe selects reply');await call('Emulation.setTouchEmulationEnabled',{enabled:false});
+    const row={touchBefore,touchDuring,touchAfter,width,before,reaction,guidancePending,beforeSending,sending,swipeBefore,duringSwipe,afterSwipe};evidence.push(row);console.log(JSON.stringify(row));
+    if(!baseline){for(const state of [reaction,guidancePending,sending])check(state.approvalOpacity===before.approvalOpacity&&state.timelineTop===(state===sending?beforeSending.timelineTop:before.timelineTop)&&!state.status,'no global mutation blink/layout status');check(before.frame!=='0px','input has permanent border');check(before.next.width>=56&&before.next.height>=48,'larger next target');check(afterSwipe.rootScroll===0&&afterSwipe.scrollTop===swipeBefore.scrollTop,'question swipe does not scroll chat');check(!sending.inputDisabled,'sending preserves input focus eligibility');}
+  }
+  await mkdir('artifacts/first-chat-corrections',{recursive:true});await writeFile('artifacts/first-chat-corrections/'+(baseline?'before':'after')+'.json',JSON.stringify(evidence,null,2));
+} finally { ws?.close(); chrome.kill(); await new Promise(r=>setTimeout(r,500)); if(!resolve(dir).startsWith(resolve(tmpdir())+sep)||!dir.includes('reals-chat-smoke-'))throw Error('Unsafe temporary directory');await rm(dir,{recursive:true,force:true,maxRetries:5}).catch(()=>{}); }
