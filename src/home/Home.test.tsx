@@ -1,6 +1,7 @@
+import { confirmSignOut } from '../test/signOut';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { App } from '../App';
+import { OperationalApp as App } from '../App';
 import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
 import { emptyHome, homeStatus } from './fixtures';
@@ -13,7 +14,7 @@ let geo: ReturnType<typeof vi.fn<Geolocation['getCurrentPosition']>>;
 const json = (v: unknown, code = 200) => new Response(JSON.stringify(v), { status: code });
 const position = (overrides = {}) => ({ coords: { latitude: 12, longitude: -21, accuracy: 25, altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}) }, timestamp: Date.now(), toJSON: () => ({}), ...overrides });
 function mount() { return render(<App firebase={{ service: auth, localVerification: false }} api={new ApiClient(fetcher)} />); }
-const confirmed = async () => { await screen.findByRole('status', { name: 'Búsqueda confirmada' }); };
+const confirmed = async () => { await waitFor(() => { expect(document.querySelector('.search-screen')).toHaveAttribute('aria-busy', 'false'); expect(screen.getByRole('button', { name: 'Cancelar búsqueda' })).toBeEnabled(); expect(screen.queryByRole('alert')).toBeNull(); }); };
 const search = () => screen.getByRole('button', { name: 'Buscar chat' });
 const ready = async () => { await waitFor(() => { expect(document.querySelector('.home')).toHaveAttribute('aria-busy', 'false'); expect(screen.queryByText('Hola, Lucía') ?? screen.queryByRole('heading', { name: 'Buscando chat' })).toBeTruthy(); }); };
 const writes = () => fetcher.mock.calls.filter(([url, o]) => String(url).endsWith('/queue') && o?.method !== 'GET');
@@ -23,9 +24,9 @@ it('offers confirmed exceptional sign-out after initial Home failure, while pres
   mount(); await screen.findByRole('alert');
   expect(screen.getByRole('button', { name: 'Actualizar' })).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Cuenta' })).toBeNull();
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
   fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(auth.signOut).not.toHaveBeenCalled();
-  confirm.mockReturnValue(true); fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' })); confirmSignOut();
   await screen.findByRole('button', { name: 'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce();
 });
 it('shows four peer management cards and a standalone Account with one header return', async () => {
@@ -235,38 +236,49 @@ it('serializes cancellation after an in-flight admission and suppresses duplicat
   mount(); await ready(); fireEvent.click(search());
   await screen.findByRole('heading', { name: 'Buscando chat' }); await waitFor(() => expect(admit).toBeDefined());
   const cancel = screen.getByRole('button', { name: 'Cancelar búsqueda' }); fireEvent.click(cancel); fireEvent.click(cancel);
-  expect(screen.getByRole('heading', { name: 'Cancelando búsqueda' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible();
   expect(writes().map(([, o]) => o?.method)).toEqual(['POST']);
   home.matchmaking.inQueue = true;
   await act(async () => admit?.(json({ userId: 'u', inQueue: true })));
   await waitFor(() => expect(search()).toBeEnabled());
   expect(writes().map(([, o]) => o?.method)).toEqual(['POST','DELETE']); expect(home.matchmaking.inQueue).toBe(false);
 });
-it('keeps one stable preparation surface through location, admission and reconciliation', async () => {
-  let located: PositionCallback | undefined, admit: ((response: Response) => void) | undefined, queueRead: ((response: Response) => void) | undefined;
+it('keeps the same search DOM, copy, focus and scroll through admission and pending cancellation', async () => {
+  let located: PositionCallback | undefined, admit: ((response: Response) => void) | undefined, queueRead: ((response: Response) => void) | undefined, leave: ((response: Response) => void) | undefined;
+  let holdQueue = true;
   geo.mockImplementation(ok => { located = ok; });
   const original = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => {
     if (options?.method === 'POST') return new Promise(resolve => { admit = resolve; });
-    if (url === '/api/matchmaking/queue') return new Promise(resolve => { queueRead = resolve; });
+    if (options?.method === 'DELETE') return new Promise(resolve => { leave = resolve; });
+    if (url === '/api/matchmaking/queue' && holdQueue) { holdQueue = false; return new Promise(resolve => { queueRead = resolve; }); }
     return original(url, options);
   });
   mount(); await ready(); fireEvent.click(search());
   const heading = screen.getByRole('heading', { name: 'Buscando chat' }), status = screen.getByRole('status');
-  const text = status.textContent, seal = screen.getByRole('img', { name: 'Reals' }), dots = document.querySelector('.search-dots');
-  await act(async () => located?.(position())); await waitFor(() => expect(admit).toBeDefined());
-  expect(heading).toHaveTextContent('Buscando chat'); expect(status.textContent).toBe(text);
+  const body = status.textContent, container = heading.parentElement, seal = screen.getByRole('img', { name: 'Reals' }), dots = document.querySelector('.search-dots');
+  const pulses = Array.from(dots?.children ?? []), cancel = screen.getByRole('button', { name: 'Cancelar b\u00fasqueda' });
+  act(() => cancel.focus()); document.documentElement.scrollTop = 41;
+  const stable = () => {
+    expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBe(heading);
+    expect(heading.parentElement).toBe(container); expect(screen.getByRole('status')).toBe(status); expect(status.textContent).toBe(body);
+    expect(status).not.toHaveAttribute('aria-label'); expect(screen.getByRole('img', { name: 'Reals' })).toBe(seal);
+    expect(document.querySelector('.search-dots')).toBe(dots); expect(dots).toHaveClass('search-dots', { exact: true });
+    pulses.forEach((pulse, index) => expect(dots?.children[index]).toBe(pulse));
+    expect(document.documentElement.scrollTop).toBe(41); expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
+  };
+  stable();
+  await act(async () => located?.(position())); await waitFor(() => expect(admit).toBeDefined()); stable(); expect(cancel).toHaveFocus();
   home.matchmaking.inQueue = true; await act(async () => admit?.(json({ userId: 'u', inQueue: true })));
-  await waitFor(() => expect(queueRead).toBeDefined());
-  expect(heading).toHaveTextContent('Buscando chat'); expect(status.textContent).toBe(text);
-  expect(screen.getByRole('button', { name: 'Cancelar búsqueda' })).toBeEnabled();
-  await act(async () => queueRead?.(json({ userId: 'u', inQueue: true })));
-  await confirmed();
-  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBe(heading);
-  expect(screen.getByRole('status')).toBe(status); expect(screen.getByRole('img', { name: 'Reals' })).toBe(seal); expect(document.querySelector('.search-dots')).toBe(dots);
-  expect(writes()).toHaveLength(1);
+  await waitFor(() => expect(queueRead).toBeDefined()); stable(); expect(cancel).toBeEnabled();
+  await act(async () => queueRead?.(json({ userId: 'u', inQueue: true }))); await confirmed(); stable(); expect(cancel).toHaveFocus();
+  fireEvent.click(cancel); fireEvent.click(cancel); await waitFor(() => expect(leave).toBeDefined());
+  stable(); expect(cancel).toBeDisabled(); expect(writes().map(([, options]) => options?.method)).toEqual(['POST', 'DELETE']);
+  home.matchmaking.inQueue = false; await act(async () => leave?.(json({ userId: 'u', inQueue: false })));
+  await waitFor(() => expect(search()).toBeEnabled()); expect(container).not.toBeInTheDocument();
+  expect(writes()).toHaveLength(2); expect(screen.queryByRole('alert')).toBeNull();
 });
-it('accepts cancellation during admission reconciliation and keeps cancellation copy until it finishes', async () => {
+it('accepts cancellation during admission reconciliation and keeps searching copy until it finishes', async () => {
   let queueRead: ((response: Response) => void) | undefined; let held = false;
   const original = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => {
@@ -278,7 +290,7 @@ it('accepts cancellation during admission reconciliation and keeps cancellation 
   mount(); await ready(); fireEvent.click(search()); await waitFor(() => expect(queueRead).toBeDefined());
   const cancel = screen.getByRole('button', { name: 'Cancelar búsqueda' });
   expect(cancel).toBeEnabled(); fireEvent.click(cancel); fireEvent.click(cancel);
-  expect(screen.getByRole('heading', { name: 'Cancelando búsqueda' })).toBeVisible(); expect(cancel).toBeDisabled();
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(cancel).toBeDisabled();
   await act(async () => queueRead?.(json({ userId: 'u', inQueue: true })));
   await waitFor(() => expect(search()).toBeEnabled());
   expect(writes().map(([, options]) => options?.method)).toEqual(['POST','DELETE']); expect(home.matchmaking.inQueue).toBe(false);
@@ -328,7 +340,7 @@ it.each(['stale','inaccurate','invalid'])('explicit retry after %s asks for a fr
   geo.mockImplementationOnce(rejected); if (kind === 'inaccurate') geo.mockImplementationOnce(rejected);
   mount(); await ready(); fireEvent.click(search()); const retry = await screen.findByRole('button', { name: 'Reintentar ubicación' });
   expect(writes()).toHaveLength(0); fireEvent.click(retry);
-  await confirmed(); expect(geo.mock.calls.at(-1)?.[2]).toMatchObject({ maximumAge: 0, enableHighAccuracy: true }); expect(writes()).toHaveLength(1);
+  await confirmed(); expect(geo.mock.calls.at(-1)?.[2]).toMatchObject({ maximumAge: 0, enableHighAccuracy: false }); expect(writes()).toHaveLength(1);
 });
 it('permission denied has an explicit retry and never retries automatically', async () => {
   geo.mockImplementation((_ok, fail) => fail?.({ code: 1, message: 'sensitive', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }));
@@ -346,23 +358,23 @@ it('canceling a location retry ignores its callback and never enqueues', async (
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' }));
   await waitFor(() => expect(search()).toBeEnabled()); await act(async () => done?.(position())); expect(writes()).toHaveLength(0);
 });
-it('fallback admits once with actual coarse accuracy and does not change the visible waiting copy', async () => {
+it('fallback admits once with actual accuracy and retains the screen while updating confirmation copy', async () => {
   let coarse: PositionCallback | undefined;
   geo.mockImplementationOnce((_ok, fail) => fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 })).mockImplementation(ok => { coarse = ok; });
   mount(); await ready(); fireEvent.click(search()); await waitFor(() => expect(geo).toHaveBeenCalledTimes(2));
   const heading = screen.getByRole('heading', { name: 'Buscando chat' }), status = screen.getByRole('status');
-  const title = heading.textContent, text = status.textContent;
-  expect(status).toHaveAccessibleName('Preparando búsqueda; ingreso todavía no confirmado'); expect(writes()).toHaveLength(0);
+  const waitingSurface = heading.parentElement;
+  expect(status).not.toHaveAttribute('aria-label'); expect(writes()).toHaveLength(0);
   await act(async () => coarse?.(position({ coords: { ...position().coords, accuracy: 4200 } }))); await confirmed();
-  expect(heading.textContent).toBe(title); expect(status.textContent).toBe(text);
+  expect(heading).toHaveTextContent('Buscando chat'); expect(heading.parentElement).toBe(waitingSurface); expect(status).not.toHaveAttribute('aria-label');
   expect(writes()).toHaveLength(1); expect(JSON.parse(String(writes()[0]?.[1]?.body)).accuracyMeters).toBe(4200);
-  expect(geo.mock.calls[1]?.[2]?.enableHighAccuracy).toBe(false);
+  expect(geo.mock.calls[1]?.[2]?.enableHighAccuracy).toBe(true);
 });
-it('cancels during the coarse fallback and ignores late results from both requests', async () => {
+it('cancels during the precise fallback and ignores late results from both requests', async () => {
   const callbacks: PositionCallback[] = [];
   geo.mockImplementation((ok, fail, options) => {
     callbacks.push(ok);
-    if (options?.enableHighAccuracy) fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
+    if (!options?.enableHighAccuracy) fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
   });
   mount(); await ready(); fireEvent.click(search()); await waitFor(() => expect(geo).toHaveBeenCalledTimes(2));
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' })); await waitFor(() => expect(search()).toBeEnabled());
@@ -385,6 +397,7 @@ it('leaves waiting for authoritative new activity using the same poller', async 
   home.matchmaking.inQueue = false; home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }]; status.version++;
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(screen.getByRole('region', { name: 'Primer chat' })).toBeVisible();
+  expect(document.querySelector('.search-screen')).toBeNull(); expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
   expect(fetcher.mock.calls.filter(([url]) => url === '/api/me/home')).toHaveLength(1);
   fetcher.mockClear();
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
@@ -512,4 +525,22 @@ it('an active chat reconciles terminal state and suppresses stale Activity',asyn
   closed=true;act(()=>window.dispatchEvent(new Event('online')));await screen.findByText('El chat se cerró por inactividad.');await ready();
   expect(screen.queryByRole('button',{name:'Cerrar sesión'})).toBeNull();
   expect(screen.queryByRole('region',{name:'Primer chat'})).toBeNull();
+});
+
+it('waits for all parallel projections before installing the reconciled Home', async () => {
+  mount(); await ready(); const original = fetcher.getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementation((url, options) => url === '/api/me/profile' ? new Promise(done => { finish = done; }) : original(url, options));
+  fetcher.mockClear(); fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/me/home')).toBe(true); expect(search()).toBeDisabled();
+  await act(async () => finish(json(profile))); await ready(); expect(search()).toBeEnabled();
+});
+it('browser Back dismisses sign-out and restores the owned Account entry', async () => {
+  mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(screen.getByRole('dialog')).toBeVisible();
+  const restored = vi.fn(); window.addEventListener('popstate', restored);
+  try { act(() => history.back()); await waitFor(() => expect(restored).toHaveBeenCalledTimes(2)); }
+  finally { window.removeEventListener('popstate', restored); }
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(history.state.trail.at(-1)).toBe('account'); expect(auth.signOut).not.toHaveBeenCalled();
 });

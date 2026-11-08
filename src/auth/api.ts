@@ -1,3 +1,4 @@
+import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { terminalCodes } from './errors';
 import type { Identity } from './firebase';
 export class ApiError extends Error {
@@ -7,8 +8,11 @@ export class ApiError extends Error {
 }
 export function object(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 export class ApiClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
+  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis), private readonly ownership?: TabOwnershipManager) {}
+  withOwnership(ownership?: TabOwnershipManager) { return new ApiClient(this.fetcher, ownership); }
   async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number): Promise<unknown> {
+    this.ownership?.assert();
+    if (this.ownership) signal = AbortSignal.any([signal, this.ownership.signal]);
     for (let attempt = 0; attempt < 2; attempt++) {
       signal.throwIfAborted();
       const headers: Record<string, string> = {};
@@ -26,7 +30,8 @@ export class ApiClient {
       signal.throwIfAborted();
       if (!response.ok) {
         let raw: unknown;
-        try { raw = await response.json(); } catch { throw new ApiError('invalid', response.status); }
+        try { raw = await response.json(); } catch { signal.throwIfAborted(); throw new ApiError('invalid', response.status); }
+        signal.throwIfAborted();
         if (!object(raw) || typeof raw.code !== 'string') throw new ApiError('invalid', response.status);
         if (response.status === 401 && raw.code === 'INVALID_TOKEN' && user && attempt === 0) continue;
         throw new ApiError(response.status === 401 || response.status === 403 ? 'authorization' : 'backend', response.status, raw.code, {
@@ -37,7 +42,7 @@ export class ApiClient {
       }
       if (expectedStatus !== undefined && response.status !== expectedStatus) throw new ApiError('invalid', response.status);
       if ((method === 'DELETE' && path === '/me' && response.status === 200) || response.status === 202 || response.status === 204) return undefined;
-      try { return await response.json(); } catch { throw new ApiError('invalid', response.status); }
+      try { const result: unknown = await response.json(); signal.throwIfAborted(); return result; } catch { signal.throwIfAborted(); throw new ApiError('invalid', response.status); }
     }
     throw new ApiError('invalid');
   }

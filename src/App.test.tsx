@@ -1,7 +1,8 @@
+import { confirmSignOut } from './test/signOut';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { App } from './App';
+import { OperationalApp as App } from './App';
 import { ApiClient } from './auth/api';
 import type { AuthService, Identity } from './auth/firebase';
 import { configureFirebase, localVerificationEnabled } from './auth/firebase';
@@ -91,7 +92,7 @@ it('sign out cancels pending fetch and rejects its late response', async () => {
   fetcher.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   mount(); act(() => observer(user)); await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
   const signal = fetcher.mock.calls[0]?.[1]?.signal;
-  fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); await screen.findByRole('button', { name: 'Ingresar' });
+  confirmSignOut(); await screen.findByRole('button', { name: 'Ingresar' });
   expect(signal?.aborted).toBe(true); await act(async () => resolve(json({ id: 'u', status: 'ACTIVE' })));
   expect(screen.getByRole('button', { name: 'Ingresar' })).toBeVisible(); expect(fetcher).toHaveBeenCalledOnce();
 });
@@ -162,8 +163,8 @@ it('registration failure belongs to signup and releases controls', async () => {
 });
 it('signout failure removes ready state and allows another signout attempt', async () => {
   ready(); vi.mocked(auth.signOut).mockRejectedValueOnce(new Error()).mockResolvedValue(undefined);
-  mount(); act(() => observer(user)); await screen.findByText('Sin perfil: falta completar el registro.'); fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
-  await screen.findByRole('alert'); fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); await screen.findByRole('button', { name: 'Ingresar' }); expect(auth.signOut).toHaveBeenCalledTimes(2);
+  mount(); act(() => observer(user)); await screen.findByText('Sin perfil: falta completar el registro.'); confirmSignOut();
+  await screen.findByRole('alert'); confirmSignOut(); await screen.findByRole('button', { name: 'Ingresar' }); expect(auth.signOut).toHaveBeenCalledTimes(2);
 });
 it('StrictMode missing-user restoration provisions once even with repeated observer events', async () => {
   fetcher.mockResolvedValueOnce(json({ code: 'ACCESS_DENIED' }, 403)).mockResolvedValueOnce(json({ id: 'u', status: 'ACTIVE' })).mockResolvedValueOnce(json({ code: 'PROFILE_NOT_FOUND' }, 404));

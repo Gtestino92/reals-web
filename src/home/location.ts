@@ -17,12 +17,13 @@ const maxAgeMillis = 15 * 60 * 1000;
 export async function currentLocation(signal: AbortSignal, allowCached = true): Promise<SearchLocation> {
   const maximumAge = allowCached ? maxAgeMillis : 0;
   try {
-    return await acquireLocation(signal, { enableHighAccuracy: true, timeout: 5000, maximumAge });
+    return await acquireLocation(signal, { enableHighAccuracy: false, timeout: 3000, maximumAge });
   } catch (error) {
     signal.throwIfAborted();
     if (!(error instanceof LocationError) || !['timeout', 'unavailable', 'inaccurate'].includes(error.kind)) throw error;
-    // One sequential alternative, never a permission retry or a queue mutation retry.
-    return acquireLocation(signal, { enableHighAccuracy: false, timeout: 8000, maximumAge: error.kind === 'inaccurate' ? 0 : maximumAge });
+    // Start with a battery-friendly browser fix/cache; escalate only on quality or
+    // acquisition failure. No prefetch, application storage or permission retry.
+    return acquireLocation(signal, { enableHighAccuracy: true, timeout: 8000, maximumAge: error.kind === 'inaccurate' ? 0 : maximumAge });
   }
 }
 function acquireLocation(signal: AbortSignal, options: PositionOptions): Promise<SearchLocation> {

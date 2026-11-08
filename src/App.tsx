@@ -1,3 +1,7 @@
+import { SignOutButton } from './auth/SignOutButton';
+import { tabOwnershipEnabled } from './tabs/policy';
+import { TabGate } from './tabs/TabGate';
+import type { TabOwnershipManager } from './tabs/TabOwnershipManager';
 import { useState, useSyncExternalStore } from 'react';
 import { LoginScreen } from './auth/LoginScreen';
 import { configureFirebase } from './auth/firebase';
@@ -9,11 +13,20 @@ import { SessionLoading } from './SessionLoading';
 import seal from './assets/reals-seal.png';
 import { Home } from './home/Home';
 
-let defaultSetup: FirebaseSetup | undefined;
-function setup() { return defaultSetup ??= configureFirebase(); }
-export function App({ firebase = setup(), api }: { firebase?: FirebaseSetup; api?: ApiClient }) {
-  const [controller] = useState(() => 'service' in firebase ? new SessionController(firebase.service, api ?? new ApiClient(), firebase.localVerification) : null);
-  if (!controller) return <main className="login-page"><section className="login-panel"><h1>Reals</h1><p role="alert">{'error' in firebase ? firebase.error : 'Firebase no está configurado.'}</p></section></main>;
+type AppProps = { firebase?: FirebaseSetup; api?: ApiClient; ownership?: TabOwnershipManager };
+export function App(props: AppProps) {
+  if (!props.ownership && !tabOwnershipEnabled(import.meta.env.DEV, window.location.hostname, import.meta.env.VITE_ENFORCE_TAB_OWNERSHIP)) return <OperationalApp {...props} />;
+  return <TabGate manager={props.ownership}>{ownership => <OperationalApp {...props} ownership={ownership} />}</TabGate>;
+}
+export function OperationalApp({ firebase, api, ownership }: AppProps) {
+  const [{ controller, firebaseSetup }] = useState(() => {
+    // SDK app/auth initialization is idempotent; the service wrapper belongs to
+    // this operational mount and must never retain a previous gate's manager.
+    const firebaseSetup = firebase ?? configureFirebase(import.meta.env, ownership);
+    const controller = 'service' in firebaseSetup ? new SessionController(firebaseSetup.service, (api ?? new ApiClient()).withOwnership(ownership), firebaseSetup.localVerification, ownership) : null;
+    return { controller, firebaseSetup };
+  });
+  if (!controller) return <main className="login-page"><section className="login-panel"><h1>Reals</h1><p role="alert">{'error' in firebaseSetup ? firebaseSetup.error : 'Firebase no está configurado.'}</p></section></main>;
   return <SessionApp controller={controller} />;
 }
 function SessionApp({ controller }: { controller: SessionController }) {
@@ -43,6 +56,6 @@ function SessionApp({ controller }: { controller: SessionController }) {
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
-    {!chatShell && !homeReady && !setupAccountAvailable && state.phase !== 'checking' && <div className="session-actions"><button className="login-button login-outlined" disabled={state.phase === 'signingOut'} onClick={controller.signOut}>Cerrar sesión</button></div>}
+    {!chatShell && !homeReady && !setupAccountAvailable && state.phase !== 'checking' && <div className="session-actions"><SignOutButton disabled={state.phase === 'signingOut'} onConfirm={controller.signOut} /></div>}
   </section></main>;
 }

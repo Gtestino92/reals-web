@@ -1,7 +1,8 @@
+import { confirmSignOut } from '../test/signOut';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { App } from '../App';
+import { OperationalApp as App } from '../App';
 import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
 import { defaults } from './contracts';
@@ -172,7 +173,7 @@ it('shows honest unavailable surfaces and signs out once from Account', async ()
   await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
   expect(screen.getByRole('button',{ name:'Notificaciones' })).toBeVisible();
   vi.spyOn(window,'confirm').mockReturnValue(true);
-  fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' }));
+  confirmSignOut();
   await screen.findByRole('button',{ name:'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce();
 });
 it('stops Home polling while editing and reconciles on resume', async () => {
@@ -217,7 +218,7 @@ it.each(['EMAIL_NOT_VERIFIED','PROFILE_PHOTOS_REQUIRED','PROFILE_PERSON_PHOTO_RE
   profile = { ...initialProfile }; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/activation') ? Promise.resolve(json({ code },409)) : original(input,options)); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); fireEvent.click(screen.getByRole('button',{ name:'Activar perfil' })); await screen.findByRole('alert'); expect(screen.queryByRole('heading',{ name:'Inicio' })).not.toBeInTheDocument(); expect(profile.status).toBe('DRAFT');
 });
 it('email resend and reload use Firebase with cooldown', async () => { profile = { ...initialProfile }; Object.defineProperty(user,'emailVerified',{ value:false,configurable:true }); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); fireEvent.click(screen.getByRole('button',{ name:'Reenviar correo' })); await waitFor(() => expect(screen.getByRole('button',{ name:/Reenviar correo/ })).toBeDisabled()); expect(auth.verify).toHaveBeenCalledOnce(); vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user,'emailVerified',{ value:true,configurable:true }); }); fireEvent.click(screen.getByRole('button',{ name:'Ya verifiqué' })); await screen.findByText('Email verificado.'); expect(screen.queryByRole('heading',{ name:'Verificá tu email' })).not.toBeInTheDocument(); });
-it('rejects stale domain results after sign-out', async () => { let finish: ((value: Response) => void) | undefined; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options)); mount(); await waitFor(() => expect(finish).toBeDefined()); fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' })); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => { finish?.(json({ requirementsSatisfied:true,documents:[] })); }); expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument(); });
+it('rejects stale domain results after sign-out', async () => { let finish: ((value: Response) => void) | undefined; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options)); mount(); await waitFor(() => expect(finish).toBeDefined()); confirmSignOut(); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => { finish?.(json({ requirementsSatisfied:true,documents:[] })); }); expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument(); });
 it('keeps failed creation input and reconciles before another attempt', async () => { const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => options?.method === 'POST' ? Promise.reject(new TypeError('offline')) : original(input,options)); mount(); const form = await createForm(); fireEvent.submit(form); await screen.findByRole('alert'); expect(screen.getByLabelText('Nombre visible')).toHaveValue('Ana'); expect(writes('POST')).toHaveLength(1); });
 it.each([false,true])('uploads cropped multipart with add/replace contract (replace=%s)', async replace => {
   profile = { ...initialProfile }; if (replace) list = [initialPhoto];
@@ -496,7 +497,7 @@ it('keeps loading sign-out accessible and rejects a late initial onboarding resp
   const original = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options));
   mount(); await waitFor(() => expect(finish).toBeDefined()); expectPreparing();
-  fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' }));
+  confirmSignOut();
   await screen.findByRole('button',{ name:'Ingresar' });
   await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[] })));
   expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument();

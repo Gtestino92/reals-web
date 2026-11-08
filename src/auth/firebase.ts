@@ -1,3 +1,4 @@
+import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { getApps, initializeApp } from 'firebase/app';
 import { browserLocalPersistence, browserSessionPersistence, setPersistence, browserPopupRedirectResolver, createUserWithEmailAndPassword, GoogleAuthProvider, initializeAuth, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
 import type { User } from 'firebase/auth';
@@ -16,7 +17,7 @@ export type FirebaseSetup = { service: AuthService; localVerification: boolean }
 export function localVerificationEnabled(dev: boolean, flag: unknown, hostname: string) {
   return dev && flag === 'true' && ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
 }
-export function configureFirebase(env: ImportMetaEnv = import.meta.env): FirebaseSetup {
+export function configureFirebase(env: ImportMetaEnv = import.meta.env, ownership?: TabOwnershipManager): FirebaseSetup {
   const keys = ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID', 'VITE_FIREBASE_APP_ID'] as const;
   if (keys.some(key => typeof env[key] !== 'string' || !env[key].trim() || env[key].includes('YOUR_'))) {
     return { error: 'Firebase no está configurado. Completá .env.local con la configuración Web del proyecto local y reiniciá Vite. Consultá docs/local-development.md.' };
@@ -26,25 +27,30 @@ export function configureFirebase(env: ImportMetaEnv = import.meta.env): Firebas
     const auth = initializeAuth(app, { persistence: [browserSessionPersistence, browserLocalPersistence], popupRedirectResolver: browserPopupRedirectResolver });
     let googleSessionReady = false;
     let authRevision = 0;
+    const checkpoint = () => { ownership?.assert(); const signal = ownership?.signal; return () => { signal?.throwIfAborted(); ownership?.assert(); }; };
     const persistenceError = () => Object.assign(new Error('Authentication persistence unavailable'), { code: 'auth/persistence-unavailable' });
     const prepareSession = async (revision: number) => {
+      const check = checkpoint();
       googleSessionReady = false;
       try { await setPersistence(auth, browserSessionPersistence); }
       catch { throw persistenceError(); }
+      check();
       if (revision === authRevision && !auth.currentUser) googleSessionReady = true;
     };
     const emailAuth = async (register: boolean, email: string, password: string, keepSignedIn: boolean) => {
       googleSessionReady = false;
+      const check = checkpoint();
       const revision = ++authRevision;
       try {
         try { await setPersistence(auth, keepSignedIn ? browserLocalPersistence : browserSessionPersistence); }
         catch { throw persistenceError(); }
+        check();
         if (revision !== authRevision || auth.currentUser) throw persistenceError();
         return (await (register ? createUserWithEmailAndPassword(auth, email, password) : signInWithEmailAndPassword(auth, email, password))).user;
       } catch (error) {
         // A failed local-persistence attempt must not affect the next Google click.
         // Never migrate an identity restored concurrently from another tab.
-        if (revision === authRevision && !auth.currentUser) await prepareSession(revision);
+        if ((!ownership || ownership.getSnapshot() === 'active') && revision === authRevision && !auth.currentUser) await prepareSession(revision);
         throw error;
       }
     };
@@ -52,12 +58,15 @@ export function configureFirebase(env: ImportMetaEnv = import.meta.env): Firebas
       localVerification: localVerificationEnabled(env.DEV, env.VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION, window.location.hostname),
       service: {
         changePassword: async (identity, current, next) => {
+          const check = checkpoint();
           const user = auth.currentUser;
           const valid = () => auth.currentUser === user && user?.uid === identity.uid;
           if (!user || !valid() || !user.email || !user.providerData.some(p => p.providerId === 'password')) throw new Error('Método de acceso no disponible.');
           await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, current));
+          check();
           if (!valid()) throw new DOMException('Sesión obsoleta', 'AbortError');
           await updatePassword(user, next);
+          check();
           if (!valid()) throw new DOMException('Sesión obsoleta', 'AbortError');
           await user.getIdToken(true);
         },
@@ -81,18 +90,22 @@ export function configureFirebase(env: ImportMetaEnv = import.meta.env): Firebas
         signUp: (email, password, keepSignedIn) => emailAuth(true, email, password, keepSignedIn),
         // No await precedes opening the popup from the click callback.
         google: () => {
+          checkpoint();
           if (!googleSessionReady || auth.currentUser) return Promise.reject(persistenceError());
           return signInWithPopup(auth, new GoogleAuthProvider()).then(result => result.user);
         },
         verify: async user => {
+          checkpoint();
           const current = auth.currentUser;
           if (!current || current.uid !== user.uid) throw new Error('Session changed');
           await sendEmailVerification(current);
         },
         signOut: async () => {
+          const check = checkpoint();
           googleSessionReady = false;
           authRevision++;
           await signOut(auth);
+          check();
           if (!auth.currentUser) await prepareSession(authRevision);
         },
       },

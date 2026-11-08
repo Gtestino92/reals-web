@@ -29,8 +29,15 @@ function jpeg(width: number,height: number,orientation = 1,little = true) {
   return fileFrom(data.buffer,'image/jpeg');
 }
 function flushFrames() { act(() => { const batch = [...frames.values()]; frames.clear(); batch.forEach(callback => callback(0)); }); }
+async function renderedPreview() {
+  const preview = await screen.findByRole('img',{ name:'Vista previa del recorte' });
+  // The canvas DOM can commit before its passive effect queues the frame.
+  // Drive the owned scheduler only after that frame actually exists.
+  await waitFor(() => expect(frames.size).toBeGreaterThan(0));
+  flushFrames(); return preview;
+}
 async function prepared() {
-  const preview = await screen.findByRole('img',{ name:'Vista previa del recorte' }); flushFrames();
+  const preview = await renderedPreview();
   await waitFor(() => expect(screen.getByRole('button',{ name:'Usar foto' })).toBeEnabled()); return preview;
 }
 beforeEach(() => {
@@ -160,7 +167,7 @@ it.each(['missing context','draw failure','context loss'])('reports %s without b
   if (failure === 'missing context') vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValueOnce(null);
   if (failure === 'draw failure') context.drawImage.mockImplementationOnce(() => { throw new Error('render failed'); });
   render(<CropDialog file={fileFrom(png())} onCancel={vi.fn()} onConfirm={vi.fn()}/>);
-  const preview = await screen.findByRole('img',{ name:'Vista previa del recorte' }); flushFrames();
+  const preview = await renderedPreview();
   if (failure === 'context loss') fireEvent(preview,new Event('contextlost',{ cancelable:true }));
   expect(screen.getByRole('alert')).toHaveTextContent(/vista previa|recorte/); expect(screen.getByRole('heading',{ name:'Recortar foto' })).toBeInTheDocument();
   expect(screen.getByRole('button',{ name:'Usar foto' })).toBeDisabled(); expect(screen.getByRole('button',{ name:'Cancelar' })).toBeEnabled();

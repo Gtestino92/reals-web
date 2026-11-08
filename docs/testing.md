@@ -1,3 +1,21 @@
+# Current validation policy
+
+Use focused tests while editing: `npm run test:focused -- <test-file paths>`. The wrapper refuses an empty filter so an iterative command cannot accidentally run the entire suite. `npm run test:watch -- <paths>` remains available. Dot reporting and a 1500-character RTL DOM diagnostic limit retain failures without printing passing test details or whole screens.
+
+| Change | Start with |
+| --- | --- |
+| Queue/geolocation | `src/home/location.test.ts`, `src/home/Home.test.tsx` |
+| Session/Firebase | `src/App.test.tsx`, `src/auth/firebase.test.ts`, `src/auth/persistence-sdk.test.ts` |
+| Ownership/policy | `src/tabs/`, `src/App.ownership.test.tsx` |
+| Sign-out/account | `src/auth/SignOutButton.test.tsx`, `src/home/AccountSection.test.tsx`, `src/home/Home.test.tsx`, `src/App.test.tsx`, `src/onboarding/Onboarding.test.tsx` |
+| Profile mutations | `src/onboarding/Onboarding.test.tsx` plus the changed field/photo/crop tests |
+
+Run `npm run typecheck` after meaningful TypeScript changes. At final validation run **one** `npm test`, `npm run build`, and `git diff --check`; repeat the full suite only to investigate failures or validate subsequent material changes. Use only browser scenarios relevant to the change. The complete CI regression suite and its auth/persistence/ownership/history/account/profile coverage remain enabled. Do not repeatedly run the whole suite to obtain a green result from a flaky test; fix its synchronization/ownership instead.
+
+Test audit for the runtime refinements: the two standalone permission-denial/fallback-count tests in `location.test.ts` duplicated the browser-error table; those same assertions now live in each table case. Two duplicate HTMLDialogElement mock setups in Account tests were replaced by the shared jsdom dialog shim; a shared sign-out confirmation helper keeps session/onboarding integration tests focused. Boundary tables, layer-specific API/UI tests and critical mutations remain because they cover distinct contracts, not duplicate scenarios. Total count can increase as new policy/dialog scenarios are added; count alone is not a coverage target. See [runtime review](runtime-refinements.md) for evidence and final counts.
+
+The earlier stage logs below are historical results, not a requirement to replay every command or browser scenario during each change.
+
 # Testing
 
 React tests run in jsdom with Vitest, React Testing Library and jest-dom matchers; the Android tunnel helper tests use the Node environment. Tests live beside the component or helper they exercise. Shared setup performs explicit cleanup after each test. Stage B has 101 tests across 5 files, including the unchanged 21 login presentation tests and 18 Android tunnel helper tests.

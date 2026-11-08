@@ -20,11 +20,16 @@ export function useHome(controller: SessionController, active = true) {
     if (!account) throw new ApiError('invalid');
     // Capture baseline before projection: a concurrent invalidation stays observable.
     const status = parseStatus(await controller.request('/me/home/status', signal));
-    const rawProfile = await controller.request('/me/profile', signal);
+    const [rawProfile, rawQueue, rawHome] = await Promise.all([
+      controller.request('/me/profile', signal),
+      queue ? controller.request('/matchmaking/queue', signal) : Promise.resolve(null),
+      controller.request('/me/home', signal),
+    ]);
+    signal.throwIfAborted();
     const profile = parseProfile(rawProfile, account.id);
     if (profile.id !== profileId || !object(rawProfile) || typeof rawProfile.displayName !== 'string' || !rawProfile.displayName.trim()) throw new ApiError('invalid');
-    const queued = queue ? parseQueue(await controller.request('/matchmaking/queue', signal), account.id) : null;
-    const home = parseHome(await controller.request('/me/home', signal));
+    const queued = queue ? parseQueue(rawQueue, account.id) : null;
+    const home = parseHome(rawHome);
     if (queued !== null && queued !== home.matchmaking.inQueue) throw new ApiError('invalid');
     if (profile.status !== home.profileStatus) throw new ApiError('invalid');
     if (valid(r, serial)) {
