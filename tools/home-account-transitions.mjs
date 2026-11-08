@@ -54,7 +54,8 @@ try {
   const sample=async(selector)=>evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e?.getBoundingClientRect();return{busy:document.querySelector('.home')?.getAttribute('aria-busy'),opacity:e?getComputedStyle(e).opacity:null,background:e?getComputedStyle(e).backgroundColor:null,disabled:e?.disabled,rect:r?.toJSON(),focus:document.activeElement?.tagName+':'+(document.activeElement?.getAttribute('aria-label')??document.activeElement?.id??''),focusPreserved:document.activeElement===window.focusedControl,scroll:document.querySelector('.chat-timeline')?.scrollTop,mountCount,cleanupCount,documents:performance.getEntriesByType('navigation').length};})()`);
   const tabAway=async()=>{const other=await call('Target.createTarget',{url:'about:blank'});await call('Target.activateTarget',{targetId:other.targetId});await delay(80);check(await evaluate("document.visibilityState==='hidden'"),'real Chrome tab hidden');return other;};
   const tabBack=async(other)=>{await call('Target.activateTarget',{targetId:target.id});await delay(60);check(await evaluate("document.visibilityState==='visible'"),'real Chrome tab visible');await call('Target.closeTarget',{targetId:other.targetId});};
-  await mkdir('artifacts/home-account',{recursive:true});const screenshot=async name=>writeFile('artifacts/home-account/'+name+'.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+  const artifactDirectory=process.argv.includes('--management')?'artifacts/home-navigation-polish/regression':'artifacts/home-account';
+  await mkdir(artifactDirectory,{recursive:true});const screenshot=async name=>writeFile(artifactDirectory+'/'+name+'.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
   for(const [width,height] of [[390,844],[1440,900]]){
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<768});reset();await evaluate('renderFixture()');await waitFor("!!document.querySelector('.home-search button:not(:disabled)')&&!document.querySelector('.home-search')?.closest('[hidden]')",'Home ready');
     await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes('Afinidades')).click()");
@@ -68,10 +69,10 @@ try {
       const homeNode=await evaluate("(window.homeNode=document.querySelector('.home'),true)");
       await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes('Afinidades')).click()");
       await evaluate('history.back()');
-      await waitFor("!!document.querySelector('.home-search button:not(:disabled)')&&!document.querySelector('.home-search')?.closest('[hidden]')&&!document.querySelector('[hidden]')",'browser Back returns Home');
+      await waitFor("!!document.querySelector('.home-search button:not(:disabled)')&&!document.querySelector('.home-search')?.closest('[hidden]')&&!document.querySelector('.home-search').closest('[hidden]')",'browser Back returns Home');
       check(homeNode&&await evaluate("homeNode===document.querySelector('.home')"),'browser Back retains Home node');
-      await evaluate("document.querySelector('[aria-label=Cuenta]').querySelector('button').click()");
-      await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Notificaciones').click()");
+      await evaluate("document.querySelector('button[aria-label=Cuenta]').click()");
+      await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Notificaciones'&&b.getClientRects().length).click()");
       await waitFor("document.querySelectorAll('.home-account input[type=checkbox]').length===3",'preferences loaded');
       const start=requests.length;
       await evaluate("(()=>{const input=document.querySelector('.home-account input[type=checkbox]');input.click();input.click()})()");
@@ -82,7 +83,7 @@ try {
       reset();await evaluate('renderFixture()');await waitFor("!!document.querySelector('.home-search button:not(:disabled)')&&!document.querySelector('.home-search')?.closest('[hidden]')",'profile Home');
       await evaluate("document.querySelector('[aria-label=\"Tu perfil\"]').click()");
       await waitFor("!!document.querySelector('.onboarding .profile-submit:not(:disabled)')",'profile loaded');
-      check(await evaluate("!!(document.querySelector('form').compareDocumentPosition(document.querySelector('summary'))&Node.DOCUMENT_POSITION_FOLLOWING)"),'profile details precede photos');
+      check(await evaluate("!!(document.querySelector('.onboarding form').compareDocumentPosition(document.querySelector('summary'))&Node.DOCUMENT_POSITION_FOLLOWING)"),'profile details precede photos');
       await screenshot('profile-'+width);
       await evaluate("document.querySelector('.profile-submit').click()");
       await waitFor("document.body.textContent.includes('Estado: DRAFT')&&!!document.querySelector('.profile-submit:not(:disabled)')",'draft reconciliation stays in editor');
@@ -93,14 +94,14 @@ try {
       check(await evaluate("!document.querySelector('.onboarding details')"),'management preferences non-collapsible');
       await screenshot('preferences-'+width);
       reset();await evaluate('window.signouts=0;renderFixture()');await waitFor("!!document.querySelector('.home-search button:not(:disabled)')&&!document.querySelector('.home-search')?.closest('[hidden]')",'account Home');
-      check(!await evaluate("Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Cerrar sesión')"),'no global sign-out');
+      check(!await evaluate("Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Cerrar sesión'&&b.getClientRects().length)"),'no global sign-out');
       await evaluate("document.querySelector('button[aria-label=Cuenta]').focus()");
       await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',windowsVirtualKeyCode:13});
       await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-      await waitFor("document.querySelector('button[aria-label=Cuenta]')?.getAttribute('aria-expanded')==='true'",'keyboard expansion');
-      acceptDialog=false;await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Cerrar sesión').click()");await delay(80);
+      await waitFor("!!document.querySelector('.home-account')?.getClientRects().length",'keyboard expansion');
+      acceptDialog=false;await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Cerrar sesión'&&b.getClientRects().length).click()");await delay(80);
       check(await evaluate('signouts===0'),'cancel native confirmation keeps session');
-      acceptDialog=true;await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Cerrar sesión').click()");
+      acceptDialog=true;await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Cerrar sesión'&&b.getClientRects().length).click()");
       await waitFor("document.body.textContent.includes('Ingresar')&&!document.querySelector('.home')",'confirmed sign-out');
       check(await evaluate('signouts===1'),'confirmed sign-out occurs once');
       for(const scenario of ['quick','delayed','error']) {
@@ -125,5 +126,5 @@ try {
     }
   }
 
-  const result={evidence,visibility:await evaluate('visibilityLog'),networkTypes:network,documentRequests:network.filter(type=>type==='Document').length};await writeFile('artifacts/home-account/'+(process.argv.includes('--notice')?'notice-polish':baseline?'before':'after')+'.json',JSON.stringify(result,null,2));
+  const result={evidence,visibility:await evaluate('visibilityLog'),networkTypes:network,documentRequests:network.filter(type=>type==='Document').length};await writeFile(artifactDirectory+'/'+(process.argv.includes('--notice')?'notice-polish':baseline?'before':'after')+'.json',JSON.stringify(result,null,2));
 } finally { server.closeAllConnections();server.close();ws?.close(); chrome.kill(); await new Promise(r=>setTimeout(r,500)); if(!resolve(dir).startsWith(resolve(tmpdir())+sep)||!dir.includes('reals-chat-smoke-'))throw Error('Unsafe temporary directory');await rm(dir,{recursive:true,force:true,maxRetries:5}).catch(()=>{}); }

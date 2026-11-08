@@ -54,7 +54,7 @@ export function configureFirebase(env: ImportMetaEnv = import.meta.env): Firebas
         changePassword: async (identity, current, next) => {
           const user = auth.currentUser;
           const valid = () => auth.currentUser === user && user?.uid === identity.uid;
-          if (!user || !valid() || !user.email || !user.providerData.some(p => p.providerId === 'password')) throw new Error('M?todo de acceso no disponible.');
+          if (!user || !valid() || !user.email || !user.providerData.some(p => p.providerId === 'password')) throw new Error('Método de acceso no disponible.');
           await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, current));
           if (!valid()) throw new DOMException('Sesión obsoleta', 'AbortError');
           await updatePassword(user, next);

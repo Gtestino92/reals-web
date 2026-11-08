@@ -22,6 +22,10 @@ function service() {
   return setup.service;
 }
 const flush = async () => { await new Promise<void>(resolve => queueMicrotask(resolve)); await Promise.resolve(); };
+it('uses correctly encoded Spanish when the password access method is unavailable', async () => {
+  await expect(service().changePassword!(user, 'current-secret', 'next-secret')).rejects.toThrow('Método de acceso no disponible.');
+  expect(sdk.reauthenticateWithCredential).not.toHaveBeenCalled();
+});
 it('reauthenticates before updating password and refreshes the token', async () => {
   const identity = { ...user, email: 'fixture@example.com', providerData: [{ providerId: 'password', uid: 'f', displayName: null, email: null, phoneNumber: null, photoURL: null }] };
   sdk.auth.currentUser = identity;

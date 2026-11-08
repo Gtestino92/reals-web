@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AccountSection } from './AccountSection';
@@ -7,15 +8,15 @@ import { ApiError } from '../auth/api';
 let controller: ReturnType<typeof controllerFixture>;
 const preferences = { activityEnabled: true, remindersEnabled: false, availabilityEnabled: true };
 beforeEach(() => { controller = controllerFixture(); vi.spyOn(controller, 'signOut').mockImplementation(() => {}); vi.spyOn(controller, 'request').mockResolvedValue(preferences); });
-function mount() { return render(<AccountSection controller={controller} disabled={false}/>); }
-function expand() { fireEvent.click(screen.getByRole('button', { name: 'Cuenta' })); }
+function Harness() { const [notifications, setNotifications] = useState(false); return <AccountSection controller={controller} disabled={false} notificationsOpen={notifications} onNotificationsOpen={() => setNotifications(true)} onBack={() => setNotifications(false)}/>; }
+function mount() { return render(<Harness/>); }
 it('validates password confirmation and excludes duplicate password submits', async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function(this: HTMLDialogElement) { this.open = false; } });
   vi.spyOn(controller, 'hasPasswordProvider', 'get').mockReturnValue(true);
   let resolve!: () => void;
   vi.spyOn(controller, 'changePassword').mockImplementation(() => new Promise(done => { resolve = done; }));
-  mount(); expand(); fireEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña de Reals' }));
+  mount(); fireEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña de Reals' }));
   const form = screen.getByRole('form', { name: 'Cambiar contraseña de Reals' });
   fireEvent.submit(form); expect(controller.changePassword).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('Contraseña actual'), { target: { value: 'current-secret' } });
@@ -25,16 +26,25 @@ it('validates password confirmation and excludes duplicate password submits', as
   expect(controller.changePassword).toHaveBeenCalledExactlyOnceWith('current-secret', 'next-secret');
   await act(async () => resolve()); expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.getByRole('status')).toHaveTextContent('Contraseña actualizada.');
 });
-it('starts collapsed, exposes only supported password capability and confirms sign-out', () => {
-  mount(); expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull(); expand();
-  expect(screen.getByRole('button', { name: 'Cuenta' })).toHaveAttribute('aria-expanded', 'true');
+it('dismisses an idle password dialog on browser Back without sending a mutation', () => {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function(this: HTMLDialogElement) { this.open = false; } });
+  vi.spyOn(controller, 'hasPasswordProvider', 'get').mockReturnValue(true);
+  mount(); fireEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña de Reals' }));
+  expect(screen.getByRole('dialog')).toBeVisible();
+  act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(controller.request).not.toHaveBeenCalled();
+});
+it('shows standalone account actions and confirms sign-out', () => {
+  mount(); expect(screen.getByRole('button', { name: 'Volver a Inicio' }).parentElement?.tagName).toBe('HEADER');
+  expect(screen.queryByRole('button', { name: 'Cuenta' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Cambiar contraseña de Reals' })).toBeNull();
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
   fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(controller.signOut).not.toHaveBeenCalled();
   confirm.mockReturnValue(true); fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(controller.signOut).toHaveBeenCalledOnce();
 });
 it('loads and saves all notification fields once, installing the server response', async () => {
-  mount(); expand(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
+  mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
   const activity = await screen.findByRole('checkbox', { name: 'Actividad' });
   let resolve!: (value: unknown) => void;
   vi.mocked(controller.request).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
@@ -44,7 +54,7 @@ it('loads and saves all notification fields once, installing the server response
   await act(async () => resolve({ ...preferences, activityEnabled: false })); expect(activity).not.toBeChecked(); expect(activity).toBeEnabled();
 });
 it('blocks uncertain notification writes until an explicit authoritative read', async () => {
-  mount(); expand(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
+  mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
   const activity = await screen.findByRole('checkbox', { name: 'Actividad' });
   vi.mocked(controller.request).mockRejectedValueOnce(new ApiError('network'));
   fireEvent.click(activity); await screen.findByRole('alert'); expect(activity).toBeDisabled();
@@ -52,7 +62,7 @@ it('blocks uncertain notification writes until an explicit authoritative read', 
   expect(controller.request).toHaveBeenCalledTimes(3);
 });
 it('deletes recoverably once and signs out only after success', async () => {
-  mount(); expand(); vi.spyOn(window, 'confirm').mockReturnValue(true);
+  mount(); vi.spyOn(window, 'confirm').mockReturnValue(true);
   let resolve!: (value: unknown) => void;
   vi.mocked(controller.request).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   const button = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(button); fireEvent.click(button);
@@ -60,14 +70,14 @@ it('deletes recoverably once and signs out only after success', async () => {
   await act(async () => resolve(undefined)); expect(controller.signOut).toHaveBeenCalledOnce();
 });
 it('never repeats an uncertain deletion, including after notification recovery', async () => {
-  mount(); expand(); vi.spyOn(window, 'confirm').mockReturnValue(true); vi.mocked(controller.request).mockRejectedValueOnce(new ApiError('network'));
+  mount(); vi.spyOn(window, 'confirm').mockReturnValue(true); vi.mocked(controller.request).mockRejectedValueOnce(new ApiError('network'));
   const button = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(button); await screen.findByRole('alert'); fireEvent.click(button);
   expect(button).toBeDisabled(); expect(controller.request).toHaveBeenCalledOnce(); expect(controller.signOut).not.toHaveBeenCalled();
 });
 it('rejects late read installation after unmount', async () => {
   let resolve!: (value: unknown) => void;
   vi.mocked(controller.request).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  const view = mount(); expand(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
+  const view = mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
   const signal = vi.mocked(controller.request).mock.calls[0]![1]; view.unmount(); expect(signal.aborted).toBe(true);
   await act(async () => resolve(preferences)); expect(screen.queryByRole('checkbox')).toBeNull();
 });

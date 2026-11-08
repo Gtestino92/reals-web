@@ -41,6 +41,30 @@ beforeEach(() => {
   });
 });
 function mount(localVerification = false) { return render(<StrictMode><App firebase={{ service:auth,localVerification }} api={new ApiClient(fetcher)}/></StrictMode>); }
+it.each(['DRAFT', 'INACTIVE'])('reuses confirmed recoverable deletion in %s setup and excludes duplicate/coupled writes', async status => {
+  profile = { ...initialProfile, status };
+  let finish!: (value: Response) => void;
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => url === '/api/me' && options?.method === 'DELETE' ? new Promise(resolve => { finish = resolve; }) : base(url, options));
+  mount(); await screen.findByRole('heading', { name: 'Completá tu perfil' });
+  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const remove = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(remove); expect(writes('DELETE')).toHaveLength(0);
+  confirm.mockReturnValue(true); fireEvent.click(remove); fireEvent.click(remove);
+  await waitFor(() => expect(writes('DELETE')).toHaveLength(1)); expect(auth.signOut).not.toHaveBeenCalled();
+  const details = screen.getByRole('form', { name: 'Datos del perfil', hidden: true }); fireEvent.submit(details); expect(writes('PATCH')).toHaveLength(0);
+  await act(async () => finish(new Response(null, { status: 200 })));
+  await screen.findByRole('button', { name: 'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce();
+});
+it('keeps uncertain setup deletion blocked and offers authoritative account reconciliation', async () => {
+  profile = { ...initialProfile }; const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => url === '/api/me' && options?.method === 'DELETE' ? Promise.reject(new TypeError('offline')) : base(url, options));
+  mount(); await screen.findByRole('heading', { name: 'Completá tu perfil' }); fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+  vi.spyOn(window, 'confirm').mockReturnValue(true); const remove = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(remove);
+  await screen.findByRole('alert'); expect(remove).toBeDisabled(); fireEvent.click(remove); expect(writes('DELETE')).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Consultar estado de la cuenta' })).toBeEnabled(); expect(auth.signOut).not.toHaveBeenCalled();
+});
 function reorderWithKeyboard(source: number,target: number) {
   const handle = screen.getByRole('button',{ name:`Reordenar foto ${source}` });
   fireEvent.keyDown(handle,{ key:' ' }); fireEvent.keyDown(handle,{ key:'Home' });
@@ -251,7 +275,7 @@ it('serializes competing photo writes and rejects the response after sign-out', 
   fetcher.mockImplementation((input,options) => String(input).endsWith('/reorder') ? new Promise(resolve => { finish = resolve; }) : original(input,options));
   mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); reorderWithKeyboard(1,2); reorderWithKeyboard(1,2);
   await waitFor(() => expect(finish).toBeDefined()); expect(writes('PUT')).toHaveLength(1); expect(screen.getByRole('button',{ name:'Eliminar foto 1' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' })); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => finish?.(json(list))); expect(screen.queryByRole('heading',{ name:'Completá tu perfil' })).not.toBeInTheDocument();
+  act(() => observer(null)); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => finish?.(json(list))); expect(screen.queryByRole('heading',{ name:'Completá tu perfil' })).not.toBeInTheDocument();
 });
 it('fails closed on inconsistent legal status and recovers only after authoritative refresh', async () => {
   let inconsistent = true;
@@ -361,7 +385,7 @@ it('serializes Home retry and rejects its late response after sign-out', async (
   retrying = true; const retry = screen.getByRole('button',{ name:'Reintentar Inicio' }); fireEvent.click(retry); fireEvent.click(retry);
   await waitFor(() => expect(finish).toBeDefined());
   expect(fetcher.mock.calls.filter(x => String(x[0]).endsWith('/home'))).toHaveLength(2);
-  fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' })); await screen.findByRole('button',{ name:'Ingresar' });
+  act(() => observer(null)); await screen.findByRole('button',{ name:'Ingresar' });
   await act(async () => finish?.(json({ invalid:true })));
   expect(screen.queryByRole('heading',{ name:'Completá tu perfil' })).not.toBeInTheDocument();
 });
@@ -576,7 +600,7 @@ it('rejects detached drop/picker callbacks after sign-out', async () => {
   mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
   const target = screen.getByRole('article',{ name:'Foto 1' }); const input = screen.getByLabelText('Agregar foto 1');
   act(() => {
-    fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' }));
+    observer(null);
     fireEvent.drop(target,{ dataTransfer:{ types:['Files'],files:[droppedFile()] } });
     fireEvent.change(input,{ target:{ files:[droppedFile()] } });
   });

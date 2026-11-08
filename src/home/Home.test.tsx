@@ -17,6 +17,50 @@ const confirmed = async () => { await screen.findByRole('status', { name: 'Búsq
 const search = () => screen.getByRole('button', { name: 'Buscar chat' });
 const ready = async () => { await waitFor(() => { expect(document.querySelector('.home')).toHaveAttribute('aria-busy', 'false'); expect(screen.queryByText('Hola, Lucía') ?? screen.queryByRole('heading', { name: 'Buscando chat' })).toBeTruthy(); }); };
 const writes = () => fetcher.mock.calls.filter(([url, o]) => String(url).endsWith('/queue') && o?.method !== 'GET');
+it('offers confirmed exceptional sign-out after initial Home failure, while preserving retry', async () => {
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => url === '/api/me/home/status' ? Promise.reject(new TypeError('offline')) : base(url, options));
+  mount(); await screen.findByRole('alert');
+  expect(screen.getByRole('button', { name: 'Actualizar' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Cuenta' })).toBeNull();
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(auth.signOut).not.toHaveBeenCalled();
+  confirm.mockReturnValue(true); fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+  await screen.findByRole('button', { name: 'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce();
+});
+it('shows four peer management cards and a standalone Account with one header return', async () => {
+  mount(); await ready();
+  const account = screen.getByRole('button', { name: 'Cuenta' });
+  expect(account.parentElement).toBe(screen.getByRole('button', { name: 'Tu perfil' }).parentElement);
+  expect(account).not.toHaveAttribute('aria-expanded'); expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
+  fireEvent.click(account);
+  expect(screen.getByRole('heading', { name: 'Cuenta', level: 2 })).toHaveFocus();
+  const back = screen.getByRole('button', { name: 'Volver a Inicio' }); expect(back.parentElement?.tagName).toBe('HEADER');
+  fireEvent.click(back); await screen.findByRole('heading', { name: 'Inicio' });
+  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
+  act(() => history.forward()); await screen.findByRole('heading', { name: 'Cuenta', level: 2 });
+});
+it('does not show a transient loading row while reconciling a loaded Home on return', async () => {
+  mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Afinidades' }));
+  let finish!: (value: Response) => void;
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => url === '/api/me/home/status' ? new Promise(resolve => { finish = resolve; }) : base(url, options));
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' })); await screen.findByRole('heading', { name: 'Inicio' });
+  await waitFor(() => expect(finish).toBeDefined()); expect(search()).toBeDisabled();
+  expect(screen.queryByText('Actualizando Inicio…')).toBeNull();
+  await act(async () => finish(json(status))); await ready();
+});
+it('preserves uncertain deletion across Account → Home → Account', async () => {
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => url === '/api/me' && options?.method === 'DELETE' ? Promise.reject(new TypeError('offline')) : base(url, options));
+  mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+  vi.spyOn(window, 'confirm').mockReturnValue(true); fireEvent.click(screen.getByRole('button', { name: 'Eliminar cuenta' })); await screen.findByRole('alert');
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' })); await screen.findByRole('heading', { name: 'Inicio' }); await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+  expect(screen.getByRole('button', { name: 'Eliminar cuenta' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Eliminar cuenta' }));
+  expect(fetcher.mock.calls.filter(([url, options]) => url === '/api/me' && options?.method === 'DELETE')).toHaveLength(1);
+});
 beforeEach(() => {
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   home = emptyHome(); status = homeStatus(); profile = { id: 'p', userId: 'u', status: 'ACTIVE', displayName: 'Lucía' };
