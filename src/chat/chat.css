@@ -6,6 +6,12 @@
 .chat-heading > div { flex:1; }
 .chat-panel { padding:12px; border:1px solid var(--color-outline); border-radius:var(--radius-card); background:var(--color-surface-variant); }
 .chat-panel p { margin:4px 0 8px; }
+.chat-decision-card { background:var(--color-surface); padding:12px; }
+.chat-decision-card h3 { font-size:1rem; color:var(--color-primary); margin:0 0 8px; }
+.chat-decision-actions { display:flex; gap:12px; }
+.chat-decision-actions button { flex:1; min-width:0; }
+.first-chat .chat-decision-approve { background:var(--color-primary); color:var(--color-on-primary); border-color:var(--color-primary); }
+.first-chat .chat-composer[hidden] { display:none; }
 .chat-timeline { flex:1 1 320px; min-height:160px; overflow:auto; overscroll-behavior:contain; list-style:none; padding:12px; margin:0; display:flex; flex-direction:column; gap:12px; background:var(--color-background); border-radius:var(--radius-card); }
 .chat-message { max-width:85%; padding:12px; border:1px solid var(--color-outline-variant); border-radius:var(--radius-card); overflow-wrap:anywhere; flex-shrink:0; }
 .chat-message p { white-space:pre-wrap; margin:6px 0; }

@@ -15,7 +15,7 @@ try {
   await call('Page.navigate',{url:'http://127.0.0.1:5174'}); await new Promise(r=>setTimeout(r,1800));
   const evaluate = async expression => {const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
   const delay=ms=>new Promise(r=>setTimeout(r,ms));
-  const evidenceRoot=process.argv.includes('--playback')?'artifacts/first-chat-playback/composer-regression':process.argv.includes('--corrections')?'artifacts/first-chat-corrections/composer':'artifacts/first-chat-composer';
+  const evidenceRoot=process.argv.includes('--navigation')?'artifacts/first-chat-navigation/composer-regression':process.argv.includes('--playback')?'artifacts/first-chat-playback/composer-regression':process.argv.includes('--corrections')?'artifacts/first-chat-corrections/composer':'artifacts/first-chat-composer';
   const evidence={layouts:[],keyboard:[],scroll:[],mediaSimulated:true};
   const check=(value,label)=>{if(!value)throw Error(label);console.log('PASS',label);};
   await evaluate("(async()=>{"+

@@ -105,7 +105,8 @@ it('rejects an obsolete refresh after tab restoration supersedes it', async () =
   fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
   await waitFor(() => expect(finish).toBeDefined());
-  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');act(() => document.dispatchEvent(new Event('visibilitychange')));
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');act(() => document.dispatchEvent(new Event('visibilitychange')));
   await ready(); await act(async () => finish?.(json({ ...homeStatus(), version: 99 })));
   expect(screen.getByText('Hola, Lucía')).toBeVisible(); expect(screen.queryByRole('alert')).toBeNull();
 });
@@ -136,7 +137,7 @@ it('pauses polling while hidden and refreshes on visible restoration', async () 
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(10000); }); expect(fetcher).not.toHaveBeenCalled();
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(0); });
-  expect(fetcher.mock.calls.filter(c => c[0] === '/api/me/home')).toHaveLength(1);
+  expect(fetcher.mock.calls.map(c => c[0])).toEqual(['/api/me/home/status']);
 });
 it('sign-out during location acquisition prevents enqueue', async () => {
   let done: PositionCallback | undefined; geo.mockImplementation(ok => { done = ok; });
@@ -403,6 +404,49 @@ it.each(['CHAT_ABANDONED','CHAT_EXPIRED'])('hides terminal %s from every Home su
   expect(screen.getByText('Con Otra persona')).toBeVisible();
   expect(document.body.textContent).not.toContain('Tenés una conversación inicial');
   expect(fetcher.mock.calls.filter(([url])=>url==='/api/matches/m/chat')).toHaveLength(before);
+});
+it.each(['CHAT_ABANDONED','CHAT_EXPIRED'])('retires terminal %s copy on Search without losing backend notices or stale-chat suppression',async code=>{
+  installFirstChatBackend();const base=fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url,options)=>url==='/api/matches/m/chat'?Promise.resolve(json({code},409)):base(url,options));
+  home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];home.passiveNotices=[{type:'SCHEDULING_PREPARING'}];mount();
+  const message=code==='CHAT_ABANDONED'?'El chat se cerró por inactividad.':'El chat venció.';await screen.findByText(message);await ready();
+  const chatReads=fetcher.mock.calls.filter(([url])=>url==='/api/matches/m/chat').length;
+  fireEvent.click(search());await confirmed();expect(screen.queryByText(message)).toBeNull();status.version++;
+  await act(async()=>document.dispatchEvent(new Event('visibilitychange')));expect(screen.queryByText(message)).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Cancelar búsqueda'}));await waitFor(()=>expect(search()).toBeEnabled());
+  expect(screen.queryByText(message)).toBeNull();expect(screen.getByText('Estamos preparando tus próximos pasos para coordinar horarios.')).toBeVisible();
+  expect(fetcher.mock.calls.filter(([url])=>url==='/api/matches/m/chat')).toHaveLength(chatReads);
+});
+it.each(['dismiss','management','activity'])('retires completion copy on %s navigation',async action=>{
+  installFirstChatBackend();const base=fetcher.getMockImplementation()!;fetcher.mockImplementation((url,options)=>url==='/api/matches/m/chat'?Promise.resolve(json({code:'CHAT_EXPIRED'},409)):base(url,options));
+  home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'},{type:'VISUAL_REVIEW',matchId:'other',chatId:null}];mount();await screen.findByText('El chat venció.');await ready();
+  const dismiss=screen.getByRole('button',{name:'Ocultar aviso del chat'});expect(dismiss.querySelector('svg')).not.toBeNull();expect(dismiss.textContent).toBe('');
+  fireEvent.click(screen.getByRole('button',{name:action==='dismiss'?'Ocultar aviso del chat':action==='management'?'Cuenta':'Ver Actividad'}));expect(screen.queryByText('El chat venció.')).toBeNull();
+  if(action!=='dismiss'){act(()=>window.dispatchEvent(new PopStateEvent('popstate')));await ready();expect(screen.queryByText('El chat venció.')).toBeNull();}
+});
+it.each(['home','search'])('keeps %s controls, DOM and focus unchanged during an unchanged foreground status check',async surface=>{
+  if(surface==='search')home.matchmaking.inQueue=true;mount();await ready();await act(async()=>{});
+  const button=surface==='home'?search():screen.getByRole('button',{name:'Cancelar búsqueda'}),root=button.closest('.home');act(()=>button.focus());
+  expect(button).toHaveFocus();const base=fetcher.getMockImplementation()!;let done:((response:Response)=>void)|undefined;fetcher.mockClear();
+  fetcher.mockImplementation((url,options)=>url==='/api/me/home/status'?new Promise(r=>{done=r;}):base(url,options));
+  fireEvent(document,new Event('visibilitychange'));await waitFor(()=>expect(done).toBeDefined());
+  expect(root).toHaveAttribute('aria-busy','false');expect(button).toBeEnabled();expect(button).toHaveFocus();expect(button.closest('.home')).toBe(root);expect(screen.queryByText('Actualizando Inicio…')).toBeNull();
+  await act(async()=>done?.(json(status)));expect(button).toHaveFocus();expect(button).toBeEnabled();expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/api/me/home/status']);
+});
+it('reconciles a changed foreground Home version and routes Search to the authoritative First Chat',async()=>{
+  installFirstChatBackend();home.matchmaking.inQueue=true;mount();await ready();
+  home.matchmaking.inQueue=false;home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];status.version++;
+  fireEvent(document,new Event('visibilitychange'));await screen.findByRole('heading',{name:'María'});expect(screen.queryByRole('heading',{name:'Buscando chat'})).toBeNull();expect(screen.queryByRole('button',{name:'Cerrar sesión'})).toBeNull();
+});
+it('recovers a failed foreground read with the same version without hiding existing Home',async()=>{
+  mount();await ready();const base=fetcher.getMockImplementation()!;fetcher.mockImplementationOnce(()=>Promise.reject(new TypeError('Synthetic offline')));
+  fireEvent(document,new Event('visibilitychange'));await screen.findByRole('alert');expect(screen.getByText('Hola, Lucía')).toBeVisible();expect(search()).toBeDisabled();
+  fetcher.mockImplementation(base);fireEvent(document,new Event('visibilitychange'));await waitFor(()=>expect(search()).toBeEnabled());expect(screen.queryByRole('alert')).toBeNull();
+});
+it('foreground restoration does not clear an uncertain search mutation or replay admission',async()=>{
+  const base=fetcher.getMockImplementation()!;fetcher.mockImplementation((url,options)=>{if(options?.method==='POST'){home.matchmaking.inQueue=true;return Promise.reject(new TypeError('Synthetic uncertain admission'));}return base(url,options);});
+  mount();await ready();fireEvent.click(search());await screen.findByRole('alert');const cancel=screen.getByRole('button',{name:'Cancelar búsqueda'});expect(cancel).toBeDisabled();
+  await act(async()=>document.dispatchEvent(new Event('visibilitychange')));expect(cancel).toBeDisabled();expect(writes()).toHaveLength(1);expect(screen.getByRole('alert')).toBeVisible();
 });
 it.each(['network','http'])('transient %s failure preserves a valid First Chat and Activity opening',async failure=>{
   installFirstChatBackend();const original=fetcher.getMockImplementation()!;

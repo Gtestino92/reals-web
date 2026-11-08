@@ -11,20 +11,23 @@ import { ReactionLane } from './ReactionLane';
 import { ChatIcon } from './ChatIcon';
 import { replyPreview, ReplyQuote } from './ReplyQuote';
 
-function ConfirmDialog({ kind, busy, close, confirm }: { kind: string; busy: boolean; close: () => void; confirm: (body?: unknown) => void }) {
+type DialogAction = 'mutual' | 'cancel' | 'safety' | 'block';
+function ConfirmDialog({ kind, busy, close, confirm }: { kind: DialogAction; busy: boolean; close: () => void; confirm: (body?: unknown) => void }) {
   const ref = useRef<HTMLDialogElement>(null), [details,setDetails] = useState(''), [reason,setReason] = useState('INAPPROPRIATE_BEHAVIOR'), [block,setBlock] = useState(false);
   useEffect(() => { const d = ref.current; d?.showModal(); return () => d?.close(); }, []);
   const safety = kind === 'safety';
   return <dialog ref={ref} aria-labelledby="chat-dialog-title" onCancel={e => { if (busy) e.preventDefault(); else close(); }}>
-    <h3 id="chat-dialog-title">{safety ? 'Reportar y cerrar chat' : kind === 'block' ? 'Bloquear a esta persona' : kind === 'mutual' ? 'Solicitar salida consensuada' : kind === 'approve' ? 'Aprobar chat' : 'Cerrar chat'}</h3>
-    <p>{safety ? 'Describí qué pasó. Este reporte cerrará el chat por seguridad y será revisado.' : kind === 'block' ? 'Se cerrará la interacción y esta persona quedará bloqueada.' : kind === 'mutual' ? 'La conversación se pausa hasta resolver la solicitud. Tanto aceptar como rechazar la salida cierran el chat.' : kind === 'approve' ? 'Si aprobás, la conversación se pausa mientras la otra persona decide. El servidor verifica la participación requerida.' : 'Esta decisión cierra el chat. Una salida unilateral puede afectar tu confiabilidad según las reglas del servidor.'}</p>
+    <h3 id="chat-dialog-title">{safety ? 'Reportar y cerrar chat' : kind === 'block' ? 'Bloquear a esta persona' : kind === 'mutual' ? 'Solicitar salida consensuada' : 'Cerrar chat'}</h3>
+    <p>{safety ? 'Describí qué pasó. Este reporte cerrará el chat por seguridad y será revisado.' : kind === 'block' ? 'Se cerrará la interacción y esta persona quedará bloqueada.' : kind === 'mutual' ? 'La conversación se pausa hasta resolver la solicitud. Tanto aceptar como rechazar la salida cierran el chat.' : 'Esta decisión cierra el chat. Una salida unilateral puede afectar tu confiabilidad según las reglas del servidor.'}</p>
     {safety && <><label>Motivo<select value={reason} onChange={e => setReason(e.target.value)} disabled={busy}><option value="INAPPROPRIATE_BEHAVIOR">Comportamiento inapropiado</option><option value="HARASSMENT">Acoso</option><option value="CHILD_SAFETY_CONCERN">Seguridad de menores</option><option value="OTHER">Otro</option></select></label><label>Detalle<textarea value={details} maxLength={1000} onChange={e => setDetails(e.target.value)} disabled={busy}/></label><label><input type="checkbox" checked={block} onChange={e => setBlock(e.target.checked)} disabled={busy}/>Bloquear también a esta persona</label></>}
     <button disabled={busy} onClick={close}>Volver</button><button disabled={busy || (safety && !plainText(details.trim()))} onClick={() => confirm(safety ? { reason, details: details.trim(), blockUser: block } : undefined)}>Confirmar</button>
   </dialog>;
 }
-function ChatMenu({ actions }: { actions: { label: string; disabled: boolean; run: () => void }[] }) {
+function ChatMenu({ actions, decisionOnly }: { decisionOnly: boolean; actions: { label: string; disabled: boolean; run: () => void }[] }) {
   const [open, setOpen] = useState(false);
   const boundary = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null);
+  const previousMode=useRef(decisionOnly);
+  useEffect(()=>{if(previousMode.current!==decisionOnly){previousMode.current=decisionOnly;if(open){setOpen(false);trigger.current?.focus({preventScroll:true});}}},[decisionOnly,open]);
   const close = () => { setOpen(false); trigger.current?.focus(); };
   useEffect(() => {
     if (!open) return;
@@ -53,10 +56,10 @@ function ChatMenu({ actions }: { actions: { label: string; disabled: boolean; ru
 }
 export function FirstChat({ controller, matchId, chatId, onHome }: { controller: SessionController; matchId: string; chatId: string; onHome: (message?: string, closed?: boolean) => void }) {
   const dirty = useRef(false), knownClosed = useRef(false), terminalMessage = useRef('');
-  const [terminalNotice,setTerminalNotice] = useState(''), [audioDirty,setAudioDirty] = useState(false);
+  const [terminalNotice,setTerminalNotice] = useState(''), [audioDirty,setAudioDirty] = useState(false), [audioEpoch,setAudioEpoch] = useState(0);
   const [session] = useState(() => new ChatSession(controller,matchId,chatId,controller.snapshot.account?.id ?? '',(message, closed) => { knownClosed.current = closed; terminalMessage.current = message; if (dirty.current) setTerminalNotice(message + ' Conservamos tu borrador hasta que vuelvas a Inicio.'); else onHome(message,closed); }));
   const state = useSyncExternalStore(session.subscribe,session.getSnapshot);
-  const [draft,setDraft] = useState(''), [reply,setReply] = useState<NonNullable<Message['replyTo']> | null>(null), [dialog,setDialog] = useState<Parameters<ChatSession['action']>[0] | null>(null), [now,setNow] = useState(Date.now()), [unseen,setUnseen] = useState(false);
+  const [draft,setDraft] = useState(''), [reply,setReply] = useState<NonNullable<Message['replyTo']> | null>(null), [dialog,setDialog] = useState<DialogAction | null>(null), [now,setNow] = useState(Date.now()), [unseen,setUnseen] = useState(false);
   const timeline = useRef<HTMLOListElement>(null), nearBottom = useRef(true), text = useRef<HTMLTextAreaElement>(null), heading = useRef<HTMLHeadingElement>(null);
   const composing = useRef(false), composer = useRef<HTMLFormElement>(null), observedHeight = useRef(0);
   const resizeInput = useCallback(() => {
@@ -84,7 +87,7 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
     session.start(); void session.refresh(); heading.current?.focus();
     const timer = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.refresh(false,true); },5000);
     const tick = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.checkExitTimeout(); },1000);
-    const resume = () => { if (document.visibilityState === 'visible') void session.refresh(); };
+    const resume = () => { if (document.visibilityState === 'visible') void session.resume(); };
     document.addEventListener('visibilitychange',resume); window.addEventListener('online',resume);
     return () => { session.dispose(); clearInterval(timer); clearInterval(tick); document.removeEventListener('visibilitychange',resume); window.removeEventListener('online',resume); };
   }, [session]);
@@ -101,6 +104,10 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
   useEffect(() => { const warn = (e: BeforeUnloadEvent) => { if (dirty.current) { e.preventDefault(); } }; window.addEventListener('beforeunload',warn); return () => window.removeEventListener('beforeunload',warn); }, [draft,state.outgoing]);
   const chat = state.chat, p = policy(chat,state.exits,now+state.offset), me = session.me, eligible = reactable(state.messages,me), g = chat?.guidance;
   const disabled = state.busy || state.blocked, ordinary = p.ordinary && !disabled && !state.outgoing;
+  const decisionPanel=chat?.status==='ACTIVE' && chat.myDecision==='PENDING' && chat.partnerDecision==='APPROVED';
+  const decisionTitle=useRef<HTMLHeadingElement>(null);
+  const decisionDisabled=disabled || audioDirty || !p.decide || state.outgoing?.phase==='uncertain';
+  useEffect(()=>{if(p.decisionOnly && dialog && dialog!=='safety' && dialog!=='block'){setDialog(null);decisionTitle.current?.focus({preventScroll:true});}},[p.decisionOnly,dialog]);
   const canProgressGuidance = !!g && p.ordinary && g.canRequestNext && !g.completed && !g.myNextRequested &&
     (g.progressionAction === 'COMPLETE' || g.progressionAction === 'NEXT_QUESTION' || (g.progressionAction === null && g.questionOrdinal < g.maxQuestions));
   const deadline = chat ? Math.min(Date.parse(chat.timeoutAt), !p.decisionOnly && chat.inactivityExpiresAt ? Date.parse(chat.inactivityExpiresAt) : Infinity) : Infinity;
@@ -116,8 +123,8 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
     return () => window.removeEventListener('popstate',back);
   });
   return <section className="first-chat" aria-label="Primer chat">
-    <header className="chat-heading"><div><p className="chat-phase">PRIMER CHAT</p><h2 ref={heading} tabIndex={-1}>{chat?.partner.displayName ?? 'Cargando conversación…'}</h2></div><ChatMenu actions={[
-      { label: 'Rechazar chat', disabled: disabled || audioDirty || !p.decide, run: () => setDialog('reject') },
+    <header className="chat-heading"><div><p className="chat-phase">PRIMER CHAT</p><h2 ref={heading} tabIndex={-1}>{chat?.partner.displayName ?? 'Cargando conversación…'}</h2></div><ChatMenu decisionOnly={p.decisionOnly} actions={[
+      ...(!decisionPanel ? [{ label: 'Rechazar chat', disabled: decisionDisabled, run: () => { if(!decisionDisabled)void session.action('reject'); } }] : []),
       ...(!p.decisionOnly ? [
         { label: 'Salida consensuada', disabled: !ordinary, run: () => setDialog('mutual') },
         { label: 'Salir unilateralmente', disabled: disabled || !p.safety, run: () => setDialog('cancel') },
@@ -125,10 +132,16 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       { label: 'Reportar por seguridad', disabled: disabled || !p.safety, run: () => setDialog('safety') },
       { label: 'Bloquear', disabled: disabled || !p.safety, run: () => setDialog('block') },
     ]}/></header>
-    <button className={`chat-approve ${p.decide && !state.blocked && !audioDirty ? "chat-stable-control" : ""}`} disabled={disabled || audioDirty || !p.decide} onClick={() => setDialog('approve')}>Aprobar chat</button>
-    {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && state.reactionFeedback === null && !state.messagePending && !state.guidancePending && <p className="chat-status" role="status">Actualizando…</p>}{state.error && !state.messageError && <p className={state.reactionFeedback === 'error' ? 'chat-reaction-error' : undefined} role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
+    {!p.decisionOnly && <button className={`chat-approve ${p.decide && !state.blocked && !audioDirty ? "chat-stable-control" : ""}`} aria-busy={!!state.decisionPending} disabled={decisionDisabled} onClick={() => { if(!decisionDisabled)void session.action('approve'); }}><span aria-live="polite">{state.decisionPending ? state.decisionPending==='approve'?'Aprobando…':'Rechazando…' : 'Aprobar chat'}</span></button>}
+    {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && state.reactionFeedback === null && !state.messagePending && !state.guidancePending && !state.decisionPending && <p className="chat-status" role="status">Actualizando…</p>}{state.error && !state.messageError && <p className={state.reactionFeedback === 'error' ? 'chat-reaction-error' : undefined} role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
     {chat && remaining <= 60 && <p role="status">{remaining ? `El plazo del chat termina en ${remaining} s.` : 'El plazo local terminó. Consultando el estado del servidor…'}</p>}
-    {p.decisionOnly && <aside className="chat-panel">{chat?.myDecision === 'PENDING' ? 'La otra persona aprobó. La conversación está pausada mientras decidís.' : 'Guardamos tu aprobación. Esperando la otra decisión.'}</aside>}
+    {decisionPanel && <aside className="chat-panel chat-decision-card" aria-labelledby="chat-decision-title">
+      <h3 ref={decisionTitle} id="chat-decision-title" tabIndex={-1}>{chat?.partner.displayName.trim() || 'La otra persona'} aprobó el chat.</h3>
+      <p role="status">El chat está pausado mientras decidís. ¿Querés aprobar también?</p>
+      <div className="chat-decision-actions"><button className="chat-decision-approve" aria-label="Aprobar" aria-busy={state.decisionPending==='approve'} disabled={decisionDisabled} onClick={()=>{if(!decisionDisabled)void session.action('approve');}}>{state.decisionPending==='approve'?'Aprobando…':'Aprobar'}</button><button aria-label="No aprobar" aria-busy={state.decisionPending==='reject'} disabled={decisionDisabled} onClick={()=>{if(!decisionDisabled)void session.action('reject');}}>{state.decisionPending==='reject'?'Rechazando…':'No aprobar'}</button></div>
+    </aside>}
+    {p.decisionOnly && audioDirty && <p role="status">Conservamos tu borrador de audio. <button disabled={!!state.outgoing?.file} onClick={()=>{setAudioEpoch(value=>value+1);setAudioDirty(false);}}>Descartar borrador de audio</button></p>}
+    {p.decisionOnly && state.messageError && state.error && <p className="chat-composer-error" role="alert">{state.error} <button disabled={state.busy} onClick={()=>void session.refresh()}>Reintentar conexión</button></p>}
     {g && !p.decisionOnly && <div className="chat-guidance-viewport"><ReplySwipe key={g.question.instanceId ?? g.question.text} enabled={ordinary && !audioDirty && !!g.question.instanceId} label="Responder pregunta" onReply={() => g.question.instanceId && beginReply({ type: 'GUIDANCE_QUESTION', targetId: g.question.instanceId }, g.question.text)}><aside className="chat-panel chat-guidance" aria-label="Conversación guiada"><div className="chat-guidance-copy"><p className="chat-guidance-ordinal">Pregunta {g.questionOrdinal} de {g.maxQuestions}</p><p>{g.question.text}</p>
       {g.completed ? <p className="chat-guidance-state">Etapa guiada completada.</p> : g.myNextRequested && <p className="chat-guidance-state">Esperando a la otra persona para continuar.</p>}</div>
       {canProgressGuidance && <button className={`${g.progressionAction === 'COMPLETE' ? 'chat-guidance-complete' : 'chat-guidance-next'} ${!state.blocked && !audioDirty ? 'chat-stable-control' : ''}`} aria-busy={state.guidancePending} aria-label={g.progressionAction === 'COMPLETE' ? 'Completar etapa' : 'Otra pregunta'} disabled={!ordinary || audioDirty} onClick={() => void session.action('guidance')}>{g.progressionAction === 'COMPLETE' ? 'Completar' : <ChatIcon name="next"/>}{state.guidancePending && <span className="chat-visually-hidden" role="status">Solicitando avance…</span>}</button>}
@@ -147,9 +160,10 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       {state.outgoing && <li className="chat-message outgoing"><p>{state.outgoing.content ?? 'Audio pendiente'}</p><p role="status">{state.outgoing.phase === 'pending' ? 'Enviando…' : state.outgoing.phase === 'uncertain' ? 'Sin confirmar' : 'Falló el envío'}</p>{state.outgoing.phase !== 'pending' && <button disabled={disabled || !p.ordinary} onClick={() => void session.retry()}>Reconciliar y reintentar el mismo envío</button>}{state.outgoing.phase === 'failed' && <button disabled={disabled} onClick={session.editFailed}>Editar borrador</button>}</li>}
     </ol>
     {unseen && <button onClick={() => { const l = timeline.current; if (l) l.scrollTop=l.scrollHeight; nearBottom.current=true; setUnseen(false); }}>Ver mensajes nuevos</button>}
-    <form ref={composer} className="chat-composer" aria-busy={state.messagePending} onSubmit={e => { e.preventDefault(); if (ordinary && !audioDirty && plainText(draft)) void session.send(draft,reply ? { type:reply.type,targetId:reply.targetId } : null); }}>
+    {/* Hide ordinary composition while retaining draft ownership and delivery reconciliation. */}
+    <form hidden={p.decisionOnly} ref={composer} className="chat-composer" aria-busy={state.messagePending} onSubmit={e => { e.preventDefault(); if (ordinary && !audioDirty && plainText(draft)) void session.send(draft,reply ? { type:reply.type,targetId:reply.targetId } : null); }}>
       {reply && <aside className="chat-reply-preview" aria-label="Respuesta seleccionada"><ReplyQuote {...replyPreview(reply,me,chat?.partner.userId,chat?.partner.displayName)}/><button type="button" className="chat-icon-button" aria-label="Quitar respuesta" disabled={!!state.outgoing} onClick={() => setReply(null)}><ChatIcon name="close"/></button></aside>}
-      <AudioComposer textConfirmationVersion={state.confirmed !== null && state.confirmedFile === null ? state.confirmationVersion : 0} policy={chat?.audioPolicy ?? null} disabled={!ordinary || dialog !== null} payloadLocked={!!state.outgoing} confirmedFile={state.confirmedFile} delivery={state.outgoing?.file ? state.outgoing.phase : null} onRetry={session.retry} onDirtyChange={setAudioDirty} onSend={file => session.send('',reply ? { type:reply.type,targetId:reply.targetId } : null,file)}>{microphone => <>
+      <AudioComposer key={audioEpoch} textConfirmationVersion={state.confirmed !== null && state.confirmedFile === null ? state.confirmationVersion : 0} policy={chat?.audioPolicy ?? null} disabled={!ordinary || dialog !== null} payloadLocked={!!state.outgoing} confirmedFile={state.confirmedFile} delivery={state.outgoing?.file ? state.outgoing.phase : null} onRetry={session.retry} onDirtyChange={setAudioDirty} onSend={file => session.send('',reply ? { type:reply.type,targetId:reply.targetId } : null,file)}>{microphone => <>
       <div className="chat-composer-row">
       <label className="chat-visually-hidden" htmlFor="chat-draft">Mensaje</label><textarea placeholder="Mensaje" id="chat-draft" ref={setText} maxLength={1000} value={draft} onChange={e => setDraft(e.target.value)} disabled={!p.ordinary || state.blocked || audioDirty} rows={1}
         onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onBlur={() => { composing.current = false; }}
@@ -165,6 +179,6 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       </>}</AudioComposer>
       {state.error && state.messageError && <p className="chat-composer-error" role="alert">{state.error} <button type="button" disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
     </form>
-    {dialog && <ConfirmDialog kind={dialog} busy={state.busy} close={() => setDialog(null)} confirm={body => { void (async () => { await session.action(dialog,body); if (!session.getSnapshot().error) setDialog(null); })(); }}/> }
+    {dialog && (!p.decisionOnly || dialog==='safety' || dialog==='block') && <ConfirmDialog kind={dialog} busy={state.busy} close={() => setDialog(null)} confirm={body => { void (async () => { await session.action(dialog,body); if (!session.getSnapshot().error) setDialog(null); })(); }}/> }
   </section>;
 }

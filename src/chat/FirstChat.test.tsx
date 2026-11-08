@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { FirstChat } from './FirstChat';
 import { chatFixture, controllerFixture, messageFixture } from './fixtures';
 import type { Message } from './contracts';
+import { admittedAudioFixture } from './audio.test-support';
 let controller:ReturnType<typeof controllerFixture>, chat:ReturnType<typeof chatFixture>, messages:Message[];
 let home:ReturnType<typeof vi.fn<(message?:string)=>void>>;
 beforeEach(()=>{
@@ -29,7 +30,12 @@ it('works under StrictMode and renders safe chronological messages without photo
 it('clears only a confirmed draft and preserves the next draft on incoming polling',async()=>{mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'¡Hola!'}});fireEvent.click(screen.getByRole('button',{name:'Enviar mensaje'}));await waitFor(()=>expect(input).toHaveValue(''));fireEvent.change(input,{target:{value:'Nuevo borrador'}});messages.push(messageFixture('3'));fireEvent(window,new Event('online'));await waitFor(()=>expect(screen.getAllByText('Hola, ¿cómo estás?')).toHaveLength(2));expect(input).toHaveValue('Nuevo borrador');});
 it('uses immutable question identity for direct replies',async()=>{mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Responder pregunta'}));fireEvent.change(screen.getByRole('textbox',{name:'Mensaje'}),{target:{value:'La música'}});fireEvent.click(screen.getByRole('button',{name:'Enviar mensaje'}));await waitFor(()=>expect(controller.request).toHaveBeenCalledWith('/chats/c/messages',expect.any(AbortSignal),'POST',expect.objectContaining({replyTo:{type:'GUIDANCE_QUESTION',targetId:'question-1'}})));});
 it('replies to incoming messages without embedding a nested quote',async()=>{mount();await ready();fireEvent.click(screen.getByRole('button',{name:/^Responder mensaje de/}));fireEvent.change(screen.getByRole('textbox',{name:'Mensaje'}),{target:{value:'Bien'}});fireEvent.click(screen.getByRole('button',{name:'Enviar mensaje'}));await waitFor(()=>expect(controller.request).toHaveBeenCalledWith('/chats/c/messages',expect.any(AbortSignal),'POST',expect.objectContaining({replyTo:{type:'MESSAGE',targetId:'1'}})));});
-it('decision-only disables conversation but leaves final decision and safety',async()=>{chat.partnerDecision='APPROVED';mount();await screen.findByRole('heading',{name:'María'});expect(screen.getByRole('textbox',{name:'Mensaje'})).toBeDisabled();expect(screen.getByRole('button',{name:'Aprobar chat'})).toBeEnabled();fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));expect(screen.queryByRole('menuitem',{name:'Salida consensuada'})).toBeNull();expect(screen.getByRole('menuitem',{name:'Reportar por seguridad'})).toBeEnabled();});
+it('decision-only shows native choices and hides ordinary conversation controls',async()=>{
+  chat.partnerDecision='APPROVED';mount();await screen.findByRole('heading',{name:'María'});await waitFor(()=>expect(screen.getByRole('button',{name:'Aprobar'})).toBeEnabled());
+  expect(screen.queryByRole('textbox',{name:'Mensaje'})).toBeNull();expect(screen.queryByRole('button',{name:'Aprobar chat'})).toBeNull();expect(screen.getByRole('button',{name:'No aprobar'})).toBeEnabled();
+  expect(screen.getByText('María aprobó el chat.')).toBeVisible();expect(screen.getByText('El chat está pausado mientras decidís. ¿Querés aprobar también?')).toBeVisible();
+  fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));expect(screen.queryByRole('menuitem',{name:'Salida consensuada'})).toBeNull();expect(screen.queryByRole('menuitem',{name:'Rechazar chat'})).toBeNull();expect(screen.getByRole('menuitem',{name:'Reportar por seguridad'})).toBeEnabled();expect(screen.getByRole('menuitem',{name:'Bloquear'})).toBeEnabled();
+});
 it('safety form requires valid details and sends reason and optional block',async()=>{mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));fireEvent.click(screen.getByRole('menuitem',{name:'Reportar por seguridad'}));expect(screen.getByRole('dialog')).toBeVisible();expect(screen.getByRole('button',{name:'Confirmar'})).toBeDisabled();fireEvent.change(screen.getByRole('textbox',{name:'Detalle'}),{target:{value:'Descripción del incidente'}});fireEvent.change(screen.getByRole('combobox',{name:'Motivo'}),{target:{value:'HARASSMENT'}});fireEvent.click(screen.getByRole('checkbox'));fireEvent.click(screen.getByRole('button',{name:'Confirmar'}));await waitFor(()=>expect(controller.request).toHaveBeenCalledWith('/chats/c/safety-cancellations',expect.any(AbortSignal),'POST',{reason:'HARASSMENT',details:'Descripción del incidente',blockUser:true}));});
 it('warns before leaving with an unsent draft',async()=>{vi.spyOn(window,'confirm').mockReturnValue(false);mount();await ready();fireEvent.change(screen.getByRole('textbox',{name:'Mensaje'}),{target:{value:'Sin enviar'}});fireEvent(window,new PopStateEvent('popstate'));expect(home).not.toHaveBeenCalled();expect(screen.getByRole('textbox',{name:'Mensaje'})).toHaveValue('Sin enviar');});
 it('unmount aborts outstanding requests and removes the poller',async()=>{const view=mount();await ready();const signals=vi.mocked(controller.request).mock.calls.map(c=>c[1]);view.unmount();expect(signals.every(s=>s.aborted)).toBe(true);});
@@ -47,7 +53,6 @@ it('menu supports keyboard traversal, Escape, outside dismissal and focus restor
   expect(screen.getByRole('heading',{name:'María'}).compareDocumentPosition(screen.getByRole('button',{name:'Aprobar chat'})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 it.each([
-  ['Rechazar chat','/matches/m/chat-decision'],
   ['Salida consensuada','/chats/c/exit-requests'],
   ['Salir unilateralmente','/chats/c/cancellations'],
   ['Bloquear','/matches/m/block'],
@@ -220,9 +225,9 @@ it('prevents duplicates from repeated Enter and simultaneous form submission whi
   enter(input);enter(input);fireEvent.submit(input.closest('form')!);
   expect(vi.mocked(controller.request).mock.calls.filter(c=>c[0]==='/chats/c/messages')).toHaveLength(1);expect(input).toBeEnabled();fireEvent.change(input,{target:{value:'Siguiente borrador'}});expect(input).toHaveValue('Siguiente borrador');
 });
-it('never sends with Enter in decision-only mode',async()=>{
-  chat.partnerDecision='APPROVED';mount();await screen.findByRole('heading',{name:'María'});const input=screen.getByRole('textbox',{name:'Mensaje'});
-  fireEvent.change(input,{target:{value:'No permitido'}});enter(input);expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
+it('never exposes text submission in decision-only mode',async()=>{
+  chat.partnerDecision='APPROVED';mount();await screen.findByRole('button',{name:'Aprobar'});expect(screen.queryByRole('textbox',{name:'Mensaje'})).toBeNull();
+  const hiddenInput=document.querySelector('textarea')!;fireEvent.change(hiddenInput,{target:{value:'No permitido'}});enter(hiddenInput);fireEvent.submit(hiddenInput.closest('form')!);expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
 });
 it('keeps a labelled preview structurally above input and clearing it preserves typed text',async()=>{
   mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Mi borrador'}});
@@ -272,4 +277,56 @@ it.each([true,false])('hides the quota notice only for a confirmed text send: %s
   if(success){await waitFor(()=>expect(input).toHaveValue(''));expect(screen.queryByRole('button',{name:'Ocultar aviso de audio'})).toBeNull();}
   else {await screen.findByRole('alert');expect(input).toHaveValue('Mensaje de texto');expect(screen.getByRole('button',{name:'Ocultar aviso de audio'})).toBeVisible();}
   expect(screen.getByRole('button',{name:'Grabar audio'})).toBeDisabled();expect(screen.getByRole('button',{name:'Grabar audio'})).toHaveAccessibleDescription('Alcanzaste el límite de audios.');
+});
+it.each(['approve','reject'] as const)('submits normal %s directly and rejects double clicks',async kind=>{
+  const base=vi.mocked(controller.request).getMockImplementation()!;
+  vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>path==='/matches/m/chat-decision'?new Promise(()=>{}):base(path,signal,method,body));
+  mount();await ready();let button:HTMLElement;
+  if(kind==='approve')button=screen.getByRole('button',{name:'Aprobar chat'});
+  else {fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));button=screen.getByRole('menuitem',{name:'Rechazar chat'});}
+  fireEvent.click(button);fireEvent.click(button);expect(screen.queryByRole('dialog')).toBeNull();
+  const writes=vi.mocked(controller.request).mock.calls.filter(c=>c[0]==='/matches/m/chat-decision');expect(writes).toHaveLength(1);expect(writes[0]?.[3]).toEqual({decision:kind==='approve'?'APPROVED':'REJECTED'});
+  expect(screen.queryByText('Actualizando…')).toBeNull();expect(screen.getByRole('button',{name:kind==='approve'?'Aprobando…':'Rechazando…'})).toBeDisabled();
+});
+it.each(['Aprobar','No aprobar'])('uses the existing API directly from decision-only %s',async name=>{
+  chat.partnerDecision='APPROVED';const base=vi.mocked(controller.request).getMockImplementation()!;
+  vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>path==='/matches/m/chat-decision'?new Promise(()=>{}):base(path,signal,method,body));
+  mount();await screen.findByRole('button',{name});await waitFor(()=>expect(screen.getByRole('button',{name})).toBeEnabled());const button=screen.getByRole('button',{name});fireEvent.click(button);fireEvent.click(button);
+  expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('button',{name:'Aprobar'})).toBeDisabled();expect(screen.getByRole('button',{name:'No aprobar'})).toBeDisabled();
+  expect(vi.mocked(controller.request).mock.calls.filter(c=>c[0]==='/matches/m/chat-decision')).toHaveLength(1);expect(controller.request).toHaveBeenCalledWith('/matches/m/chat-decision',expect.any(AbortSignal),'POST',{decision:name==='Aprobar'?'APPROVED':'REJECTED'});
+});
+it('preserves history and unsent text when the partner approves during an open ordinary exit dialog',async()=>{
+  mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'}),list=screen.getByRole('list',{name:'Mensajes'}),message=document.querySelector('.chat-message');fireEvent.change(input,{target:{value:'Borrador conservado'}});
+  fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));fireEvent.click(screen.getByRole('menuitem',{name:'Salida consensuada'}));expect(screen.getByRole('dialog')).toBeVisible();
+  chat={...chat,partnerDecision:'APPROVED'};fireEvent(window,new Event('online'));await screen.findByText('María aprobó el chat.');
+  expect(screen.queryByRole('dialog')).toBeNull();expect(screen.queryByRole('textbox',{name:'Mensaje'})).toBeNull();expect(input).toHaveValue('Borrador conservado');expect(input.closest('form')).toHaveAttribute('hidden');
+  expect(screen.getByRole('list',{name:'Mensajes'})).toBe(list);expect(document.querySelector('.chat-message')).toBe(message);expect(screen.getByRole('heading',{name:'María aprobó el chat.'})).toHaveFocus();
+  const unload=new Event('beforeunload',{cancelable:true});fireEvent(window,unload);expect(unload.defaultPrevented).toBe(true);
+});
+it('keeps an existing safety report draft open when the partner approves',async()=>{
+  mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));fireEvent.click(screen.getByRole('menuitem',{name:'Reportar por seguridad'}));const dialog=screen.getByRole('dialog'),details=screen.getByRole('textbox',{name:'Detalle'});fireEvent.change(details,{target:{value:'Reporte pendiente'}});
+  chat={...chat,partnerDecision:'APPROVED'};fireEvent(window,new Event('online'));await screen.findByText('María aprobó el chat.');expect(screen.getByRole('dialog')).toBe(dialog);expect(details).toHaveValue('Reporte pendiente');
+});
+it('closes stale overflow contents and retains focus on the trigger after a partner decision',async()=>{
+  mount();await ready();const trigger=screen.getByRole('button',{name:'Opciones del chat'});fireEvent.click(trigger);chat={...chat,partnerDecision:'APPROVED'};fireEvent(window,new Event('online'));await screen.findByText('María aprobó el chat.');
+  expect(screen.queryByRole('menu')).toBeNull();expect(trigger).toHaveFocus();fireEvent.click(trigger);expect(screen.queryByRole('menuitem',{name:'Rechazar chat'})).toBeNull();
+});
+it('quiet foreground reconciliation preserves chat nodes, focus and the draft',async()=>{
+  mount();await ready();const root=screen.getByRole('region',{name:'Primer chat'}),input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'Sigo escribiendo'}});act(()=>input.focus());
+  const base=vi.mocked(controller.request).getMockImplementation()!;let finish:((value:unknown)=>void)|undefined;
+  vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>path==='/matches/m'?new Promise(r=>{finish=r;}):base(path,signal,method,body));fireEvent(document,new Event('visibilitychange'));
+  expect(input).toHaveFocus();expect(input).toHaveValue('Sigo escribiendo');expect(screen.getByRole('region',{name:'Primer chat'})).toBe(root);expect(screen.queryByText('Actualizando…')).toBeNull();
+  await act(async()=>finish?.({id:'m',userAId:'me',userBId:'them',state:'CHAT_ACTIVE'}));expect(input).toHaveFocus();expect(screen.getByRole('region',{name:'Primer chat'})).toBe(root);
+});
+it('retains an audio draft during partner approval and explicitly discards it without uploading',async()=>{
+  let recorder:Recorder|undefined;const stop=vi.fn();
+  class Recorder {static isTypeSupported=()=>true;state='inactive';mimeType='audio/mp4';ondataavailable:((event:{data:Blob})=>void)|null=null;onstop:(()=>void)|null=null;
+    constructor(){recorder=this;}start(){this.state='recording';}stop(){this.state='inactive';this.ondataavailable?.({data:new Blob([admittedAudioFixture()])});this.onstop?.();}}
+  vi.stubGlobal('MediaRecorder',Recorder);Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>({getTracks:()=>[{stop}]})}});
+  const read=vi.spyOn(Blob.prototype,'arrayBuffer').mockResolvedValue(admittedAudioFixture());
+  Object.defineProperty(URL,'createObjectURL',{configurable:true,value:vi.fn(()=> 'blob:synthetic-draft')});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});
+  try {mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await screen.findByRole('timer');expect(recorder).toBeDefined();fireEvent.click(screen.getByRole('button',{name:'Detener'}));await screen.findByLabelText('Vista previa del audio');
+    chat={...chat,partnerDecision:'APPROVED'};fireEvent(window,new Event('online'));await screen.findByText('María aprobó el chat.');expect(screen.getByRole('button',{name:'Aprobar'})).toBeDisabled();expect(screen.queryByRole('textbox',{name:'Mensaje'})).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'Descartar borrador de audio'}));await waitFor(()=>expect(screen.getByRole('button',{name:'Aprobar'})).toBeEnabled());expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:synthetic-draft');expect(vi.mocked(controller.request).mock.calls.some(c=>c[0].endsWith('/audio-messages'))).toBe(false);
+  } finally {read.mockRestore();Reflect.deleteProperty(navigator,'mediaDevices');}
 });

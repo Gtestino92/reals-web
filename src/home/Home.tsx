@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionController } from '../auth/session';
 import type { Activity } from './contracts';
 import { Onboarding } from '../onboarding/Onboarding';
@@ -6,6 +6,7 @@ import { useHome } from './useHome';
 import { activityPresentation } from './presentation';
 import { SearchingScreen } from './SearchingScreen';
 import { FirstChat } from '../chat/FirstChat';
+import { ChatIcon } from '../chat/ChatIcon';
 import { reconcileHiddenFirstChats, visibleHome } from './hiddenFirstChats';
 import './home.css';
 
@@ -47,6 +48,7 @@ const managementEntries = [
 
 export function Home({ controller, onCompleteProfile, onChatActiveChange }: { onChatActiveChange?: (active: boolean) => void; controller: SessionController; onCompleteProfile?: () => void }) {
   const [chat, setChat] = useState<Activity | null>(null), [notice, setNotice] = useState('');
+  const retireNotice = useCallback(() => setNotice(''), []);
   useEffect(() => { onChatActiveChange?.(!!chat); return () => onChatActiveChange?.(false); }, [chat, onChatActiveChange]);
   const suppressed = useRef(new Set<string>());
   const hidden = useRef(new Set<string>());
@@ -65,6 +67,7 @@ export function Home({ controller, onCompleteProfile, onChatActiveChange }: { on
   const [surface, setSurface] = useState<ManagementSurface | null>(null);
   const locked = useRef(false), root = useRef<HTMLDivElement>(null);
   const open = (next: ManagementSurface) => {
+    retireNotice();
     locked.current = next === 'profile' || next === 'preferences';
     window.history.pushState(null, '');
     setSurface(next);
@@ -84,7 +87,7 @@ export function Home({ controller, onCompleteProfile, onChatActiveChange }: { on
     if (heading) { heading.tabIndex = -1; heading.focus(); }
   }, [surface]);
   if (chat?.chatId) return <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>;
-  if (!surface) return <>{notice && <p role="status">{notice}</p>}<HomeOverview controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current}/></>;
+  if (!surface) return <HomeOverview notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current}/>;
   return <div className="home" ref={root}>
     <header className="home-heading"><h2>{managementEntries.find(entry => entry[0] === surface)?.[1]}</h2></header>
     {surface === 'profile' || surface === 'preferences' ? <Onboarding controller={controller} management={surface === 'profile' ? 'details' : 'filters'} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; }} /> : <>
@@ -99,7 +102,7 @@ export function Home({ controller, onCompleteProfile, onChatActiveChange }: { on
   </div>;
 }
 
-function HomeOverview({ controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed }: { controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
+function HomeOverview({ notice, retireNotice, controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed }: { notice: string; retireNotice: () => void; controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
   const { model, busy, blocked, error, refresh, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller);
   const [surface, setSurface] = useState<'overview' | 'activity'>('overview');
   const root = useRef<HTMLDivElement>(null);
@@ -111,6 +114,7 @@ function HomeOverview({ controller, onCompleteProfile, onManage, onOpenChat, sup
   }, [home, busy, blocked, onOpenChat, suppressed]);
   const waiting = !!m?.inQueue || searchPhase !== 'idle';
   const screen = waiting ? 'search' : surface;
+  useEffect(() => { if (screen !== 'overview') retireNotice(); }, [screen, retireNotice]);
   useEffect(() => {
     if (surface !== 'activity') return;
     const pop = () => setSurface('overview');
@@ -136,6 +140,7 @@ function HomeOverview({ controller, onCompleteProfile, onManage, onOpenChat, sup
   </div>;
   return <div ref={root} className="home" aria-busy={busy}>
     <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><button className="login-button login-outlined" disabled={busy} onClick={refresh}>Actualizar</button></header>
+    {notice && <p className="home-notice home-terminal-notice" role="status"><span>{notice}</span><button type="button" onClick={retireNotice} aria-label="Ocultar aviso del chat"><ChatIcon name="close"/></button></p>}
     {busy && <p role="status">Actualizando Inicio…</p>}
     {error && <p className="home-error" role="alert">{error}</p>}
     {home && <>

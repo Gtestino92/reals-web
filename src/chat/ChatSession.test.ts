@@ -88,6 +88,29 @@ it.each(['EXPIRED','ABANDONED'])('routes authoritative %s and stops polling',asy
 it.each(['CHAT_EXPIRED','CHAT_ABANDONED'])('handles authoritative terminal conflict %s',async code=>{request.mockRejectedValue(new ApiError('backend',409,code));await session.refresh();expect(home).toHaveBeenCalled();});
 it('local expiry blocks ordinary actions without synthesizing terminal state',async()=>{chat.timeoutAt=new Date(Date.now()-1000).toISOString();await session.refresh();await session.send('Hola',null);expect(writes()).toHaveLength(0);expect(home).not.toHaveBeenCalled();});
 it('decision-only ignores inactivity advisory while awaiting final decision',async()=>{chat.partnerDecision='APPROVED';chat.inactivityExpiresAt=new Date(Date.now()-1000).toISOString();await session.refresh();await session.action('reject');expect(writes()).toHaveLength(1);});
+it.each(['approve','reject'] as const)('keeps %s pending metadata coupled to the write lock and reconciles authoritative closure',async kind=>{
+  await session.refresh();const base=request.getMockImplementation()!;let complete:((value:unknown)=>void)|undefined;
+  request.mockImplementation((path,signal,method,body)=>path.endsWith('/chat-decision')?new Promise(r=>{complete=r;}):base(path,signal,method,body));
+  const write=session.action(kind);expect(session.getSnapshot()).toMatchObject({decisionPending:kind,busy:true});await session.action(kind);await session.resume();expect(writes()).toHaveLength(1);
+  matchState=kind==='approve'?'VISUAL_PHASE':'CHAT_REJECTED';complete?.({id:'m',state:matchState});await write;
+  expect(home).toHaveBeenCalledTimes(1);expect(session.getSnapshot()).toMatchObject({busy:false,decisionPending:null});
+});
+it('does not infer mutual approval from a write alone and reconciles an uncertain decision before retry',async()=>{
+  chat.partnerDecision='APPROVED';await session.refresh();const base=request.getMockImplementation()!;let failReads=false;
+  request.mockImplementation((path,signal,method,body)=>{if(path.endsWith('/chat-decision')){failReads=true;return Promise.reject(new ApiError('network'));}return failReads?Promise.reject(new ApiError('network')):base(path,signal,method,body);});
+  await session.action('approve');expect(home).not.toHaveBeenCalled();expect(session.getSnapshot()).toMatchObject({blocked:true,busy:false,decisionPending:null});await session.action('approve');expect(writes()).toHaveLength(1);
+  failReads=false;matchState='VISUAL_PHASE';await session.resume();expect(home).toHaveBeenCalledTimes(1);expect(writes()).toHaveLength(1);
+});
+it('shows an approval eligibility failure without accepting a decision locally',async()=>{
+  await session.refresh();const base=request.getMockImplementation()!;request.mockImplementation((path,signal,method,body)=>path.endsWith('/chat-decision')?Promise.reject(new ApiError('backend',409,'FIRST_CHAT_APPROVAL_TOO_EARLY')):base(path,signal,method,body));
+  await session.action('approve');expect(session.getSnapshot().error).toContain('Todavía');expect(session.getSnapshot().chat?.myDecision).toBe('PENDING');expect(session.getSnapshot().decisionPending).toBeNull();expect(home).not.toHaveBeenCalled();
+});
+it('foreground supersedes an old read without resetting the valid chat or accepting its late response',async()=>{
+  await session.refresh();const base=request.getMockImplementation()!;let old:((value:unknown)=>void)|undefined;
+  request.mockImplementationOnce(()=>new Promise(r=>{old=r;}));const stale=session.refresh(false,true);chat.partnerDecision='APPROVED';await session.resume();
+  expect(session.getSnapshot().chat?.partnerDecision).toBe('APPROVED');old?.({id:'m',userAId:'me',userBId:'them',state:'EXPIRED'});await stale;
+  expect(home).not.toHaveBeenCalled();expect(session.getSnapshot().chat?.partnerDecision).toBe('APPROVED');request.mockImplementation(base);
+});
 it('disposal rejects obsolete async results',async()=>{let resolve:((value:unknown)=>void)|undefined;request.mockImplementation(()=>new Promise(r=>{resolve=r;}));const pending=session.refresh();session.dispose();resolve?.({id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'});await pending;expect(home).not.toHaveBeenCalled();expect(session.getSnapshot().chat).toBeNull();});
 it('effect restart works after StrictMode cleanup',async()=>{session.dispose();session.start();await session.refresh();expect(session.getSnapshot().chat?.id).toBe('c');});
 it('audio send uses multipart without boundary and keeps identical bytes/id on retry',async()=>{const base=request.getMockImplementation()!;request.mockImplementation((...args)=>args[0].endsWith('/audio-messages')?Promise.reject(new ApiError('network')):base(...args));await session.refresh();const file=new Blob(['aac'],{type:'audio/mp4'});await session.send('',{type:'MESSAGE',targetId:'1'},file);await session.retry();expect(writes()).toHaveLength(2);const first=writes()[0]?.[3],second=writes()[1]?.[3];expect(first).toBeInstanceOf(FormData);if(!(first instanceof FormData)||!(second instanceof FormData))throw Error();expect(first.get('clientMessageId')).toBe(second.get('clientMessageId'));expect(first.get('replyToType')).toBe('MESSAGE');expect((first.get('file') as File).size).toBe(file.size);});

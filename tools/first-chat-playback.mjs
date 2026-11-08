@@ -21,7 +21,7 @@ try {
   await call('Page.navigate',{url:'http://127.0.0.1:5174'}); await new Promise(r=>setTimeout(r,1800));
   const evaluate = async expression => {const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
   const delay=ms=>new Promise(r=>setTimeout(r,ms));
-  const evidenceRoot=process.argv.includes('--corrections')?'artifacts/first-chat-corrections/composer':'artifacts/first-chat-composer';
+  const evidenceRoot=process.argv.includes('--navigation')?'artifacts/first-chat-navigation/playback-regression':'artifacts/first-chat-playback';
 
   const check=(value,label)=>{if(!value)throw Error(label);console.log('PASS',label);};
   await evaluate("(async()=>{"+
@@ -58,7 +58,7 @@ try {
   }
   await evaluate('window.fixtureSizes='+JSON.stringify(Object.fromEntries(Object.entries(files).map(([key,file])=>[key,file.length]))));
   const waitFor=async(expression,label)=>{for(let i=0;i<50;i++){if(await evaluate(expression)){check(true,label);return;}await delay(60);}throw Error(label);};
-  const screenshot=async name=>{await mkdir('artifacts/first-chat-playback',{recursive:true});await writeFile('artifacts/first-chat-playback/'+name+'.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));};
+  const screenshot=async name=>{await mkdir(evidenceRoot,{recursive:true});await writeFile(evidenceRoot+'/'+name+'.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));};
   for(const [width,height] of [[390,844],[768,1024],[1440,900]]) {
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<768});
     await evaluate("window.expiredRenew=false;window.policyOverride=null;renderFixture();fixtureMessages.splice(0,fixtureMessages.length,...['valid','legacy','invalid','expired'].map((kind,i)=>({id:String(i+1),chatSessionId:'c',senderId:i%2?'me':'them',clientMessageId:null,messageType:'AUDIO',content:null,replyTo:null,reactionType:null,sentAt:new Date(1000000+i*1000).toISOString(),audio:{url:mediaOrigin+'/'+kind,durationMillis:['valid','expired'].includes(kind)?(window.validDuration??682):682,sizeBytes:fixtureSizes[kind==='expired'?'valid':kind],contentType:'audio/mp4'}})));window.dispatchEvent(new Event('online'))");await delay(300);
@@ -91,5 +91,5 @@ try {
     }
 
   }
-  await mkdir('artifacts/first-chat-playback',{recursive:true});await writeFile('artifacts/first-chat-playback/'+(baseline?'before':'after')+'.json',JSON.stringify({evidence,httpEvidence},null,2));
+  await mkdir(evidenceRoot,{recursive:true});await writeFile(evidenceRoot+'/'+(baseline?'before':'after')+'.json',JSON.stringify({evidence,httpEvidence},null,2));
 } finally { server.closeAllConnections();server.close();ws?.close(); chrome.kill(); await new Promise(r=>setTimeout(r,500)); if(!resolve(dir).startsWith(resolve(tmpdir())+sep)||!dir.includes('reals-chat-smoke-'))throw Error('Unsafe temporary directory');await rm(dir,{recursive:true,force:true,maxRetries:5}).catch(()=>{}); }
