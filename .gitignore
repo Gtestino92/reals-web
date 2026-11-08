@@ -9,3 +9,5 @@ coverage/
 secrets/
 *.log
 .idea/
+
+/artifacts/affinities/

@@ -166,8 +166,8 @@ it('returns to waiting if the editor admission read finds an active queue', asyn
   await openManagement('Tu perfil'); await screen.findByRole('heading',{ name:'Buscando chat' });
   expect(screen.queryByRole('form')).toBeNull(); expect(writes('DELETE')).toHaveLength(0);
 });
-it('shows honest unavailable surfaces and signs out once from Account', async () => {
-  await openManagement('Afinidades'); expect(screen.getByRole('heading',{ name:'Próximamente' })).toBeVisible();
+it('opens affinity recovery and signs out once from Account', async () => {
+  await openManagement('Afinidades'); expect(screen.getByRole('heading',{ name:'Preguntas de afinidad' })).toBeVisible();
   expect(screen.queryByRole('progressbar')).toBeNull(); expect(screen.queryByRole('link')).toBeNull();
   fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' })); const entry = await screen.findByRole('button',{ name:'Cuenta' });
   await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
