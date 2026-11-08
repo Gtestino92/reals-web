@@ -1,3 +1,4 @@
+import { confirmSignOut } from '../test/signOut';
 import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -11,8 +12,6 @@ beforeEach(() => { controller = controllerFixture(); vi.spyOn(controller, 'signO
 function Harness() { const [notifications, setNotifications] = useState(false); return <AccountSection controller={controller} disabled={false} notificationsOpen={notifications} onNotificationsOpen={() => setNotifications(true)} onBack={() => setNotifications(false)}/>; }
 function mount() { return render(<Harness/>); }
 it('validates password confirmation and excludes duplicate password submits', async () => {
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
-  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function(this: HTMLDialogElement) { this.open = false; } });
   vi.spyOn(controller, 'hasPasswordProvider', 'get').mockReturnValue(true);
   let resolve!: () => void;
   vi.spyOn(controller, 'changePassword').mockImplementation(() => new Promise(done => { resolve = done; }));
@@ -27,8 +26,6 @@ it('validates password confirmation and excludes duplicate password submits', as
   await act(async () => resolve()); expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.getByRole('status')).toHaveTextContent('Contraseña actualizada.');
 });
 it('dismisses an idle password dialog on browser Back without sending a mutation', () => {
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
-  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function(this: HTMLDialogElement) { this.open = false; } });
   vi.spyOn(controller, 'hasPasswordProvider', 'get').mockReturnValue(true);
   mount(); fireEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña de Reals' }));
   expect(screen.getByRole('dialog')).toBeVisible();
@@ -39,9 +36,9 @@ it('shows standalone account actions and confirms sign-out', () => {
   mount(); expect(screen.getByRole('button', { name: 'Volver a Inicio' }).parentElement?.tagName).toBe('HEADER');
   expect(screen.queryByRole('button', { name: 'Cuenta' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Cambiar contraseña de Reals' })).toBeNull();
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
   fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(controller.signOut).not.toHaveBeenCalled();
-  confirm.mockReturnValue(true); fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(controller.signOut).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' })); confirmSignOut(); expect(controller.signOut).toHaveBeenCalledOnce();
 });
 it('loads and saves all notification fields once, installing the server response', async () => {
   mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));

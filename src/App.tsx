@@ -1,3 +1,5 @@
+import { SignOutButton } from './auth/SignOutButton';
+import { tabOwnershipEnabled } from './tabs/policy';
 import { TabGate } from './tabs/TabGate';
 import type { TabOwnershipManager } from './tabs/TabOwnershipManager';
 import { useState, useSyncExternalStore } from 'react';
@@ -13,6 +15,7 @@ import { Home } from './home/Home';
 
 type AppProps = { firebase?: FirebaseSetup; api?: ApiClient; ownership?: TabOwnershipManager };
 export function App(props: AppProps) {
+  if (!props.ownership && !tabOwnershipEnabled(import.meta.env.DEV, window.location.hostname, import.meta.env.VITE_ENFORCE_TAB_OWNERSHIP)) return <OperationalApp {...props} />;
   return <TabGate manager={props.ownership}>{ownership => <OperationalApp {...props} ownership={ownership} />}</TabGate>;
 }
 export function OperationalApp({ firebase, api, ownership }: AppProps) {
@@ -53,6 +56,6 @@ function SessionApp({ controller }: { controller: SessionController }) {
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
-    {!chatShell && !homeReady && !setupAccountAvailable && state.phase !== 'checking' && <div className="session-actions"><button className="login-button login-outlined" disabled={state.phase === 'signingOut'} onClick={controller.signOut}>Cerrar sesión</button></div>}
+    {!chatShell && !homeReady && !setupAccountAvailable && state.phase !== 'checking' && <div className="session-actions"><SignOutButton disabled={state.phase === 'signingOut'} onConfirm={controller.signOut} /></div>}
   </section></main>;
 }

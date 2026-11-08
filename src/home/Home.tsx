@@ -1,3 +1,4 @@
+import { SignOutButton } from '../auth/SignOutButton';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionController } from '../auth/session';
 import type { Activity } from './contracts';
@@ -123,7 +124,7 @@ function HomeOverview({ notice, retireNotice, controller, onCompleteProfile, onM
     {notice && <p className="home-notice home-terminal-notice" role="status"><span>{notice}</span><button type="button" onClick={retireNotice} aria-label="Ocultar aviso del chat"><ChatIcon name="close"/></button></p>}
     {busy && !model && <p role="status">Actualizando Inicio…</p>}
     {error && <p className="home-error" role="alert">{error}</p>}
-    {!model && !busy && error && <button className="login-button login-outlined" onClick={() => { if (window.confirm('Cerrar sesi\u00f3n\nVas a cerrar tu sesi\u00f3n en este dispositivo.')) controller.signOut(); }}>Cerrar sesión</button>}
+    {!model && !busy && error && <SignOutButton onConfirm={controller.signOut} />}
     {home && <>
       {home.profileStatus !== 'ACTIVE' && <aside className="home-card"><h3>{home.profileStatus === 'DRAFT' ? 'Tu perfil está en borrador' : 'Tu perfil no está activo'}</h3><p>Tus interacciones se conservan. Para buscar nuevas personas, revisá y activá tu perfil.</p>{onCompleteProfile && <button className="login-button login-outlined" onClick={onCompleteProfile} disabled={busy}>Completar perfil</button>}</aside>}
       {!!presentation?.priorities.length && <section className="home-priority" aria-label="Prioridad ahora"><h3>Prioridad ahora</h3>{presentation.priorities.map((item, index) => <p key={`${item.matchId}-${item.type}-${index}`}>{labels[item.type] ?? 'Actividad pendiente'}{item.partnerName ? ` con ${item.partnerName}` : ''} · Revisá tu Actividad.</p>)}</section>}

@@ -1,0 +1,5 @@
+.reals-sign-out-dialog, .home-account .reals-sign-out-dialog { box-sizing: border-box; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--color-outline); border-radius: var(--radius-card); background: var(--color-surface); color: var(--color-on-surface); }
+.reals-sign-out-dialog::backdrop { background: rgb(0 0 0 / 50%); }
+.reals-sign-out-dialog h2 { margin-top: 0; font-family: ui-serif, serif; font-weight: 400; }
+.sign-out-actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; }
+.sign-out-actions button { min-height: 48px; }

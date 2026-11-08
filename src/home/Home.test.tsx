@@ -1,3 +1,4 @@
+import { confirmSignOut } from '../test/signOut';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { OperationalApp as App } from '../App';
@@ -23,9 +24,9 @@ it('offers confirmed exceptional sign-out after initial Home failure, while pres
   mount(); await screen.findByRole('alert');
   expect(screen.getByRole('button', { name: 'Actualizar' })).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Cuenta' })).toBeNull();
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
   fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(auth.signOut).not.toHaveBeenCalled();
-  confirm.mockReturnValue(true); fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' })); confirmSignOut();
   await screen.findByRole('button', { name: 'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce();
 });
 it('shows four peer management cards and a standalone Account with one header return', async () => {
@@ -222,7 +223,7 @@ it('opens Activity and returns with heading focus without fetching again', async
 it('can cancel location acquisition, reconcile and ignore a late position', async () => {
   let done: PositionCallback | undefined; geo.mockImplementation(ok => { done = ok; });
   mount(); await ready(); fireEvent.click(search());
-  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Obteniendo ubicación' })).toBeVisible();
   expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' }));
   await waitFor(() => expect(search()).toBeEnabled());
@@ -233,7 +234,7 @@ it('serializes cancellation after an in-flight admission and suppresses duplicat
   const original = fetcher.getMockImplementation()!; let admit: ((response: Response) => void) | undefined;
   fetcher.mockImplementation((url, options) => options?.method === 'POST' ? new Promise(resolve => { admit = resolve; }) : original(url, options));
   mount(); await ready(); fireEvent.click(search());
-  await screen.findByRole('heading', { name: 'Buscando chat' }); await waitFor(() => expect(admit).toBeDefined());
+  await screen.findByRole('heading', { name: 'Ingresando a la búsqueda' }); await waitFor(() => expect(admit).toBeDefined());
   const cancel = screen.getByRole('button', { name: 'Cancelar búsqueda' }); fireEvent.click(cancel); fireEvent.click(cancel);
   expect(screen.getByRole('heading', { name: 'Cancelando búsqueda' })).toBeVisible();
   expect(writes().map(([, o]) => o?.method)).toEqual(['POST']);
@@ -252,13 +253,13 @@ it('keeps one stable preparation surface through location, admission and reconci
     return original(url, options);
   });
   mount(); await ready(); fireEvent.click(search());
-  const heading = screen.getByRole('heading', { name: 'Buscando chat' }), status = screen.getByRole('status');
-  const text = status.textContent, seal = screen.getByRole('img', { name: 'Reals' }), dots = document.querySelector('.search-dots');
+  const heading = screen.getByRole('heading', { name: 'Obteniendo ubicación' }), status = screen.getByRole('status');
+  const seal = screen.getByRole('img', { name: 'Reals' }), dots = document.querySelector('.search-dots');
   await act(async () => located?.(position())); await waitFor(() => expect(admit).toBeDefined());
-  expect(heading).toHaveTextContent('Buscando chat'); expect(status.textContent).toBe(text);
+  expect(heading).toHaveTextContent('Ingresando a la búsqueda'); expect(status).not.toHaveAccessibleName('Búsqueda confirmada');
   home.matchmaking.inQueue = true; await act(async () => admit?.(json({ userId: 'u', inQueue: true })));
   await waitFor(() => expect(queueRead).toBeDefined());
-  expect(heading).toHaveTextContent('Buscando chat'); expect(status.textContent).toBe(text);
+  expect(heading).toHaveTextContent('Confirmando búsqueda'); expect(status).not.toHaveAccessibleName('Búsqueda confirmada');
   expect(screen.getByRole('button', { name: 'Cancelar búsqueda' })).toBeEnabled();
   await act(async () => queueRead?.(json({ userId: 'u', inQueue: true })));
   await confirmed();
@@ -306,7 +307,7 @@ it('waits for first permission grant and slow acquisition before sending exactly
   vi.useFakeTimers(); mount(); await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   fireEvent.click(search());
   await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
-  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(writes()).toHaveLength(0);
+  expect(screen.getByRole('heading', { name: 'Obteniendo ubicación' })).toBeVisible(); expect(writes()).toHaveLength(0);
   await act(async () => { granted?.(position()); await vi.advanceTimersByTimeAsync(0); });
   expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(writes()).toHaveLength(1); expect(geo).toHaveBeenCalledOnce();
 });
@@ -328,7 +329,7 @@ it.each(['stale','inaccurate','invalid'])('explicit retry after %s asks for a fr
   geo.mockImplementationOnce(rejected); if (kind === 'inaccurate') geo.mockImplementationOnce(rejected);
   mount(); await ready(); fireEvent.click(search()); const retry = await screen.findByRole('button', { name: 'Reintentar ubicación' });
   expect(writes()).toHaveLength(0); fireEvent.click(retry);
-  await confirmed(); expect(geo.mock.calls.at(-1)?.[2]).toMatchObject({ maximumAge: 0, enableHighAccuracy: true }); expect(writes()).toHaveLength(1);
+  await confirmed(); expect(geo.mock.calls.at(-1)?.[2]).toMatchObject({ maximumAge: 0, enableHighAccuracy: false }); expect(writes()).toHaveLength(1);
 });
 it('permission denied has an explicit retry and never retries automatically', async () => {
   geo.mockImplementation((_ok, fail) => fail?.({ code: 1, message: 'sensitive', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }));
@@ -346,23 +347,23 @@ it('canceling a location retry ignores its callback and never enqueues', async (
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' }));
   await waitFor(() => expect(search()).toBeEnabled()); await act(async () => done?.(position())); expect(writes()).toHaveLength(0);
 });
-it('fallback admits once with actual coarse accuracy and does not change the visible waiting copy', async () => {
+it('fallback admits once with actual accuracy and retains the screen while updating confirmation copy', async () => {
   let coarse: PositionCallback | undefined;
   geo.mockImplementationOnce((_ok, fail) => fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 })).mockImplementation(ok => { coarse = ok; });
   mount(); await ready(); fireEvent.click(search()); await waitFor(() => expect(geo).toHaveBeenCalledTimes(2));
-  const heading = screen.getByRole('heading', { name: 'Buscando chat' }), status = screen.getByRole('status');
-  const title = heading.textContent, text = status.textContent;
+  const heading = screen.getByRole('heading', { name: 'Obteniendo ubicación' }), status = screen.getByRole('status');
+  const waitingSurface = heading.parentElement;
   expect(status).toHaveAccessibleName('Preparando búsqueda; ingreso todavía no confirmado'); expect(writes()).toHaveLength(0);
   await act(async () => coarse?.(position({ coords: { ...position().coords, accuracy: 4200 } }))); await confirmed();
-  expect(heading.textContent).toBe(title); expect(status.textContent).toBe(text);
+  expect(heading).toHaveTextContent('Buscando chat'); expect(heading.parentElement).toBe(waitingSurface); expect(status).toHaveAccessibleName('Búsqueda confirmada');
   expect(writes()).toHaveLength(1); expect(JSON.parse(String(writes()[0]?.[1]?.body)).accuracyMeters).toBe(4200);
-  expect(geo.mock.calls[1]?.[2]?.enableHighAccuracy).toBe(false);
+  expect(geo.mock.calls[1]?.[2]?.enableHighAccuracy).toBe(true);
 });
-it('cancels during the coarse fallback and ignores late results from both requests', async () => {
+it('cancels during the precise fallback and ignores late results from both requests', async () => {
   const callbacks: PositionCallback[] = [];
   geo.mockImplementation((ok, fail, options) => {
     callbacks.push(ok);
-    if (options?.enableHighAccuracy) fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
+    if (!options?.enableHighAccuracy) fail?.({ code: 3, message: '', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
   });
   mount(); await ready(); fireEvent.click(search()); await waitFor(() => expect(geo).toHaveBeenCalledTimes(2));
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' })); await waitFor(() => expect(search()).toBeEnabled());
@@ -512,4 +513,22 @@ it('an active chat reconciles terminal state and suppresses stale Activity',asyn
   closed=true;act(()=>window.dispatchEvent(new Event('online')));await screen.findByText('El chat se cerró por inactividad.');await ready();
   expect(screen.queryByRole('button',{name:'Cerrar sesión'})).toBeNull();
   expect(screen.queryByRole('region',{name:'Primer chat'})).toBeNull();
+});
+
+it('waits for all parallel projections before installing the reconciled Home', async () => {
+  mount(); await ready(); const original = fetcher.getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementation((url, options) => url === '/api/me/profile' ? new Promise(done => { finish = done; }) : original(url, options));
+  fetcher.mockClear(); fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/me/home')).toBe(true); expect(search()).toBeDisabled();
+  await act(async () => finish(json(profile))); await ready(); expect(search()).toBeEnabled();
+});
+it('browser Back dismisses sign-out and restores the owned Account entry', async () => {
+  mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(screen.getByRole('dialog')).toBeVisible();
+  const restored = vi.fn(); window.addEventListener('popstate', restored);
+  try { act(() => history.back()); await waitFor(() => expect(restored).toHaveBeenCalledTimes(2)); }
+  finally { window.removeEventListener('popstate', restored); }
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(history.state.trail.at(-1)).toBe('account'); expect(auth.signOut).not.toHaveBeenCalled();
 });

@@ -1,5 +1,7 @@
 # Single active application tab
 
+Environment policy: the loopback Vite dev server bypasses the gate by default; deployed Dev/Prod, builds/preview and explicit ownership tests enforce it. Local opt-in: `VITE_ENFORCE_TAB_OWNERSHIP=true`; see [local development](local-development.md#tab-ownership-during-local-development). The protocol and guarantees below apply when enabled.
+
 This is a Web-specific product requirement. Scope: one same-origin browser storage partition, across all identities and login/onboarding/application screens. It is cooperative client-side enforcement, **not server-enforced anti-fraud protection**. Other origins, profiles, private contexts, partitions and old/non-cooperating clients are outside this guarantee. Same-origin script can request release or bypass the application; messages are not an authentication boundary.
 
 ## Authority and state

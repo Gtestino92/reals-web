@@ -173,3 +173,11 @@ adb -s DEVICE_SERIAL reverse --list
 Remove only that mapping when finished with `adb -s DEVICE_SERIAL reverse --remove tcp:9000`. The existing ADB helper and Vite IPv4/LAN settings are unchanged. Never rewrite a presigned host/path/query: it may invalidate the signature. For expired URLs, use **Actualizar estado** to obtain fresh URLs. HTTPS pages cannot necessarily load an HTTP MinIO endpoint; the current target is local Chrome development. Safari/iOS and HEIC support are not claimed.
 
 Stage C environment probe: `.env.local` exists; backend `/actuator/health` and MinIO `/minio/health/live` returned HTTP 200. No configuration values, credentials or media signatures were printed. This establishes service reachability, not an authenticated end-to-end result.
+
+## Tab ownership during local development
+
+The Vite development server on `localhost`, `127.0.0.1` or IPv6 loopback disables tab ownership by default, allowing multiple session-persistence Firebase identities in separate tabs. No fake manager is installed. Firebase local persistence still shares identities according to Firebase's normal behavior.
+
+To test ownership locally, set `VITE_ENFORCE_TAB_OWNERSHIP=true` in `.env.local` and restart Vite. Passing a real manager explicitly in ownership tests also forces enforcement. This flag only opts loopback Vite development into enforcement; `false` cannot disable it on deployed hosts. A production build/`npm run preview` enforces ownership even on loopback. A remote host served by Vite also enforces it: Vite DEV is not the backend Dev environment. Public client configuration is not a security/anti-fraud boundary.
+
+Targeted Chromium regression: start `npm run dev -- --host 127.0.0.1 --port 5174` with the local flag unset/false, then run `node tools/runtime-refinements-browser.mjs`. It compares baseline/current queue timing with synthetic geolocation/token/HTTP delays, checks two independent local logins, explicit enabled takeover, and the real sign-out modal/Back/Escape/focus behavior. No live Firebase/SQL records are touched.

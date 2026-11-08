@@ -4,11 +4,11 @@ import type { SearchPhase } from './useHome';
 const searching = { title: 'Buscando chat', body: 'Estamos buscando a alguien compatible. Te avisaremos cuando encontremos una persona para conversar.' };
 const copy: Record<SearchPhase, { title: string; body: string }> = {
   idle: { title: 'Preparando búsqueda', body: 'Estamos consultando tu estado actual.' },
-  locating: searching,
-  admitting: searching,
+  locating: { title: 'Obteniendo ubicación', body: 'Necesitamos tu ubicación antes de solicitar el ingreso a la búsqueda.' },
+  admitting: { title: 'Ingresando a la búsqueda', body: 'Estamos enviando tu solicitud. El ingreso todavía no está confirmado.' },
   queued: searching,
   canceling: { title: 'Cancelando búsqueda', body: 'Esperamos cualquier solicitud pendiente y confirmamos tu salida de la búsqueda.' },
-  reconciling: searching,
+  reconciling: { title: 'Confirmando búsqueda', body: 'Estamos consultando el estado de tu búsqueda en el servidor.' },
   failed: { title: 'Revisá tu búsqueda', body: 'No pudimos confirmar todos los pasos. Revisá el mensaje y actualizá el estado antes de continuar.' },
 };
 export function SearchingScreen({ phase, error, busy, blocked, inQueue, onCancel, onRefresh, onBack, canRetryLocation, onRetryLocation }: {

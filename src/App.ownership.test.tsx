@@ -62,3 +62,17 @@ it.each(['google', 'signIn', 'signUp'] as const)('remount binds %s to the new ma
   }
   second.view.unmount();
 });
+
+it('loopback Vite development renders two operational logins without browser lock APIs', async () => {
+  vi.stubEnv('DEV', true); vi.stubEnv('VITE_ENFORCE_TAB_OWNERSHIP', 'false');
+  vi.stubGlobal('isSecureContext', false); Reflect.deleteProperty(navigator, 'locks');
+  render(<><App /><App /></>);
+  await waitFor(() => expect(screen.getAllByRole('button', { name: 'Ingresar' })).toHaveLength(2));
+  expect(screen.queryByRole('button', { name: 'Usar Reals acá' })).toBeNull();
+});
+it('local opt-in fails closed when required ownership APIs are unavailable', async () => {
+  vi.stubEnv('DEV', true); vi.stubEnv('VITE_ENFORCE_TAB_OWNERSHIP', 'true');
+  vi.stubGlobal('isSecureContext', false);
+  render(<App />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Web Locks'); expect(sdk.onAuthStateChanged).not.toHaveBeenCalled();
+});
