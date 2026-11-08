@@ -12,6 +12,11 @@ function harness(...responses: Response[]) {
   return { fetcher, api: new ApiClient(fetcher), user: identity(), signal: new AbortController().signal };
 }
 describe('backend contracts', () => {
+  it('accepts the empty 200 recoverable-deletion response without requiring JSON', async () => {
+    const { api, user, signal, fetcher } = harness(new Response(null, { status: 200 }));
+    await expect(api.request('/me', signal, user, 'DELETE')).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
   it('calls default native fetch with the global receiver', async () => {
     const nativeFetch = vi.fn(function (this: unknown, ...args: Parameters<typeof fetch>) {
       if (this !== globalThis) throw new TypeError('Illegal invocation');

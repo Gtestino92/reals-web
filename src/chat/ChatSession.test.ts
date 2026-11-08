@@ -8,6 +8,48 @@ let chat:ReturnType<typeof chatFixture>, messages:ReturnType<typeof messageFixtu
 let controller:ReturnType<typeof controllerFixture>, session:ChatSession, home:ReturnType<typeof vi.fn<(message: string) => void>>;
 let request:MockInstance<typeof controller.request>;
 const writes=()=>request.mock.calls.filter(([, ,method])=>method && method!=='GET');
+it.each(['CHAT_ACTIVE', 'VISUAL_PHASE'])('uses private decision feedback with authoritative %s', async state => {
+  await session.refresh();
+  chat.myDecision = 'APPROVED'; matchState = state;
+  await session.refresh();
+  expect(home).toHaveBeenCalledWith(state === 'CHAT_ACTIVE' ? 'Tu decisión quedó registrada.' : 'El chat terminó.', state !== 'CHAT_ACTIVE');
+  expect(JSON.stringify(home.mock.calls)).not.toMatch(/Ambas|Actividad|mutu/);
+});
+it('keeps quick approval pending for presentation only and excludes duplicates', async () => {
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  request.mockImplementation(async (path, signal, method, body) => {
+    if (path.endsWith('/chat-decision')) { chat.myDecision = 'APPROVED'; return {}; }
+    return base(path, signal, method, body);
+  });
+  vi.useFakeTimers();
+  try {
+    const pending = session.action('approve');
+    await session.action('approve');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(session.getSnapshot().decisionPending).toBe('approve'); expect(home).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(200); await pending;
+    expect(home).toHaveBeenCalledWith('Tu decisión quedó registrada.', false); expect(writes()).toHaveLength(1);
+  } finally { vi.useRealTimers(); }
+});
+it.each(['dispose', 'hidden'])('releases presentation ownership on %s', async outcome => {
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  await session.refresh(); const base = request.getMockImplementation()!;
+  request.mockImplementation(async (path, signal, method, body) => {
+    if (path.endsWith('/chat-decision')) { chat.myDecision = 'APPROVED'; return {}; }
+    return base(path, signal, method, body);
+  });
+  vi.useFakeTimers();
+  try {
+    const pending = session.action('approve'); await vi.advanceTimersByTimeAsync(50);
+    if (outcome === 'dispose') session.dispose();
+    else { vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); }
+    await pending;
+    expect(vi.getTimerCount()).toBe(0);
+    expect(home).toHaveBeenCalledTimes(outcome === 'dispose' ? 0 : 1);
+  } finally { vi.useRealTimers(); }
+});
 it('installs authoritative guidance acknowledgement even if following reconciliation fails',async()=>{
   await session.refresh();const base=request.getMockImplementation()!;let accepted=false;
   request.mockImplementation((path,signal,method,body)=>{

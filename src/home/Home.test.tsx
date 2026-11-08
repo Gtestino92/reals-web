@@ -49,7 +49,7 @@ it('renders all known summaries, notices and unknown types as text without navig
   home.nextSteps = ['SCHEDULING','SECOND_CHAT_SCHEDULED','SECOND_CHAT_AVAILABLE','SECOND_CHAT_EXPIRED','SECOND_CHAT_READ_ONLY','FUTURE'].map(type => ({ type, connectionId: type, matchId: 'm', requiresAction: true }));
   home.passiveNotices = [{ type: 'SCHEDULING_PREPARING' }, { type: 'UNKNOWN' }];
   mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Ver Actividad' })); expect(screen.getByText('Con <img src=x>')).toBeVisible(); expect(screen.getByText('Actividad pendiente')).toBeVisible();
-  expect(screen.getByText(/Podés continuar tu primer chat/)).toBeVisible(); expect(screen.queryByRole('link')).toBeNull(); expect(document.body.textContent).not.toContain('SECOND_CHAT_');
+  expect(screen.queryByText(/Podés continuar tu primer chat/)).toBeNull(); expect(screen.queryByRole('link')).toBeNull(); expect(document.body.textContent).not.toContain('SECOND_CHAT_');
 });
 it('blocks ineligible search and offers cancellation while queued', async () => {
   home.matchmaking = { canSearch: false, inQueue: true, blockedReason: null };
@@ -110,11 +110,11 @@ it('rejects an obsolete refresh after tab restoration supersedes it', async () =
   await ready(); await act(async () => finish?.(json({ ...homeStatus(), version: 99 })));
   expect(screen.getByText('Hola, Lucía')).toBeVisible(); expect(screen.queryByRole('alert')).toBeNull();
 });
-it.each(['signout','observer'])('clears Home and ignores late requests on %s', async kind => {
+it('clears Home and ignores late requests after an external sign-out', async () => {
   mount(); await ready(); let finish: (r: Response) => void = () => {};
   fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
-  if (kind === 'signout') fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); else act(() => observer(null));
+  act(() => observer(null));
   await screen.findByRole('button', { name: 'Ingresar' }); await act(async () => finish(json(homeStatus())));
   expect(screen.queryByText('Hola, Lucía')).toBeNull(); expect(writes()).toHaveLength(0);
 });
@@ -141,7 +141,7 @@ it('pauses polling while hidden and refreshes on visible restoration', async () 
 });
 it('sign-out during location acquisition prevents enqueue', async () => {
   let done: PositionCallback | undefined; geo.mockImplementation(ok => { done = ok; });
-  mount(); await ready(); fireEvent.click(search()); fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+  mount(); await ready(); fireEvent.click(search()); act(() => observer(null));
   await screen.findByRole('button', { name: 'Ingresar' }); await act(async () => done?.(position())); expect(writes()).toHaveLength(0);
 });
 it('malformed Home fails closed and retry recovers', async () => {
@@ -421,7 +421,7 @@ it.each(['dismiss','management','activity'])('retires completion copy on %s navi
   installFirstChatBackend();const base=fetcher.getMockImplementation()!;fetcher.mockImplementation((url,options)=>url==='/api/matches/m/chat'?Promise.resolve(json({code:'CHAT_EXPIRED'},409)):base(url,options));
   home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'},{type:'VISUAL_REVIEW',matchId:'other',chatId:null}];mount();await screen.findByText('El chat venció.');await ready();
   const dismiss=screen.getByRole('button',{name:'Ocultar aviso del chat'});expect(dismiss.querySelector('svg')).not.toBeNull();expect(dismiss.textContent).toBe('');
-  fireEvent.click(screen.getByRole('button',{name:action==='dismiss'?'Ocultar aviso del chat':action==='management'?'Cuenta':'Ver Actividad'}));expect(screen.queryByText('El chat venció.')).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:action==='dismiss'?'Ocultar aviso del chat':action==='management'?'Afinidades':'Ver Actividad'}));expect(screen.queryByText('El chat venció.')).toBeNull();
   if(action!=='dismiss'){act(()=>window.dispatchEvent(new PopStateEvent('popstate')));await ready();expect(screen.queryByText('El chat venció.')).toBeNull();}
 });
 it.each(['home','search'])('keeps %s controls, DOM and focus unchanged during an unchanged foreground status check',async surface=>{
@@ -466,6 +466,6 @@ it('an active chat reconciles terminal state and suppresses stale Activity',asyn
   fetcher.mockImplementation((url,options)=>closed&&url==='/api/matches/m/chat'?Promise.resolve(json({code:'CHAT_ABANDONED'},409)):original(url,options));
   home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByRole('region',{name:'Primer chat'});
   closed=true;act(()=>window.dispatchEvent(new Event('online')));await screen.findByText('El chat se cerró por inactividad.');await ready();
-  expect(screen.getByRole('button',{name:'Cerrar sesión'})).toBeVisible();
+  expect(screen.queryByRole('button',{name:'Cerrar sesión'})).toBeNull();
   expect(screen.queryByRole('region',{name:'Primer chat'})).toBeNull();
 });

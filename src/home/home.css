@@ -40,3 +40,12 @@
 .search-dots-paused span { animation: none; }
 @keyframes search-pulse { 0%, 80%, 100% { opacity: .35; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-5px); } }
 @media (prefers-reduced-motion: reduce) { .search-dots span { animation: none; } }
+.home-account { margin-block-start: 20px; }
+.home-account #account-options, .home-account form { display: grid; gap: 12px; }
+.home-account label { display: grid; gap: 8px; }
+.home-account input[type=checkbox] { width: 22px; height: 22px; }
+.home-account input[type=password] { width: 100%; min-height: 48px; }
+.home-account dialog { width: min(440px, 90vw); max-height: 90dvh; overflow: auto; padding: 24px; border: 1px solid var(--color-outline); border-radius: 16px; color: var(--color-on-surface); background: var(--color-surface); }
+.home-account dialog::backdrop { background: rgb(0 0 0 / 50%); }
+.home:has(> .account-notifications) > :not(.account-notifications) { display: none; }
+@media (max-width: 340px) { .home-account .home-heading { flex-direction: column; align-items: stretch; } }

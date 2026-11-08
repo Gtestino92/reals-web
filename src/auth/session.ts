@@ -56,6 +56,15 @@ export class SessionController {
   };
   get emailVerified() { return this.user?.emailVerified ?? false; }
   get hasPasswordProvider() { return this.user?.providerData?.some(provider => provider.providerId === 'password') ?? null; }
+  changePassword = async (current: string, next: string) => {
+    if (this.locked || !this.user || !this.hasPasswordProvider || !this.auth.changePassword || this.snapshot.phase !== 'ready') throw new Error('Cambio no disponible.');
+    const generation = this.generation, user = this.user;
+    this.locked = true;
+    try {
+      await this.auth.changePassword(user, current, next);
+      if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
+    } finally { if (this.current(generation)) this.locked = false; }
+  };
   installProfile = (profile: Profile | null) => { if (this.snapshot.phase === 'ready') this.install({ profile }); };
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);

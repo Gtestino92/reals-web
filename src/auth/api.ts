@@ -36,7 +36,7 @@ export class ApiClient {
         });
       }
       if (expectedStatus !== undefined && response.status !== expectedStatus) throw new ApiError('invalid', response.status);
-      if (response.status === 202 || response.status === 204) return undefined;
+      if ((method === 'DELETE' && path === '/me' && response.status === 200) || response.status === 202 || response.status === 204) return undefined;
       try { return await response.json(); } catch { throw new ApiError('invalid', response.status); }
     }
     throw new ApiError('invalid');

@@ -12,13 +12,14 @@ const initialProfile = { ...defaults, birthDate:'1995-01-01',displayName:'Ana',c
 const initialPhoto = { id:'photo',url:'http://localhost:9000/photo',position:1,validationStatus:'VALIDATED',moderationStatus:'APPROVED',isPersonPhoto:true,isFullBody:true };
 let profile: typeof initialProfile | null, list: typeof initialPhoto[], satisfied: boolean, version: string;
 let user: Identity, auth: AuthService;
+let observer: (user: Identity | null) => void;
 let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 const json = (body: unknown,status = 200) => new Response(JSON.stringify(body),{ status });
 const document = () => ({ type:'PRIVACY_NOTICE',version,requiredAction:'ACKNOWLEDGED',satisfied,url:'https://example.com/privacy' });
 beforeEach(() => {
   profile = null; list = []; satisfied = true; version = 'v1';
   user = { uid:'f',emailVerified:true,getIdToken:vi.fn().mockResolvedValue('token'),reload:vi.fn().mockResolvedValue(undefined) };
-  auth = { observe:vi.fn(next => { next(user); return vi.fn(); }),signIn:vi.fn(),signUp:vi.fn(),google:vi.fn(),verify:vi.fn().mockResolvedValue(undefined),signOut:vi.fn().mockResolvedValue(undefined) };
+  auth = { observe:vi.fn(next => { observer = next; next(user); return vi.fn(); }),signIn:vi.fn(),signUp:vi.fn(),google:vi.fn(),verify:vi.fn().mockResolvedValue(undefined),signOut:vi.fn().mockResolvedValue(undefined) };
   fetcher = vi.fn<typeof fetch>().mockImplementation(async (input,options) => {
     const path = String(input), method = options?.method ?? 'GET';
     if (path === '/api/matchmaking/queue') return json({ userId:'u', inQueue:false });
@@ -59,6 +60,7 @@ it('offers compact management entries and ACTIVE profile editing with photos and
   for (const name of ['Tu perfil','Preferencias','Afinidades','Cuenta']) expect(await screen.findByRole('button',{ name })).toBeVisible();
   const entry = screen.getByRole('button',{ name:'Tu perfil' }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
   const form = await screen.findByRole('form',{ name:'Datos del perfil' });
+  expect(form.compareDocumentPosition(screen.getByText('Fotos', { selector: 'summary' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.getByRole('heading',{ name:'Tu perfil' })).toHaveFocus();
   expect(screen.getByLabelText('Agregar foto 1')).toBeInTheDocument();
   expect(screen.queryByRole('button',{ name:'Activar perfil' })).toBeNull();
@@ -71,6 +73,7 @@ it('offers compact management entries and ACTIVE profile editing with photos and
 it('loads saved preferences and saves only the filter contract, surviving a remount', async () => {
   await openManagement('Preferencias');
   const form = await screen.findByRole('form',{ name:'Preferencias de búsqueda' });
+  expect(form.closest('details')).toBeNull();
   expect(within(form).getByRole('slider',{ name:'Edad mínima' })).toHaveAttribute('aria-valuenow','27');
   expect(within(form).getByRole('slider',{ name:'Edad máxima' })).toHaveAttribute('aria-valuenow','43');
   expect(within(form).getByLabelText(/Distancia máxima/)).toHaveValue('62');
@@ -94,7 +97,11 @@ it.each(['PATCH','DELETE','PUT'])('routes authoritative INACTIVE after ACTIVE mu
   await screen.findByRole('form',{ name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil' });
   if (method === 'DELETE') fireEvent.click(screen.getByRole('button',{ name:'Eliminar foto 1' }));
   else fireEvent.submit(screen.getByRole('form',{ name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil' }));
-  await screen.findByRole('heading',{ name:'Completá tu perfil' }); expect(screen.getByText('Estado: INACTIVE')).toBeVisible();
+  await screen.findByText('Estado: INACTIVE');
+  expect(screen.getByRole('form',{name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil'})).toBeVisible();
+  await waitFor(() => expect(screen.getByRole('button',{name:'Volver a Inicio'})).toBeEnabled());
+  fireEvent.click(screen.getByRole('button',{name:'Volver a Inicio'}));
+  await screen.findByRole('heading',{name:'Completá tu perfil'});
 });
 it('blocks back navigation during a pending mutation and retains input on failure', async () => {
   const original = fetcher.getMockImplementation()!; let finish: ((response:Response) => void) | undefined;
@@ -139,8 +146,9 @@ it('shows honest unavailable surfaces and signs out once from Account', async ()
   expect(screen.queryByRole('progressbar')).toBeNull(); expect(screen.queryByRole('link')).toBeNull();
   fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' })); const entry = await screen.findByRole('button',{ name:'Cuenta' });
   await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
-  for (const name of ['Notificaciones','Cambiar contraseña','Eliminar cuenta']) { expect(screen.getByRole('heading',{ name })).toBeVisible(); expect(screen.queryByRole('button',{ name })).toBeNull(); }
-  expect(screen.getAllByRole('button',{ name:'Cerrar sesión' })).toHaveLength(1); fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' }));
+  expect(screen.getByRole('button',{ name:'Notificaciones' })).toBeVisible();
+  vi.spyOn(window,'confirm').mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' }));
   await screen.findByRole('button',{ name:'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce();
 });
 it('stops Home polling while editing and reconciles on resume', async () => {
@@ -149,19 +157,20 @@ it('stops Home polling while editing and reconciles on resume', async () => {
   await act(async () => { await vi.advanceTimersByTimeAsync(15000); }); expect(fetcher).not.toHaveBeenCalled();
   vi.useRealTimers(); profile = { ...profile!, status:'DRAFT' };
   fireEvent(window.document,new Event('visibilitychange'));
-  await screen.findByRole('heading',{ name:'Completá tu perfil' }); expect(screen.getByText('Estado: DRAFT')).toBeVisible();
+  await screen.findByText('Estado: DRAFT');
+  expect(screen.getByRole('form',{name:'Preferencias de búsqueda'})).toBeVisible();
 });
 it('does not expose password changes for Google-only identities', async () => {
   user = { ...user, providerData:[{ providerId:'google.com',uid:'g',displayName:null,email:null,phoneNumber:null,photoURL:null }] };
   await openManagement('Cuenta');
   expect(screen.queryByRole('heading',{ name:'Cambiar contraseña' })).toBeNull();
-  expect(screen.getByText(/proveedor de inicio de sesión/)).toBeVisible();
+  expect(screen.queryByRole('button',{ name:'Cambiar contraseña de Reals' })).toBeNull();
 });
 it('rejects pending editor reads after sign-out', async () => {
   const original = fetcher.getMockImplementation()!; let finish: ((value:Response) => void) | undefined;
   fetcher.mockImplementation((input,options) => String(input).endsWith('/photos') ? new Promise(resolve => { finish = resolve; }) : original(input,options));
   await openManagement('Tu perfil'); await waitFor(() => expect(finish).toBeDefined());
-  fireEvent.click(screen.getByRole('button',{ name:'Cerrar sesión' })); await screen.findByRole('button',{ name:'Ingresar' });
+  act(() => observer(null)); await screen.findByRole('button',{ name:'Ingresar' });
   await act(async () => finish?.(json([]))); expect(screen.queryByRole('form',{ name:'Datos del perfil' })).toBeNull();
 });
 async function createForm() { await screen.findByRole('heading',{ name:'Crear perfil' }); const form = screen.getByRole('form',{ name:'Crear perfil' }); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'Ana' } }); fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } }); fireEvent.change(within(form).getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } }); return form; }
@@ -417,7 +426,7 @@ it.each([
     expect(screen.getByRole('status')).toBe(statusElement);
     await act(async () => finishBootstrap?.(json({ id:'u',status:'ACTIVE' })));
     if (status !== 'ACTIVE') { await waitFor(() => expect(finishOnboarding).toBeDefined()); expectPreparing(); }
-    expect(screen.getByRole('button',{ name:'Cerrar sesión' })).toBeEnabled();
+    if (status !== 'ACTIVE') expect(screen.getByRole('button',{ name:'Cerrar sesión' })).toBeEnabled();
     await act(async () => finishOnboarding?.(json({ requirementsSatisfied:satisfied,documents:[document()] })));
     await screen.findByRole('heading',{ name:heading });
     expect(screen.queryByText('Preparando Reals…')).not.toBeInTheDocument();
