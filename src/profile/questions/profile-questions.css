@@ -1,0 +1,12 @@
+.profile-questions, .question-list, .question-actions { display: grid; gap: 14px; min-width: 0; }
+.question-actions h3, .question-actions p { margin: 0; }
+.question-controls { display: flex; gap: 10px; flex-wrap: wrap; }
+.question-controls button { flex: 1 1 auto; }
+.question-preview, .question-actions h3 { overflow-wrap: anywhere; white-space: pre-wrap; }
+.profile-questions textarea { box-sizing: border-box; width: 100%; min-height: 48px; padding: 12px; resize: vertical; border: 1px solid var(--color-outline); border-radius: var(--radius-button); color: var(--color-on-surface); background: var(--color-surface); font: inherit; }
+.profile-questions textarea:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.profile-question-entry { margin-block: 16px; }
+.onboarding[hidden] { display: none; }
+.profile-questions { text-align: left; }
+.profile-questions h2 { font: var(--font-weight-display) var(--type-screen-title-size)/var(--type-screen-title-line-height) var(--font-display); }
+.profile-questions h3 { font-family: var(--font-display); font-weight: var(--font-weight-display); }

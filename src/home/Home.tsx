@@ -15,6 +15,8 @@ import { reconcileHiddenFirstChats, visibleHome } from './hiddenFirstChats';
 import './home.css';
 import { AccountSection } from './AccountSection';
 import { useHomeNavigation } from './useHomeNavigation';
+import type { HomeNavigation } from './useHomeNavigation';
+import { isProfileQuestions } from '../profile/questions/ProfileQuestions';
 
 const labels: Record<string, string> = {
   FIRST_CHAT: 'Primer chat', VISUAL_REVIEW: 'Perfil por descubrir', SCHEDULING: 'Coordinar horarios',
@@ -52,7 +54,7 @@ const managementEntries = [
   ['account', 'Cuenta', 'Notificaciones, seguridad y sesi\u00f3n'],
 ] as const;
 
-export function Home({ controller, onCompleteProfile, onChatActiveChange, onManagementActiveChange }: { onManagementActiveChange?: (active: boolean) => void; onChatActiveChange?: (active: boolean) => void; controller: SessionController; onCompleteProfile?: () => void }) {
+export function Home({ controller, onCompleteProfile, onChatActiveChange, onManagementActiveChange, navigation: providedNavigation, onNavigationBlockedChange }: { onNavigationBlockedChange?: (blocked: boolean) => void; navigation?: HomeNavigation | undefined; onManagementActiveChange?: (active: boolean) => void; onChatActiveChange?: (active: boolean) => void; controller: SessionController; onCompleteProfile?: () => void }) {
   const affinities = useAffinityQuestionnaire(controller);
   const [chat, setChat] = useState<Activity | null>(null), [notice, setNotice] = useState('');
   const retireNotice = useCallback(() => setNotice(''), []);
@@ -72,19 +74,25 @@ export function Home({ controller, onCompleteProfile, onChatActiveChange, onMana
     setChat(null); setNotice(message);
   };
   const locked = useRef(false), accountLocked = useRef(false), root = useRef<HTMLDivElement>(null);
-  const navigation = useHomeNavigation(() => !locked.current && !accountLocked.current && !chat);
-  const surface = navigation.destination === 'home' || navigation.destination === 'activity' ? null : navigation.destination;
+  const reportNavigationLock = () => onNavigationBlockedChange?.(locked.current || accountLocked.current || !!chat);
+  useLayoutEffect(() => { reportNavigationLock(); return () => onNavigationBlockedChange?.(false); }, [chat, onNavigationBlockedChange]);
+  const localNavigation = useHomeNavigation(() => !locked.current && !accountLocked.current && !chat, !providedNavigation);
+  const navigation = providedNavigation ?? localNavigation;
+  // Draft setup owns its shared history and renders questions outside this nested Home.
+  const surface = navigation.destination === 'home' || navigation.destination === 'activity' || (providedNavigation && isProfileQuestions(navigation.destination)) ? null : navigation.destination;
+  const profileActive = surface === 'profile' || isProfileQuestions(surface ?? '');
   useLayoutEffect(() => { onManagementActiveChange?.(!!surface); return () => onManagementActiveChange?.(false); }, [surface, onManagementActiveChange]);
   const open = (next: ManagementSurface) => { retireNotice(); navigation.open(next); if (next === 'affinities') void affinities.refresh(); };
   const returnHome = () => navigation.backTo('home');
+  const focusSurface = profileActive ? 'profile' : surface;
   useLayoutEffect(() => {
     const heading = Array.from(root.current?.querySelectorAll('h2') ?? []).find(node => !node.closest('[hidden]'));
     document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
-  }, [surface]);
+  }, [focusSurface]);
   return <><div hidden={!!surface || !!chat}><HomeOverview affinities={affinities} notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current} active={!surface && !chat} activityOpen={navigation.destination === 'activity'} onActivity={() => navigation.open('activity')} onReturnHome={returnHome}/> </div>{chat?.chatId && <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>}<div hidden={!surface} className="home home-management-page" ref={root}>
-    <div hidden={surface !== 'account' && surface !== 'notifications'}><AccountSection controller={controller} disabled={false} onBack={() => navigation.backTo(surface === 'notifications' ? 'account' : 'home')} notificationsOpen={surface === 'notifications'} onNotificationsOpen={() => navigation.open('notifications')} onNavigationBlockedChange={value => { accountLocked.current = value; }} /></div>
-    {surface === 'profile' || surface === 'preferences' ? <Onboarding controller={controller} management={surface === 'profile' ? 'details' : 'filters'} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; }} /> : null}
+    <div hidden={surface !== 'account' && surface !== 'notifications'}><AccountSection controller={controller} disabled={false} onBack={() => navigation.backTo(surface === 'notifications' ? 'account' : 'home')} notificationsOpen={surface === 'notifications'} onNotificationsOpen={() => navigation.open('notifications')} onNavigationBlockedChange={value => { accountLocked.current = value; reportNavigationLock(); }} /></div>
+    {profileActive || surface === 'preferences' ? <Onboarding controller={controller} management={profileActive ? 'details' : 'filters'} navigation={navigation} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; reportNavigationLock(); }} /> : null}
 
     <AffinityQuestionnaire model={affinities} navigation={navigation}/>
   </div></>;
