@@ -94,16 +94,16 @@ it('blocks uncertain notification writes until an explicit authoritative read', 
   expect(controller.request).toHaveBeenCalledTimes(3);
 });
 it('deletes recoverably once and signs out only after success', async () => {
-  mount(); vi.spyOn(window, 'confirm').mockReturnValue(true);
+  mount();
   let resolve!: (value: unknown) => void;
   vi.mocked(controller.request).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  const button = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(button); fireEvent.click(button);
+  const button = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(button); fireEvent.click(screen.getByRole('button', { name: 'Programar eliminación' })); fireEvent.click(button);
   expect(controller.request).toHaveBeenCalledExactlyOnceWith('/me', expect.any(AbortSignal), 'DELETE'); expect(controller.signOut).not.toHaveBeenCalled();
   await act(async () => resolve(undefined)); expect(controller.signOut).toHaveBeenCalledOnce();
 });
 it('never repeats an uncertain deletion or bypasses its lock through Notifications', async () => {
-  mount(); vi.spyOn(window, 'confirm').mockReturnValue(true); vi.mocked(controller.request).mockRejectedValueOnce(new ApiError('network'));
-  const button = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(button); await screen.findByRole('alert'); fireEvent.click(button);
+  mount(); vi.mocked(controller.request).mockRejectedValueOnce(new ApiError('network'));
+  const button = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(button); fireEvent.click(screen.getByRole('button', { name: 'Programar eliminación' })); await screen.findByRole('alert'); fireEvent.click(button);
   expect(button).toBeDisabled(); expect(controller.request).toHaveBeenCalledOnce(); expect(controller.signOut).not.toHaveBeenCalled();
   // Notifications cannot bypass a pending-deletion recovery lock.
   fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' })); expect(controller.request).toHaveBeenCalledOnce();

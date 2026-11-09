@@ -1,0 +1,6 @@
+.deletion-recovery { padding-block: 24px; text-align: left; }
+.deletion-recovery h2 { font: 400 2rem/1.25 ui-serif, serif; color: var(--color-primary); }
+.deletion-recovery p { line-height: 1.5; overflow-wrap: anywhere; }
+.deletion-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.deletion-recovery > button { margin-top: 12px; }
+.deletion-destructive { background: var(--color-error); color: var(--color-surface); border: 1px solid var(--color-error); }

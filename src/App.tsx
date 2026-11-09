@@ -1,8 +1,9 @@
+import { AccountDeletionRecovery } from './auth/AccountDeletionRecovery';
 import { SignOutButton } from './auth/SignOutButton';
 import { tabOwnershipEnabled } from './tabs/policy';
 import { TabGate } from './tabs/TabGate';
 import type { TabOwnershipManager } from './tabs/TabOwnershipManager';
-import { useState, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { LoginScreen } from './auth/LoginScreen';
 import { configureFirebase } from './auth/firebase';
 import type { FirebaseSetup } from './auth/firebase';
@@ -34,6 +35,9 @@ function SessionApp({ controller }: { controller: SessionController }) {
   const [chatActive, setChatActive] = useState(false);
   const [managementActive, setManagementActive] = useState(false);
   const [setupAccountAvailable, setSetupAccountAvailable] = useState(false);
+  useLayoutEffect(() => {
+    if (state.phase !== 'ready') { setChatActive(false); setManagementActive(false); setSetupAccountAvailable(false); }
+  }, [state.phase]);
   const homeReady = state.phase === 'ready' && (state.profile?.status === 'ACTIVE' || managementActive);
   const chatShell = chatActive && homeReady;
   if (state.phase === 'login' || state.phase === 'authenticating') return <LoginScreen
@@ -53,9 +57,10 @@ function SessionApp({ controller }: { controller: SessionController }) {
     {(state.phase === 'checking' || state.phase === 'loading') && <SessionLoading />}
     {state.phase === 'signingOut' && <p role="status">Cerrando sesión…</p>}
     {state.phase === 'ready' && (homeReady ? <Home key={`${state.account?.id}-${state.profile?.id}`} controller={controller} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding key={state.account?.id} controller={controller} onAccountAvailableChange={setSetupAccountAvailable} />)}
+    {state.phase === 'deletionRecovery' && <AccountDeletionRecovery controller={controller} state={state} />}
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
-    {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
+    {state.error && state.phase !== 'deletionRecovery' && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
-    {!chatShell && !homeReady && !setupAccountAvailable && state.phase !== 'checking' && <div className="session-actions"><SignOutButton disabled={state.phase === 'signingOut'} onConfirm={controller.signOut} /></div>}
+    {state.phase !== 'deletionRecovery' && !chatShell && !homeReady && !setupAccountAvailable && state.phase !== 'checking' && <div className="session-actions"><SignOutButton disabled={state.phase === 'signingOut'} onConfirm={controller.signOut} /></div>}
   </section></main>;
 }
