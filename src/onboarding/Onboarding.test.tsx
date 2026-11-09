@@ -466,11 +466,11 @@ it.each(['ACCOUNT_TEMPORARILY_BANNED','INVALID_TOKEN'])('does not mask session/a
     if (restricted && (path.endsWith('/home') || path === '/api/me')) return Promise.resolve(json({ code },code === 'INVALID_TOKEN' ? 401 : 403));
     return original(input,options);
   });
-  mount(); await screen.findByRole('alert');
+  mount(); if (code === 'ACCOUNT_TEMPORARILY_BANNED') await screen.findByRole('heading', { name: 'Cuenta suspendida temporalmente' }); else await screen.findByRole('alert');
   expect(screen.queryByRole('heading',{ name:'Inicio no disponible' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button',{ name:'Activar perfil' })).not.toBeInTheDocument();
   if (code === 'INVALID_TOKEN') { await screen.findByRole('button',{ name:'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce(); }
-  else { expect(screen.getByRole('alert')).toHaveTextContent('suspendida temporalmente'); expect(auth.signOut).not.toHaveBeenCalled(); }
+  else { expect(screen.getByRole('heading', { name: 'Cuenta suspendida temporalmente' })).toBeVisible(); expect(auth.signOut).not.toHaveBeenCalled(); }
 });
 it.each([401,403])('propagates Home authorization HTTP %s with a nonterminal code and permits explicit recovery', async status => {
   profile = { ...initialProfile }; let denied = true;
