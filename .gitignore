@@ -15,3 +15,5 @@ secrets/
 /artifacts/notification-settings/
 
 artifacts/account-deletion-recovery/
+
+/artifacts/account-suspension/

@@ -1,3 +1,5 @@
+import { parseAppeal, validStatement, validExpiry } from './suspension';
+import type { Appeal } from './suspension';
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { ApiClient, ApiError, DeletedAccountError, bootstrap, object, parseUser } from './api';
 import type { BackendUser, Profile } from './api';
@@ -5,9 +7,13 @@ import { errorCode, isRateLimitResponse, safeMessage, terminalCodes } from './er
 import type { AuthService, Identity } from './firebase';
 import type { LoginErrorOwner } from './LoginScreen';
 
-type Phase = 'checking' | 'login' | 'authenticating' | 'loading' | 'ready' | 'restricted' | 'recoverable' | 'signingOut' | 'deletionRecovery';
+type Phase = 'checking' | 'login' | 'authenticating' | 'loading' | 'ready' | 'restricted' | 'recoverable' | 'signingOut' | 'deletionRecovery' | 'temporarySuspension' | 'permanentAppeal';
 export interface SessionSnapshot {
   phase: Phase;
+  suspensionExpiry?: string | null;
+  suspensionBusy?: boolean;
+  appeal?: Appeal | null;
+  appealUncertain?: boolean;
   recoveryBusy?: 'reactivate' | 'finalize' | 'refresh' | null;
   recoveryUncertain?: boolean;
   recoveryTerminal?: boolean;
@@ -52,7 +58,7 @@ export class SessionController {
       return result;
     } catch (error) {
       if (this.current(generation) && !isRateLimitResponse(error) && (terminalCodes.has(errorCode(error)) || errorCode(error).startsWith('ACCOUNT_'))) {
-        this.retry();
+        if (!this.restrict(error)) { this.invalidate(); this.locked = false; void this.load(); }
       }
       throw error;
     }
@@ -124,7 +130,7 @@ export class SessionController {
         if (epoch !== this.observerEpoch || !this.listeners.size) return;
         if (!this.available() || this.snapshot.phase === 'signingOut') return;
         if (this.snapshot.phase === 'authenticating' && user) { this.user = user; return; }
-        if (this.user?.uid === user?.uid && ['loading', 'ready', 'restricted', 'recoverable', 'deletionRecovery'].includes(this.snapshot.phase)) return;
+        if (this.user?.uid === user?.uid && ['loading', 'ready', 'restricted', 'recoverable', 'deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(this.snapshot.phase)) return;
         this.replace(user);
       }, error => {
         if (epoch !== this.observerEpoch || !this.listeners.size) return;
@@ -147,11 +153,58 @@ export class SessionController {
   private replace(user: Identity | null) {
     this.invalidate(); this.locked = false; this.user = user;
     if (this.pendingVerification?.uid !== user?.uid) this.pendingVerification = null;
-    this.install({ phase: user ? 'loading' : 'login', operation: null, account: null, profile: null, error: null, verificationMessage: null });
+    this.install({ ...initial, appeal: null, appealUncertain: false, suspensionExpiry: null, suspensionBusy: false, phase: user ? 'loading' : 'login', operation: null, account: null, profile: null, error: null, verificationMessage: null });
     this.ownership?.assert();
     const generation = this.generation;
     // StrictMode's synchronous cleanup cancels the first scheduled bootstrap.
     if (user) queueMicrotask(() => { if (this.current(generation)) void this.load(); });
+  }
+  private restrict(error: unknown, fetchAppeal = true) {
+    const code = errorCode(error);
+    if (!['ACCOUNT_TEMPORARILY_BANNED', 'ACCOUNT_PERMANENTLY_BANNED'].includes(code) || isRateLimitResponse(error)) return false;
+    this.invalidate(); this.locked = false;
+    this.install({ phase: code === 'ACCOUNT_TEMPORARILY_BANNED' ? 'temporarySuspension' : 'permanentAppeal', account: null, profile: null, error: null, appeal: null, appealUncertain: false, suspensionBusy: false, suspensionExpiry: error instanceof ApiError ? validExpiry(error.detail.expiresAt) : null });
+    if (fetchAppeal && code === 'ACCOUNT_PERMANENTLY_BANNED') void this.refreshAppeal();
+    return true;
+  }
+  // Minimal restricted capability: no arbitrary URL or method is exposed.
+  refreshAppeal = () => this.runAppeal();
+  submitAppeal = (statement: string) => this.runAppeal(statement);
+  private async runAppeal(statement?: string) {
+    if (!this.available() || this.locked || !this.user || this.snapshot.phase !== 'permanentAppeal') return;
+    if (statement !== undefined && (this.snapshot.appeal?.status !== 'AVAILABLE' || this.snapshot.appealUncertain || !validStatement(statement))) return;
+    this.locked = true;
+    const generation = this.generation, user = this.user, signal = this.controller.signal;
+    this.install({ suspensionBusy: true, error: null });
+    let submissionError: string | null = null;
+    try {
+      if (statement !== undefined) {
+        this.install({ appealUncertain: true });
+        try { await this.api.request('/me/ban/appeal', signal, user, 'POST', { statement: statement.trim() }, 201, false); }
+        catch (error) {
+          if (!this.current(generation)) return;
+          if (this.restrict(error, false)) return;
+          submissionError = safeMessage(error);
+          // Even an uncertain write or already-submitted conflict reconciles by GET only.
+          if (terminalCodes.has(errorCode(error)) && errorCode(error) !== 'INVALID_TOKEN') throw error;
+        }
+      }
+      const appeal = parseAppeal(await this.api.request('/me/ban/appeal', signal, user, 'GET', undefined, 200));
+      if (!this.current(generation)) return;
+      this.install({ appeal, appealUncertain: false, error: appeal.status === 'AVAILABLE' && submissionError ? { owner: 'shared', message: submissionError } : null });
+      if (appeal.status === 'APPROVED') {
+        this.locked = false;
+        this.invalidate();
+        await this.load();
+      }
+    } catch (error) {
+      if (!this.current(generation)) return;
+      if (this.restrict(error, false)) return;
+      if (terminalCodes.has(errorCode(error))) { this.locked = false; this.invalidate(); await this.load(); return; }
+      this.install({ appealUncertain: true, error: { owner: 'shared', message: 'No pudimos confirmar el estado de tu solicitud. Intentá actualizarlo.' } });
+    } finally {
+      if (this.current(generation)) { this.locked = false; this.install({ suspensionBusy: false }); }
+    }
   }
   private async load() {
     const user = this.user;
@@ -160,7 +213,8 @@ export class SessionController {
     this.ownership?.assert();
     const generation = this.generation;
     const signal = this.controller.signal;
-    this.install({ phase: 'loading', operation: null, error: null, account: null, profile: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false });
+    const preserved = ['temporarySuspension', 'permanentAppeal'].includes(this.snapshot.phase);
+    this.install({ phase: preserved ? this.snapshot.phase : 'loading', suspensionBusy: preserved, operation: null, error: null, account: null, profile: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false });
     try {
       if (this.pendingVerification?.uid === user.uid) {
         await this.auth.verify(user);
@@ -169,9 +223,10 @@ export class SessionController {
         this.install({ verificationMessage: 'Te enviamos un email para verificar tu cuenta.' });
       }
       const session = await bootstrap(this.api, user, signal, this.localVerification);
-      if (this.current(generation)) this.install({ phase: 'ready', ...session });
+      if (this.current(generation)) this.install({ phase: 'ready', ...session, appeal: null, appealUncertain: false, suspensionBusy: false, suspensionExpiry: null });
     } catch (error) {
       if (!this.current(generation)) return;
+      if (this.restrict(error)) return;
       if (error instanceof DeletedAccountError) {
         this.install({ phase: 'deletionRecovery', account: error.account, profile: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, error: null });
       } else if (terminalCodes.has(errorCode(error))) {
@@ -182,12 +237,13 @@ export class SessionController {
         if (this.current(generation)) { this.user = null; this.install({ phase: 'login', error: { message: safeMessage(error), owner: 'shared' } }); }
       } else {
         const restricted = ['ACCOUNT_PENDING_DELETION', 'ACCOUNT_DELETED', 'ACCOUNT_TEMPORARILY_BANNED', 'ACCOUNT_PERMANENTLY_BANNED'].includes(errorCode(error));
-        this.install({ phase: restricted ? 'restricted' : 'recoverable', error: { message: safeMessage(error), owner: 'shared' } });
+        this.install({ phase: preserved && !restricted ? this.snapshot.phase : restricted ? 'restricted' : 'recoverable', error: { message: safeMessage(error), owner: 'shared' } });
       }
-    } finally { if (this.current(generation)) this.locked = false; }
+    } finally { if (this.current(generation)) { this.locked = false; this.install({ suspensionBusy: false }); } }
   }
   retry = () => {
     if (!this.available() || this.locked) return;
+    if (this.snapshot.phase === 'permanentAppeal' && this.snapshot.appeal?.status !== 'APPROVED') { void this.refreshAppeal(); return; }
     if (this.snapshot.phase === 'deletionRecovery') { void this.recoverDeletion('refresh'); return; }
     if (this.user) void this.load();
     else this.install({ phase: 'login', error: null });

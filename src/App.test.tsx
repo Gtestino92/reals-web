@@ -190,8 +190,8 @@ it.each(['AUTH_METHOD_NOT_ALLOWED', 'EMAIL_ALREADY_LINKED_TO_DIFFERENT_FIREBASE_
   await screen.findByRole('button', { name: 'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce(); expect(screen.getByRole('alert')).toBeVisible();
 });
 it.each(['ACCOUNT_PENDING_DELETION', 'ACCOUNT_TEMPORARILY_BANNED', 'ACCOUNT_PERMANENTLY_BANNED'])('restricted %s never renders ready', async code => {
-  fetcher.mockResolvedValueOnce(json({ code }, 403)); mount(); act(() => observer(user)); await screen.findByRole('alert');
-  expect(screen.queryByText('Firebase autenticado. Sesión del backend lista.')).not.toBeInTheDocument(); expect(fetcher).toHaveBeenCalledOnce();
+  fetcher.mockResolvedValueOnce(json({ code }, 403)); mount(); act(() => observer(user)); if (code === 'ACCOUNT_TEMPORARILY_BANNED') await screen.findByRole('heading', { name: 'Cuenta suspendida temporalmente' }); else await screen.findByRole('alert');
+  expect(screen.queryByText('Firebase autenticado. Sesión del backend lista.')).not.toBeInTheDocument(); expect(fetcher).toHaveBeenCalledTimes(code === 'ACCOUNT_PERMANENTLY_BANNED' ? 2 : 1);
 });
 it('password reset validates, sends unauthenticated trimmed email and applies cooldown only on 202', async () => {
   fetcher.mockResolvedValueOnce(json(null, 202)); mount(); login(); fireEvent.click(screen.getByRole('button', { name: 'Olvidé mi contraseña' }));

@@ -1,3 +1,4 @@
+import { AccountSuspension } from './auth/AccountSuspension';
 import { AccountDeletionRecovery } from './auth/AccountDeletionRecovery';
 import { SignOutButton } from './auth/SignOutButton';
 import { tabOwnershipEnabled } from './tabs/policy';
@@ -57,10 +58,11 @@ function SessionApp({ controller }: { controller: SessionController }) {
     {(state.phase === 'checking' || state.phase === 'loading') && <SessionLoading />}
     {state.phase === 'signingOut' && <p role="status">Cerrando sesión…</p>}
     {state.phase === 'ready' && (homeReady ? <Home key={`${state.account?.id}-${state.profile?.id}`} controller={controller} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding key={state.account?.id} controller={controller} onAccountAvailableChange={setSetupAccountAvailable} />)}
+    {(state.phase === 'temporarySuspension' || state.phase === 'permanentAppeal') && <AccountSuspension controller={controller} state={state} />}
     {state.phase === 'deletionRecovery' && <AccountDeletionRecovery controller={controller} state={state} />}
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
-    {state.error && state.phase !== 'deletionRecovery' && <p className="login-error" role="alert">{state.error.message}</p>}
+    {state.error && !['deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(state.phase) && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
-    {state.phase !== 'deletionRecovery' && !chatShell && !homeReady && !setupAccountAvailable && state.phase !== 'checking' && <div className="session-actions"><SignOutButton disabled={state.phase === 'signingOut'} onConfirm={controller.signOut} /></div>}
+    {!['deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(state.phase) && !chatShell && !homeReady && !setupAccountAvailable && state.phase !== 'checking' && <div className="session-actions"><SignOutButton disabled={state.phase === 'signingOut'} onConfirm={controller.signOut} /></div>}
   </section></main>;
 }
