@@ -1,5 +1,6 @@
+import { DeletionConfirmation } from '../auth/DeletionConfirmation';
 import { SignOutButton } from '../auth/SignOutButton';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionController } from '../auth/session';
 import { ApiError, object } from '../auth/api';
 import { errorCode } from '../auth/errors';
@@ -17,6 +18,8 @@ function parse(value: unknown): Preferences {
   return { activityEnabled: value.activityEnabled, remindersEnabled: value.remindersEnabled, availabilityEnabled: value.availabilityEnabled };
 }
 export function AccountSection({ controller, disabled, setup = false, onBack, notificationsOpen = false, onNotificationsOpen, onNavigationBlockedChange }: { controller: SessionController; disabled: boolean; setup?: boolean; onBack?: () => void; notificationsOpen?: boolean; onNotificationsOpen?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const dismissDelete = useCallback(() => setDeleteOpen(false), []);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [expanded, setExpanded] = useState(false), [view, setView] = useState<'password' | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
@@ -38,7 +41,7 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
     finally { if (owner.current === r && !r.abort.signal.aborted) { r.locked = false; setBusy(false); } }
   };
   const read = () => void run(async signal => { notificationAction.current = 'read'; const value = parse(await controller.request('/me/notification-preferences', signal)); signal.throwIfAborted(); setPreferences(value); setUncertain(false); });
-  useLayoutEffect(() => { onNavigationBlockedChange?.(busy || view === 'password' || signOutOpen); }, [busy, view, signOutOpen, onNavigationBlockedChange]);
+  useLayoutEffect(() => { onNavigationBlockedChange?.(busy || view === 'password' || signOutOpen || deleteOpen); }, [busy, view, signOutOpen, deleteOpen, onNavigationBlockedChange]);
   useEffect(() => {
     if (view !== 'password') return;
     // Home restores the owned entry; idle modal Back dismisses only the dialog.
@@ -80,7 +83,8 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
       {!setup && import.meta.env.DEV && <section><h4>Apoyar Reals</h4><p>Si te gusta Reals y querés ayudar a sostener el proyecto, podés hacer un aporte voluntario. No te da beneficios dentro de la app.</p><a className="login-button login-outlined" href="https://cafecito.app/reals-app" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Apoyar en Cafecito</a></section>}
       <SignOutButton disabled={blocked} onOpenChange={setSignOutOpen} onConfirm={controller.signOut} />
       <p>Eliminar la cuenta programa una eliminación recuperable durante 30 días y cierra la sesión.</p>
-      <button className="login-button login-outlined" disabled={blocked || uncertain} onClick={() => { if (owner.current?.locked || !window.confirm('Eliminar cuenta\nTu cuenta quedará pendiente de eliminación y podrás recuperarla durante 30 días. ¿Programar eliminación?')) return; void run(async signal => { setDeleteUncertain(true); await controller.request('/me', signal, 'DELETE'); signal.throwIfAborted(); controller.signOut(); }); }}>Eliminar cuenta</button>
+      <button className="login-button login-outlined" disabled={blocked || uncertain} onClick={() => { if (!owner.current?.locked) setDeleteOpen(true); }}>Eliminar cuenta</button>
+      {deleteOpen && <DeletionConfirmation onCancel={dismissDelete} onConfirm={() => { setDeleteOpen(false); void run(async signal => { setDeleteUncertain(true); await controller.request('/me', signal, 'DELETE'); signal.throwIfAborted(); controller.signOut(); }); }}/>}
       {deleteUncertain && !busy && <button className="login-button login-outlined" onClick={() => controller.retry()}>Consultar estado de la cuenta</button>}
 
       {view === 'password' && <PasswordForm operationError={error} busy={blocked || uncertain} onCancel={() => setView(null)} onSubmit={(current, next) => void run(async signal => { await controller.changePassword(current, next); signal.throwIfAborted(); setView(null); setMessage('Contraseña actualizada.'); })}/>}

@@ -53,9 +53,8 @@ it.each(['DRAFT', 'INACTIVE'])('reuses confirmed recoverable deletion in %s setu
   mount(); await screen.findByRole('heading', { name: 'Completá tu perfil' });
   expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
   const remove = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(remove); expect(writes('DELETE')).toHaveLength(0);
-  confirm.mockReturnValue(true); fireEvent.click(remove); fireEvent.click(remove);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' })); fireEvent.click(remove); fireEvent.click(screen.getByRole('button', { name: 'Programar eliminación' })); fireEvent.click(remove);
   await waitFor(() => expect(writes('DELETE')).toHaveLength(1)); expect(auth.signOut).not.toHaveBeenCalled();
   const details = screen.getByRole('form', { name: 'Datos del perfil', hidden: true }); fireEvent.submit(details); expect(writes('PATCH')).toHaveLength(0);
   await act(async () => finish(new Response(null, { status: 200 })));
@@ -65,7 +64,7 @@ it('keeps uncertain setup deletion blocked and offers authoritative account reco
   profile = { ...initialProfile }; const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => url === '/api/me' && options?.method === 'DELETE' ? Promise.reject(new TypeError('offline')) : base(url, options));
   mount(); await screen.findByRole('heading', { name: 'Completá tu perfil' }); fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
-  vi.spyOn(window, 'confirm').mockReturnValue(true); const remove = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(remove);
+  const remove = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(remove); fireEvent.click(screen.getByRole('button', { name: 'Programar eliminación' }));
   await screen.findByRole('alert'); expect(remove).toBeDisabled(); fireEvent.click(remove); expect(writes('DELETE')).toHaveLength(1);
   expect(screen.getByRole('button', { name: 'Consultar estado de la cuenta' })).toBeEnabled(); expect(auth.signOut).not.toHaveBeenCalled();
 });

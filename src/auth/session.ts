@@ -1,13 +1,16 @@
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
-import { ApiClient, bootstrap } from './api';
+import { ApiClient, ApiError, DeletedAccountError, bootstrap, object, parseUser } from './api';
 import type { BackendUser, Profile } from './api';
 import { errorCode, isRateLimitResponse, safeMessage, terminalCodes } from './errors';
 import type { AuthService, Identity } from './firebase';
 import type { LoginErrorOwner } from './LoginScreen';
 
-type Phase = 'checking' | 'login' | 'authenticating' | 'loading' | 'ready' | 'restricted' | 'recoverable' | 'signingOut';
+type Phase = 'checking' | 'login' | 'authenticating' | 'loading' | 'ready' | 'restricted' | 'recoverable' | 'signingOut' | 'deletionRecovery';
 export interface SessionSnapshot {
   phase: Phase;
+  recoveryBusy?: 'reactivate' | 'finalize' | 'refresh' | null;
+  recoveryUncertain?: boolean;
+  recoveryTerminal?: boolean;
   account: BackendUser | null;
   profile: Profile | null;
   error: { message: string; owner: LoginErrorOwner } | null;
@@ -16,7 +19,7 @@ export interface SessionSnapshot {
   resetAt: number | null;
   verificationMessage: string | null;
 }
-const initial: SessionSnapshot = { phase: 'checking', account: null, profile: null, error: null, operation: null, resetMessage: null, resetAt: null, verificationMessage: null };
+const initial: SessionSnapshot = { recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, phase: 'checking', account: null, profile: null, error: null, operation: null, resetMessage: null, resetAt: null, verificationMessage: null };
 export class SessionController {
   snapshot: SessionSnapshot = initial;
   private listeners = new Set<() => void>();
@@ -54,6 +57,40 @@ export class SessionController {
       throw error;
     }
   };
+  // The caller selects an operation, never an arbitrary restricted URL/method.
+  recoverDeletion = async (operation: 'reactivate' | 'finalize' | 'refresh') => {
+    if (!this.available() || this.locked || !this.user || this.snapshot.phase !== 'deletionRecovery') return;
+    const account = this.snapshot.account;
+    if (!account || account.status !== 'DELETED') return;
+    if (operation !== 'refresh' && (this.snapshot.recoveryUncertain || this.snapshot.recoveryTerminal || !account.deletedAt || !account.deletionFinalizesAt || Date.parse(account.deletedAt) >= Date.parse(account.deletionFinalizesAt))) return;
+    this.locked = true;
+    const generation = this.generation, user = this.user, signal = this.controller.signal;
+    this.install({ recoveryBusy: operation, error: null });
+    try {
+      const path = operation === 'refresh' ? '/me' : operation === 'reactivate' ? '/me/reactivation' : '/me/deletion/finalization';
+      const raw = await this.api.request(path, signal, user, operation === 'refresh' ? 'GET' : 'POST', undefined, 200, operation === 'refresh');
+      const result = parseUser(raw);
+      if (!this.current(generation)) return;
+      if (result.id !== account.id) throw new ApiError('invalid');
+      if (operation === 'finalize') {
+        if (result.status !== 'DELETED' || !result.deletedAt || !object(raw) || raw.deletionFinalizesAt !== null) throw new ApiError('invalid');
+        this.signOut(); return;
+      }
+      if (result.status === 'ACTIVE') {
+        // Retire recovery before a fresh owned bootstrap; never install a speculative profile.
+        this.locked = false; this.invalidate(); await this.load(); return;
+      }
+      if (operation === 'reactivate') throw new ApiError('invalid');
+      this.install({ account: result, profile: null, recoveryUncertain: false });
+    } catch (error) {
+      if (!this.current(generation)) return;
+      const terminal = !isRateLimitResponse(error) && errorCode(error) === 'ACCOUNT_DELETION_FINALIZED';
+      // Any failed write requires a read before another deliberate write, including auth failures.
+      this.install({ recoveryTerminal: terminal || !!this.snapshot.recoveryTerminal, recoveryUncertain: this.snapshot.recoveryUncertain || operation !== 'refresh', error: { owner: 'shared', message: terminal ? 'La cuenta ya no puede recuperarse. Podés crear una cuenta nueva.' : operation === 'refresh' ? safeMessage(error) : 'No pudimos confirmar el resultado. Consultá el estado de la cuenta antes de volver a intentar.' } });
+    } finally {
+      if (this.current(generation)) { this.locked = false; this.install({ recoveryBusy: null }); }
+    }
+  };
   verifyEmail = async (send: boolean) => {
     this.ownership?.assert();
     const generation = this.generation;
@@ -87,7 +124,7 @@ export class SessionController {
         if (epoch !== this.observerEpoch || !this.listeners.size) return;
         if (!this.available() || this.snapshot.phase === 'signingOut') return;
         if (this.snapshot.phase === 'authenticating' && user) { this.user = user; return; }
-        if (this.user?.uid === user?.uid && ['loading', 'ready', 'restricted', 'recoverable'].includes(this.snapshot.phase)) return;
+        if (this.user?.uid === user?.uid && ['loading', 'ready', 'restricted', 'recoverable', 'deletionRecovery'].includes(this.snapshot.phase)) return;
         this.replace(user);
       }, error => {
         if (epoch !== this.observerEpoch || !this.listeners.size) return;
@@ -123,7 +160,7 @@ export class SessionController {
     this.ownership?.assert();
     const generation = this.generation;
     const signal = this.controller.signal;
-    this.install({ phase: 'loading', operation: null, error: null, account: null, profile: null });
+    this.install({ phase: 'loading', operation: null, error: null, account: null, profile: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false });
     try {
       if (this.pendingVerification?.uid === user.uid) {
         await this.auth.verify(user);
@@ -135,7 +172,9 @@ export class SessionController {
       if (this.current(generation)) this.install({ phase: 'ready', ...session });
     } catch (error) {
       if (!this.current(generation)) return;
-      if (terminalCodes.has(errorCode(error))) {
+      if (error instanceof DeletedAccountError) {
+        this.install({ phase: 'deletionRecovery', account: error.account, profile: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, error: null });
+      } else if (terminalCodes.has(errorCode(error))) {
         // Clear only the identity owned by this generation; auth observer is gated.
         this.install({ phase: 'signingOut' });
         try { await this.auth.signOut(); }
@@ -149,6 +188,7 @@ export class SessionController {
   }
   retry = () => {
     if (!this.available() || this.locked) return;
+    if (this.snapshot.phase === 'deletionRecovery') { void this.recoverDeletion('refresh'); return; }
     if (this.user) void this.load();
     else this.install({ phase: 'login', error: null });
   };

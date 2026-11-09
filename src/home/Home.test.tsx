@@ -67,7 +67,7 @@ it('preserves uncertain deletion across Account → Home → Account', async () 
   const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => url === '/api/me' && options?.method === 'DELETE' ? Promise.reject(new TypeError('offline')) : base(url, options));
   mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
-  vi.spyOn(window, 'confirm').mockReturnValue(true); fireEvent.click(screen.getByRole('button', { name: 'Eliminar cuenta' })); await screen.findByRole('alert');
+  fireEvent.click(screen.getByRole('button', { name: 'Eliminar cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Programar eliminación' })); await screen.findByRole('alert');
   fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' })); await screen.findByRole('heading', { name: 'Inicio' }); await ready();
   fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
   expect(screen.getByRole('button', { name: 'Eliminar cuenta' })).toBeDisabled();

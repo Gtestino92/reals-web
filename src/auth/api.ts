@@ -15,7 +15,7 @@ export function object(value: unknown): value is Record<string, unknown> { retur
 export class ApiClient {
   constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis), private readonly ownership?: TabOwnershipManager) {}
   withOwnership(ownership?: TabOwnershipManager) { return new ApiClient(this.fetcher, ownership); }
-  async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number): Promise<unknown> {
+  async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true): Promise<unknown> {
     this.ownership?.assert();
     if (this.ownership) signal = AbortSignal.any([signal, this.ownership.signal]);
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -39,7 +39,7 @@ export class ApiClient {
         try { raw = await response.json(); } catch { signal.throwIfAborted(); throw new ApiError('invalid', response.status, '', {}, retryAfter); }
         signal.throwIfAborted();
         if (!object(raw) || typeof raw.code !== 'string') throw new ApiError('invalid', response.status, '', {}, retryAfter);
-        if (response.status === 401 && raw.code === 'INVALID_TOKEN' && user && attempt === 0) continue;
+        if (response.status === 401 && raw.code === 'INVALID_TOKEN' && user && attempt === 0 && refreshInvalidToken) continue;
         throw new ApiError(response.status === 401 || response.status === 403 ? 'authorization' : 'backend', response.status, raw.code, {
           ...(typeof raw.error === 'string' ? { error: raw.error } : {}),
           ...(typeof raw.message === 'string' ? { message: raw.message } : {}),
@@ -53,15 +53,24 @@ export class ApiClient {
     throw new ApiError('invalid');
   }
 }
-export interface BackendUser { id: string; status: 'ACTIVE' | 'DELETED' }
+export interface BackendUser { id: string; status: 'ACTIVE' | 'DELETED'; deletedAt?: string | null; deletionFinalizesAt?: string | null }
 export interface Profile { id: string; userId: string; status: 'DRAFT' | 'ACTIVE' | 'INACTIVE' }
 export function parseUser(raw: unknown): BackendUser {
   if (!object(raw) || typeof raw.id !== 'string' || !raw.id || (raw.status !== 'ACTIVE' && raw.status !== 'DELETED')) throw new ApiError('invalid');
-  return { id: raw.id, status: raw.status };
+  const date = (value: unknown): string | null => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value))) return null;
+    // Date.parse normalizes impossible calendar dates such as February 31.
+    const day = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+    return day.toISOString().slice(0, 10) === value.slice(0, 10) ? value : null;
+  };
+  return { id: raw.id, status: raw.status, ...(raw.status === 'DELETED' ? { deletedAt: date(raw.deletedAt), deletionFinalizesAt: date(raw.deletionFinalizesAt) } : {}) };
 }
 export function parseProfile(raw: unknown, userId: string): Profile {
   if (!object(raw) || typeof raw.id !== 'string' || !raw.id || raw.userId !== userId || (raw.status !== 'DRAFT' && raw.status !== 'ACTIVE' && raw.status !== 'INACTIVE')) throw new ApiError('invalid');
   return { id: raw.id, userId, status: raw.status };
+}
+export class DeletedAccountError extends ApiError {
+  constructor(public readonly account: BackendUser) { super('backend', 403, 'ACCOUNT_PENDING_DELETION'); }
 }
 export async function bootstrap(api: ApiClient, user: Identity, signal: AbortSignal, localVerification: boolean) {
   let raw: unknown;
@@ -72,7 +81,7 @@ export async function bootstrap(api: ApiClient, user: Identity, signal: AbortSig
     raw = await api.request('/me/provision', signal, user, 'POST');
   }
   const account = parseUser(raw);
-  if (account.status === 'DELETED') throw new ApiError('backend', 403, 'ACCOUNT_PENDING_DELETION');
+  if (account.status === 'DELETED') throw new DeletedAccountError(account);
   let profile: Profile | null;
   try { profile = parseProfile(await api.request('/me/profile', signal, user), account.id); }
   catch (error) { if (error instanceof ApiError && error.status === 404 && error.kind !== 'invalid' && !terminalCodes.has(error.code) && !error.code.startsWith('ACCOUNT_')) profile = null; else throw error; }

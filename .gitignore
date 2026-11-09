@@ -13,3 +13,5 @@ secrets/
 /artifacts/affinities/
 /artifacts/profile-questions/
 /artifacts/notification-settings/
+
+artifacts/account-deletion-recovery/
