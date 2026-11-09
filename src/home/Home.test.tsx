@@ -53,6 +53,16 @@ it('does not show a transient loading row while reconciling a loaded Home on ret
   expect(screen.queryByText('Actualizando Inicio…')).toBeNull();
   await act(async () => finish(json(status))); await ready();
 });
+it('restores the Notifications entry focus for explicit and browser Back to Account', async () => {
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => path === '/api/me/notification-preferences' ? Promise.resolve(json({ activityEnabled: true, remindersEnabled: false, availabilityEnabled: true })) : base(path, options));
+  mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' })); await screen.findByRole('switch', { name: 'Actividad' });
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Cuenta' })); await screen.findByRole('heading', { name: 'Cuenta' });
+  expect(screen.getByRole('button', { name: 'Notificaciones' })).toHaveFocus();
+  act(() => history.forward()); await screen.findByRole('heading', { name: 'Notificaciones' });
+  act(() => history.back()); await screen.findByRole('heading', { name: 'Cuenta' }); expect(screen.getByRole('button', { name: 'Notificaciones' })).toHaveFocus();
+});
 it('preserves uncertain deletion across Account → Home → Account', async () => {
   const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => url === '/api/me' && options?.method === 'DELETE' ? Promise.reject(new TypeError('offline')) : base(url, options));

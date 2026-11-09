@@ -40,21 +40,56 @@ it('shows standalone account actions and confirms sign-out', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(controller.signOut).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar' })); confirmSignOut(); expect(controller.signOut).toHaveBeenCalledOnce();
 });
-it('loads and saves all notification fields once, installing the server response', async () => {
+it.each([['activityEnabled', 'Actividad'], ['remindersEnabled', 'Recordatorios'], ['availabilityEnabled', 'Disponibilidad']] as const)('loads and saves %s once, installing every server-confirmed field', async (key, label) => {
   mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
-  const activity = await screen.findByRole('checkbox', { name: 'Actividad' });
+  const toggle = await screen.findByRole('switch', { name: label });
+  expect(screen.getAllByRole('switch')).toHaveLength(3); expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(screen.getByRole('switch', { name: 'Actividad' })).toBeChecked();
+  expect(screen.getByRole('switch', { name: 'Recordatorios' })).not.toBeChecked();
+  expect(screen.getByRole('switch', { name: 'Disponibilidad' })).toBeChecked();
   let resolve!: (value: unknown) => void;
   vi.mocked(controller.request).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  fireEvent.click(activity); fireEvent.click(activity);
-  expect(controller.request).toHaveBeenCalledTimes(2); expect(activity).toBeDisabled();
+  fireEvent.click(toggle); fireEvent.click(toggle);
+  expect(controller.request).toHaveBeenCalledTimes(2); screen.getAllByRole('switch').forEach(input => expect(input).toBeDisabled());
+  expect(screen.getByRole('region', { name: 'Notificaciones' })).toHaveAttribute('data-saving', 'true');
+  expect(toggle).toHaveProperty('checked', preferences[key]); expect(screen.getByRole('status')).toHaveTextContent('Guardando preferencias…');
+  expect(controller.request).toHaveBeenLastCalledWith('/me/notification-preferences', expect.any(AbortSignal), 'PUT', { ...preferences, [key]: !preferences[key] });
+  await act(async () => resolve({ activityEnabled: true, remindersEnabled: true, availabilityEnabled: false }));
+  expect(screen.getByRole('switch', { name: 'Actividad' })).toBeChecked(); expect(screen.getByRole('switch', { name: 'Recordatorios' })).toBeChecked(); expect(screen.getByRole('switch', { name: 'Disponibilidad' })).not.toBeChecked(); expect(toggle).toBeEnabled();
+  expect(screen.getByRole('status')).toBeEmptyDOMElement();
+  expect(screen.getByRole('region', { name: 'Notificaciones' })).toHaveAttribute('data-saving', 'false');
+  expect(screen.queryByText('Preferencias guardadas.')).toBeNull();
+});
+it('associates one switch with each complete label and description, including row clicks', async () => {
+  mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' })); await screen.findByRole('switch', { name: 'Actividad' });
+  expect(screen.getByRole('switch', { name: 'Actividad' })).toHaveAccessibleDescription('Nuevos chats y cambios importantes en tus interacciones.');
+  expect(screen.getByRole('switch', { name: 'Recordatorios' })).toHaveAccessibleDescription('Avisos sobre revisiones pendientes y próximas segundas charlas.');
+  expect(screen.getByRole('switch', { name: 'Disponibilidad' })).toHaveAccessibleDescription('Avisame cuando pueda volver a buscar a alguien nuevo.');
+  expect(screen.getByText(/Estos ajustes se aplican actualmente/)).toHaveTextContent('notificaciones push de Android');
+  expect(screen.getByText(/Estos ajustes se aplican actualmente/)).toHaveTextContent('Las notificaciones del navegador se configurarán por separado');
+  fireEvent.click(screen.getByText('Nuevos chats y cambios importantes en tus interacciones.'));
+  await waitFor(() => expect(controller.request).toHaveBeenCalledTimes(2));
   expect(controller.request).toHaveBeenLastCalledWith('/me/notification-preferences', expect.any(AbortSignal), 'PUT', { ...preferences, activityEnabled: false });
-  await act(async () => resolve({ ...preferences, activityEnabled: false })); expect(activity).not.toBeChecked(); expect(activity).toBeEnabled();
+});
+it('describes initial loading and read failure, then retries without a write and restores entry focus', async () => {
+  let resolve!: (value: unknown) => void;
+  vi.mocked(controller.request).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
+  expect(screen.getByRole('status')).toHaveTextContent('Cargando notificaciones…'); expect(screen.queryByRole('switch')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Volver a Cuenta' })).toBeDisabled();
+  await act(async () => resolve({ activityEnabled: null }));
+  expect(screen.getByRole('alert')).toHaveTextContent('No pudimos cargar las preferencias.');
+  fireEvent.click(screen.getByRole('button', { name: 'Actualizar notificaciones' })); await screen.findByRole('switch', { name: 'Actividad' });
+  expect(vi.mocked(controller.request).mock.calls.every(call => call[2] === undefined)).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Cuenta' })); expect(screen.getByRole('button', { name: 'Notificaciones' })).toHaveFocus();
 });
 it('blocks uncertain notification writes until an explicit authoritative read', async () => {
   mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
-  const activity = await screen.findByRole('checkbox', { name: 'Actividad' });
+  const activity = await screen.findByRole('switch', { name: 'Actividad' });
   vi.mocked(controller.request).mockRejectedValueOnce(new ApiError('network'));
   fireEvent.click(activity); await screen.findByRole('alert'); expect(activity).toBeDisabled();
+  expect(screen.getByRole('alert')).toHaveTextContent('No pudimos confirmar el cambio.');
+  screen.getAllByRole('switch').forEach(input => expect(input).toBeDisabled());
   fireEvent.click(screen.getByRole('button', { name: 'Actualizar notificaciones' })); await waitFor(() => expect(activity).toBeEnabled());
   expect(controller.request).toHaveBeenCalledTimes(3);
 });
@@ -66,15 +101,17 @@ it('deletes recoverably once and signs out only after success', async () => {
   expect(controller.request).toHaveBeenCalledExactlyOnceWith('/me', expect.any(AbortSignal), 'DELETE'); expect(controller.signOut).not.toHaveBeenCalled();
   await act(async () => resolve(undefined)); expect(controller.signOut).toHaveBeenCalledOnce();
 });
-it('never repeats an uncertain deletion, including after notification recovery', async () => {
+it('never repeats an uncertain deletion or bypasses its lock through Notifications', async () => {
   mount(); vi.spyOn(window, 'confirm').mockReturnValue(true); vi.mocked(controller.request).mockRejectedValueOnce(new ApiError('network'));
   const button = screen.getByRole('button', { name: 'Eliminar cuenta' }); fireEvent.click(button); await screen.findByRole('alert'); fireEvent.click(button);
   expect(button).toBeDisabled(); expect(controller.request).toHaveBeenCalledOnce(); expect(controller.signOut).not.toHaveBeenCalled();
+  // Notifications cannot bypass a pending-deletion recovery lock.
+  fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' })); expect(controller.request).toHaveBeenCalledOnce();
 });
 it('rejects late read installation after unmount', async () => {
   let resolve!: (value: unknown) => void;
   vi.mocked(controller.request).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   const view = mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
   const signal = vi.mocked(controller.request).mock.calls[0]![1]; view.unmount(); expect(signal.aborted).toBe(true);
-  await act(async () => resolve(preferences)); expect(screen.queryByRole('checkbox')).toBeNull();
+  await act(async () => resolve(preferences)); expect(screen.queryByRole('switch')).toBeNull();
 });

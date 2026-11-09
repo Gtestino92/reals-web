@@ -85,7 +85,11 @@ export function Home({ controller, onCompleteProfile, onChatActiveChange, onMana
   const open = (next: ManagementSurface) => { retireNotice(); navigation.open(next); if (next === 'affinities') void affinities.refresh(); };
   const returnHome = () => navigation.backTo('home');
   const focusSurface = profileActive ? 'profile' : surface;
+  const previousFocusSurface = useRef(focusSurface);
   useLayoutEffect(() => {
+    const returningToAccount = previousFocusSurface.current === 'notifications' && focusSurface === 'account';
+    previousFocusSurface.current = focusSurface;
+    if (returningToAccount) return; // AccountSection restores the Notifications entry's focus.
     const heading = Array.from(root.current?.querySelectorAll('h2') ?? []).find(node => !node.closest('[hidden]'));
     document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }

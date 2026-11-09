@@ -1,8 +1,9 @@
 import { SignOutButton } from '../auth/SignOutButton';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionController } from '../auth/session';
 import { ApiError, object } from '../auth/api';
 import { errorCode } from '../auth/errors';
+import './notification-settings.css';
 
 type Preferences = { activityEnabled: boolean; remindersEnabled: boolean; availabilityEnabled: boolean };
 const descriptions = {
@@ -21,6 +22,7 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
   const [preferences, setPreferences] = useState<Preferences | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
   const [uncertain, setUncertain] = useState(false), [deleteUncertain, setDeleteUncertain] = useState(false);
   const owner = useRef<{ abort: AbortController; locked: boolean } | null>(null);
+  const notificationId = useId(), notificationAction = useRef<'read' | 'write'>('read');
   useEffect(() => { const r = { abort: new AbortController(), locked: false }; owner.current = r; return () => { r.abort.abort(); if (owner.current === r) owner.current = null; }; }, [controller]);
   const run = async (task: (signal: AbortSignal) => Promise<void>) => {
     const r = owner.current;
@@ -35,7 +37,7 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
     }
     finally { if (owner.current === r && !r.abort.signal.aborted) { r.locked = false; setBusy(false); } }
   };
-  const read = () => void run(async signal => { const value = parse(await controller.request('/me/notification-preferences', signal)); signal.throwIfAborted(); setPreferences(value); setUncertain(false); });
+  const read = () => void run(async signal => { notificationAction.current = 'read'; const value = parse(await controller.request('/me/notification-preferences', signal)); signal.throwIfAborted(); setPreferences(value); setUncertain(false); });
   useLayoutEffect(() => { onNavigationBlockedChange?.(busy || view === 'password' || signOutOpen); }, [busy, view, signOutOpen, onNavigationBlockedChange]);
   useEffect(() => {
     if (view !== 'password') return;
@@ -52,7 +54,23 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
     previousNotifications.current = notificationsOpen;
   }, [notificationsOpen]);
   const blocked = disabled || busy || deleteUncertain;
-  if (notificationsOpen) return <section className="home-account account-notifications" aria-label="Notificaciones"><header className="home-heading"><h2 ref={heading} tabIndex={-1}>Notificaciones</h2><button className="login-button login-outlined" disabled={busy} onClick={onBack}>Volver a Cuenta</button></header><p>Elegí qué avisos querés recibir.</p>{busy && <p role="status">Actualizando notificaciones…</p>}{preferences && groups.map(([key, label]) => <label key={key}><input type="checkbox" aria-label={label} aria-describedby={`notification-${key}`} checked={preferences[key]} disabled={blocked || uncertain} onChange={e => { const requested = { ...preferences, [key]: e.target.checked }; void run(async signal => { setUncertain(true); const value = parse(await controller.request('/me/notification-preferences', signal, 'PUT', requested)); signal.throwIfAborted(); setPreferences(value); setUncertain(false); }); }}/><span>{label}</span><span id={`notification-${key}`}>{descriptions[key]}</span></label>)}<button disabled={blocked} onClick={read}>Actualizar notificaciones</button>{error && <p role="alert">{error}</p>}</section>;
+  if (notificationsOpen) return <section className="home-account account-notifications" aria-label="Notificaciones" aria-busy={busy} data-saving={busy && notificationAction.current === 'write'}>
+    <header className="notification-heading">
+      <div className="home-heading"><h2 ref={heading} tabIndex={-1}>Notificaciones</h2><button className="login-button login-outlined" disabled={busy} onClick={onBack}>Volver a Cuenta</button></div>
+      <p>Elegí qué avisos querés recibir.</p>
+      <div className="brand-divider" aria-hidden="true"><span/></div>
+    </header>
+    <p className="notification-platform">Estos ajustes se aplican actualmente a las notificaciones push de Android. Las notificaciones del navegador se configurarán por separado cuando estén disponibles.</p>
+    <div className="notification-rows">{preferences && groups.map(([key, label]) => <label className="notification-row" key={key}>
+      <span className="notification-copy"><span className="notification-title" id={`${notificationId}-${key}-title`}>{label}</span><span className="notification-description" id={`${notificationId}-${key}-description`}>{descriptions[key]}</span></span>
+      <span className="notification-switch-target"><input type="checkbox" role="switch" className="notification-switch" aria-labelledby={`${notificationId}-${key}-title`} aria-describedby={`${notificationId}-${key}-description`} checked={preferences[key]} disabled={blocked || uncertain} onChange={e => { const requested = { ...preferences, [key]: e.target.checked }; void run(async signal => { notificationAction.current = 'write'; setUncertain(true); const value = parse(await controller.request('/me/notification-preferences', signal, 'PUT', requested)); signal.throwIfAborted(); setPreferences(value); setUncertain(false); }); }}/></span>
+    </label>)}</div>
+    <div className="notification-feedback">
+      <p role="status">{busy ? notificationAction.current === 'write' ? 'Guardando preferencias…' : preferences ? 'Actualizando preferencias…' : 'Cargando notificaciones…' : ''}</p>
+      {error && <p role="alert" className="notification-error">{notificationAction.current === 'write' ? 'No pudimos confirmar el cambio. Actualizá las notificaciones antes de volver a intentar.' : 'No pudimos cargar las preferencias. Revisá tu conexión y usá «Actualizar notificaciones».'}</p>}
+    </div>
+    <button className="login-button login-outlined" disabled={blocked} onClick={read}>Actualizar notificaciones</button>
+  </section>;
   return <section className={setup ? 'home-card home-account' : 'home-account'} aria-label="Cuenta" aria-busy={busy}>
     {setup ? <header className="home-heading"><h3>Cuenta</h3><button type="button" className="login-button login-outlined" aria-label="Cuenta" aria-expanded={expanded} aria-controls="account-options" disabled={blocked} onClick={() => setExpanded(v => !v)}>{expanded ? 'Ocultar' : 'Abrir'}</button></header> : <header className="home-heading"><h2>Cuenta</h2><button className="login-button login-outlined" disabled={busy || view === 'password'} onClick={onBack}>Volver a Inicio</button></header>}
     {(!setup || expanded) && <div id="account-options" className={setup ? undefined : 'home-card'}>
