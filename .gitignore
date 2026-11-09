@@ -17,3 +17,5 @@ secrets/
 artifacts/account-deletion-recovery/
 
 /artifacts/account-suspension/
+
+/artifacts/admin/

@@ -1,0 +1,25 @@
+.admin { max-width: 1200px; margin: auto; padding: 24px; overflow-wrap: anywhere; }
+.admin header,.admin nav { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 20px; }
+.admin h1 { font-family: var(--font-display); font-weight: 400; }
+.admin button,.admin input,.admin select,.admin textarea { font: inherit; color: inherit; background: var(--color-surface); border: 1px solid var(--color-outline); border-radius: 8px; padding: 10px; min-height: 48px; max-width: 100%; }
+.admin button { cursor: pointer; margin: 4px; }
+.admin button:disabled { opacity: .55; cursor: default; }
+.admin [aria-current] { outline: 2px solid var(--color-secondary); }
+.admin label { display: grid; gap: 6px; margin: 12px 0; }
+.admin input,.admin textarea { width: 100%; box-sizing: border-box; }
+.admin textarea { min-height: 100px; }
+.admin fieldset { min-width: 0; border: 0; padding: 0; }
+.admin-panels { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,2fr); gap: 24px; }
+.admin-panels section { min-width: 0; }
+.admin-item { display: block; width: calc(100% - 8px); text-align: left; }
+.admin dl { margin: 12px 0; }
+.admin dt { font-weight: 600; }
+.admin dd { margin: 0 0 12px; white-space: pre-wrap; }
+.admin-preview { max-width: 100%; max-height: 60vh; object-fit: contain; }
+.admin-text { white-space: pre-wrap; }
+.admin audio { max-width: 100%; }
+.admin dialog { color: var(--color-on-surface); background: var(--color-surface); border: 1px solid var(--color-outline); border-radius: 14px; max-width: min(520px,90vw); max-height: 85dvh; overflow: auto; }
+.admin dialog::backdrop { background: #0008; }
+@media (max-width: 700px) { .admin { padding: 16px; } .admin-panels { grid-template-columns: minmax(0,1fr); } }
+
+.admin-thumbnail { width: 48px; height: 48px; object-fit: cover; vertical-align: middle; margin-right: 10px; }

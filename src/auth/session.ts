@@ -53,10 +53,16 @@ export class SessionController {
     const user = this.user;
     if (!user || this.snapshot.phase !== 'ready') throw new DOMException('Sesión obsoleta', 'AbortError');
     try {
-      const result = await this.api.request(path, AbortSignal.any([signal, this.controller.signal]), user, method, body);
+      const result = await this.api.request(path, AbortSignal.any([signal, this.controller.signal]), user, method, body, path.startsWith('/admin/') ? 200 : undefined, !path.startsWith('/admin/'));
       if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
       return result;
     } catch (error) {
+      // Admin writes must never replay or automatically reenter after token denial.
+      if (this.current(generation) && path.startsWith('/admin/') && errorCode(error) === 'INVALID_TOKEN') {
+        this.invalidate(); this.locked = false;
+        this.install({ phase: 'restricted', account: null, profile: null, error: { message: safeMessage(error), owner: 'shared' } });
+        throw error;
+      }
       if (this.current(generation) && !isRateLimitResponse(error) && (terminalCodes.has(errorCode(error)) || errorCode(error).startsWith('ACCOUNT_'))) {
         if (!this.restrict(error)) { this.invalidate(); this.locked = false; void this.load(); }
       }

@@ -1,0 +1,4 @@
+export const diag = { queueWaitingCount: 1, queueTotalCount: 2, activeMatchLocks: 0, activeConnectionLocks: 0, oldestQueueEntryEnteredAt: null, oldestActiveLockCreatedAt: null };
+export const photo = { photoId: 'photo', userId: 'target', displayName: 'Lucía', readUrl: 'https://example.invalid/photo', position: 1, photoVersion: 42, validationStatus: 'VALID', moderationStatus: 'NEEDS_REVIEW', isPersonPhoto: true, isFullBody: false, createdAt: '2026-01-01T00:00:00Z' };
+export const summary = { id: 'report', reported: { userId: 'target' }, reporter: { userId: 'reporter' }, priorityReview: true, status: 'PENDING', source: 'USER' };
+export const appeal = { penaltyId: 'penalty', userId: 'target', penaltyReason: 'Original', appealStatement: 'Revisión', appealedAt: '2026-01-01', createdAt: '2026-01-01', sourceReportId: 'report' };
