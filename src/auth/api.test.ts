@@ -12,6 +12,34 @@ function harness(...responses: Response[]) {
   return { fetcher, api: new ApiClient(fetcher), user: identity(), signal: new AbortController().signal };
 }
 describe('backend contracts', () => {
+  it.each(['ACCOUNT_PROVISIONING_LIMIT_EXCEEDED', 'RATE_LIMIT_EXCEEDED'])('parses 429 %s without retrying or refreshing the token', async code => {
+    const { api, fetcher, user, signal } = harness(new Response(JSON.stringify({ code, error: 'Too Many Requests', message: 'private diagnostic' }), { status: 429, headers: { 'Retry-After': '120' } }));
+    await expect(api.request('/me/provision', signal, user, 'POST')).rejects.toMatchObject({ kind: 'backend', status: 429, code, retryAfterSeconds: 120, detail: { error: 'Too Many Requests' } });
+    expect(fetcher).toHaveBeenCalledOnce(); expect(user.getIdToken).toHaveBeenCalledExactlyOnceWith(false);
+  });
+  it.each([
+    [null, undefined], ['', undefined], ['0', 0], ['1', 1], ['0009', 9], [' 120 ', 120], ['604800', 604800], ['31536000', 31536000],
+    ['-1', undefined], ['-0', undefined], ['+1', undefined], ['1.5', undefined], ['NaN', undefined], ['Infinity', undefined], ['1e3', undefined],
+    ['30 seconds', undefined], ['60, 30', undefined], ['Wed, 21 Oct 2026 07:28:00 GMT', undefined], ['31536001', undefined], ['9007199254740992', undefined], ['9'.repeat(100), undefined],
+  ])('safely handles Retry-After %j as %j', async (header, expected) => {
+    const headers = new Headers(); if (header !== null) headers.set('Retry-After', String(header));
+    const h = harness(new Response(JSON.stringify({ code: 'RATE_LIMIT_EXCEEDED' }), { status: 429, headers }));
+    await expect(h.api.request('/me', h.signal, h.user)).rejects.toMatchObject({ status: 429, retryAfterSeconds: expected });
+    expect(h.fetcher).toHaveBeenCalledOnce();
+  });
+  it('retains retry metadata on malformed error JSON without treating it as a successful DTO', async () => {
+    const h = harness(new Response('not json', { status: 429, headers: { 'Retry-After': '5' } }));
+    await expect(h.api.request('/me', h.signal, h.user)).rejects.toMatchObject({ kind: 'invalid', status: 429, retryAfterSeconds: 5 });
+  });
+  it('propagates provisioning quota failure before fetching a profile or running local verification', async () => {
+    const h = harness(failure(404, 'USER_NOT_FOUND'), new Response(JSON.stringify({ code: 'ACCOUNT_PROVISIONING_LIMIT_EXCEEDED' }), { status: 429 }));
+    await expect(bootstrap(h.api, h.user, h.signal, true)).rejects.toMatchObject({ status: 429, code: 'ACCOUNT_PROVISIONING_LIMIT_EXCEEDED' });
+    expect(h.fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/me', '/api/me/provision']); expect(h.user.reload).not.toHaveBeenCalled();
+  });
+  it('ignores Retry-After on successful responses and preserves successful bodies', async () => {
+    const h = harness(new Response(JSON.stringify(account), { headers: { 'Retry-After': '120' } }));
+    await expect(h.api.request('/me', h.signal, h.user)).resolves.toEqual(account);
+  });
   it('accepts the empty 200 recoverable-deletion response without requiring JSON', async () => {
     const { api, user, signal, fetcher } = harness(new Response(null, { status: 200 }));
     await expect(api.request('/me', signal, user, 'DELETE')).resolves.toBeUndefined();

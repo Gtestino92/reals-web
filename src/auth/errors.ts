@@ -27,7 +27,27 @@ const messages: Record<string, string> = {
   ACCOUNT_PERMANENTLY_BANNED: 'Tu cuenta está suspendida permanentemente.',
 };
 export const terminalCodes = new Set(['INVALID_TOKEN', 'AUTH_METHOD_NOT_ALLOWED', 'EMAIL_ALREADY_LINKED_TO_DIFFERENT_FIREBASE_USER', 'UNSUPPORTED_AUTH_PROVIDER', 'auth/user-disabled', 'auth/user-token-expired', 'auth/invalid-user-token', 'auth/user-not-found']);
-export function safeMessage(error: unknown): string {
+// Bound advisory copy, not eligibility. Covers backend provisioning windows up to 365 days.
+export const maxRetryAfterSeconds = 365 * 24 * 60 * 60;
+export function isRateLimitResponse(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'status' in error && error.status === 429;
+}
+function approximateWait(error: object): string {
+  if (!('retryAfterSeconds' in error) || typeof error.retryAfterSeconds !== 'number') return '';
+  const seconds = error.retryAfterSeconds;
+  if (!Number.isSafeInteger(seconds) || seconds < 0 || seconds > maxRetryAfterSeconds) return '';
+  if (seconds === 0) return ' Podés reintentar en unos instantes.';
+  const divisor = seconds < 60 ? 1 : seconds < 3600 ? 60 : seconds < 86400 ? 3600 : 86400;
+  const unit = divisor === 1 ? 'segundo' : divisor === 60 ? 'minuto' : divisor === 3600 ? 'hora' : 'día';
+  const amount = Math.ceil(seconds / divisor);
+  return ` Esperá aproximadamente ${amount} ${unit}${amount === 1 ? '' : 's'} antes de reintentar.`;
+}
+export function safeMessage(error: unknown, context: 'general' | 'password-reset' = 'general'): string {
+  if (isRateLimitResponse(error) && typeof error === 'object' && error !== null) {
+    const code = errorCode(error);
+    if (code === 'ACCOUNT_PROVISIONING_LIMIT_EXCEEDED') return 'Los nuevos registros desde esta conexión están temporalmente limitados. Intentá nuevamente más tarde.' + approximateWait(error);
+    if (code === 'RATE_LIMIT_EXCEEDED') return (context === 'password-reset' ? 'Por ahora no se puede solicitar otra recuperación de acceso.' : 'Hay demasiadas solicitudes. Intentá nuevamente más tarde.') + approximateWait(error);
+  }
   if (typeof error === 'object' && error !== null && 'kind' in error) {
     if (error.kind === 'invalid') return 'La respuesta del backend no es válida. Verificá la versión del servidor y reintentá.';
     if (error.kind === 'network') return 'No pudimos conectar con el backend. Revisá que esté iniciado y reintentá.';

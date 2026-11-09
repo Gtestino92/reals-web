@@ -1,10 +1,15 @@
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
-import { terminalCodes } from './errors';
+import { maxRetryAfterSeconds, terminalCodes } from './errors';
 import type { Identity } from './firebase';
 export class ApiError extends Error {
-  constructor(public readonly kind: 'network' | 'invalid' | 'authorization' | 'backend', public readonly status = 0, public readonly code = '', public readonly detail: { error?: string; message?: string; expiresAt?: string } = {}) {
+  constructor(public readonly kind: 'network' | 'invalid' | 'authorization' | 'backend', public readonly status = 0, public readonly code = '', public readonly detail: { error?: string; message?: string; expiresAt?: string } = {}, public readonly retryAfterSeconds?: number) {
     super(kind);
   }
+}
+function parseRetryAfter(value: string | null): number | undefined {
+  if (value === null || !/^[0-9]+$/.test(value.trim())) return undefined;
+  const seconds = Number(value.trim());
+  return Number.isSafeInteger(seconds) && seconds <= maxRetryAfterSeconds ? seconds : undefined;
 }
 export function object(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 export class ApiClient {
@@ -29,16 +34,17 @@ export class ApiClient {
       catch { signal.throwIfAborted(); throw new ApiError('network'); }
       signal.throwIfAborted();
       if (!response.ok) {
+        const retryAfter = parseRetryAfter(response.headers.get('Retry-After'));
         let raw: unknown;
-        try { raw = await response.json(); } catch { signal.throwIfAborted(); throw new ApiError('invalid', response.status); }
+        try { raw = await response.json(); } catch { signal.throwIfAborted(); throw new ApiError('invalid', response.status, '', {}, retryAfter); }
         signal.throwIfAborted();
-        if (!object(raw) || typeof raw.code !== 'string') throw new ApiError('invalid', response.status);
+        if (!object(raw) || typeof raw.code !== 'string') throw new ApiError('invalid', response.status, '', {}, retryAfter);
         if (response.status === 401 && raw.code === 'INVALID_TOKEN' && user && attempt === 0) continue;
         throw new ApiError(response.status === 401 || response.status === 403 ? 'authorization' : 'backend', response.status, raw.code, {
           ...(typeof raw.error === 'string' ? { error: raw.error } : {}),
           ...(typeof raw.message === 'string' ? { message: raw.message } : {}),
           ...(typeof raw.expiresAt === 'string' ? { expiresAt: raw.expiresAt } : {}),
-        });
+        }, retryAfter);
       }
       if (expectedStatus !== undefined && response.status !== expectedStatus) throw new ApiError('invalid', response.status);
       if ((method === 'DELETE' && path === '/me' && response.status === 200) || response.status === 202 || response.status === 204) return undefined;
