@@ -1,7 +1,7 @@
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { ApiClient, bootstrap } from './api';
 import type { BackendUser, Profile } from './api';
-import { errorCode, safeMessage, terminalCodes } from './errors';
+import { errorCode, isRateLimitResponse, safeMessage, terminalCodes } from './errors';
 import type { AuthService, Identity } from './firebase';
 import type { LoginErrorOwner } from './LoginScreen';
 
@@ -48,7 +48,7 @@ export class SessionController {
       if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
       return result;
     } catch (error) {
-      if (this.current(generation) && (terminalCodes.has(errorCode(error)) || errorCode(error).startsWith('ACCOUNT_'))) {
+      if (this.current(generation) && !isRateLimitResponse(error) && (terminalCodes.has(errorCode(error)) || errorCode(error).startsWith('ACCOUNT_'))) {
         this.retry();
       }
       throw error;
@@ -191,7 +191,7 @@ export class SessionController {
     void this.api.request('/auth/password-reset', this.controller.signal, undefined, 'POST', { email: clean }, 202).then(() => {
       if (this.current(generation)) this.install({ resetMessage: 'Si el email está registrado, te enviamos instrucciones para recuperar el acceso.', resetAt: Date.now() + 60000 });
     }).catch(error => {
-      if (this.current(generation)) this.install({ error: { message: safeMessage(error), owner: 'signIn' } });
+      if (this.current(generation)) this.install({ error: { message: safeMessage(error, 'password-reset'), owner: 'signIn' } });
     }).finally(() => { if (this.current(generation)) { this.locked = false; this.install({ operation: null }); } });
   };
   signOut = () => {
