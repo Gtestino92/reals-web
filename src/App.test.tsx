@@ -6,7 +6,7 @@ import { OperationalApp as App } from './App';
 import { ApiClient } from './auth/api';
 import type { AuthService, Identity } from './auth/firebase';
 import { configureFirebase, localVerificationEnabled } from './auth/firebase';
-import type { SessionController } from './auth/session';
+import { SessionController } from './auth/session';
 // Stage B tests isolate authentication; Stage C exercises the real surface separately.
 vi.mock('./onboarding/Onboarding', () => ({ Onboarding: ({ controller }: { controller: SessionController }) => <p>{controller.snapshot.profile ? `Perfil existente: ${controller.snapshot.profile.status}` : 'Sin perfil: falta completar el registro.'}</p> }));
 let observer: (user: Identity | null) => void;
@@ -15,6 +15,7 @@ let auth: AuthService;
 let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 const json = (body: unknown, status = 200) => new Response(status === 202 || status === 204 ? null : JSON.stringify(body), { status });
 const ready = () => fetcher.mockResolvedValueOnce(json({ id: 'u', status: 'ACTIVE' })).mockResolvedValueOnce(json({ code: 'PROFILE_NOT_FOUND' }, 404));
+const limited = (retry: string | null, code = 'ACCOUNT_PROVISIONING_LIMIT_EXCEEDED') => new Response(JSON.stringify({ code, error: 'Too Many Requests', message: 'private diagnostic, never display' }), { status: 429, headers: retry === null ? {} : { 'Retry-After': retry } });
 function mount(strict = false, local = false) {
   const app = <App firebase={{ service: auth, localVerification: local }} api={new ApiClient(fetcher)} />;
   render(strict ? <StrictMode>{app}</StrictMode> : app);
@@ -101,6 +102,68 @@ it('transient backend failure preserves Firebase and retry recovers existing pro
   mount(); act(() => observer(user)); await screen.findByRole('alert'); expect(auth.signOut).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); await screen.findByRole('heading', { name: 'Inicio' });
 });
+it.each([null, '120', 'malformed'])('restores Firebase under StrictMode and keeps provisioning quota recoverable (%s)', async retry => {
+  fetcher.mockResolvedValueOnce(json({ code: 'USER_NOT_FOUND' }, 404)).mockResolvedValueOnce(limited(retry));
+  vi.mocked(auth.observe).mockImplementation(next => { observer = next; next(user); return vi.fn(); });
+  mount(true); const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent('Los nuevos registros desde esta conexión están temporalmente limitados.');
+  if (retry === '120') expect(alert).toHaveTextContent('aproximadamente 2 minutos'); else expect(alert).not.toHaveTextContent('aproximadamente');
+  expect(alert).not.toHaveTextContent('private diagnostic'); expect(auth.signOut).not.toHaveBeenCalled();
+  expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull(); expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/me', '/api/me/provision']);
+  act(() => { observer(user); observer(user); }); expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('button', { name: 'Reintentar' })).toBeEnabled(); expect(screen.getByRole('button', { name: 'Cerrar sesión' })).toBeEnabled();
+  if (retry === null) { confirmSignOut(); await screen.findByRole('button', { name: 'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce(); }
+});
+it('retains a newly registered Firebase identity when backend provisioning is rate limited', async () => {
+  fetcher.mockResolvedValueOnce(json({ code: 'USER_NOT_FOUND' }, 404)).mockResolvedValueOnce(limited('3600'));
+  mount(); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  const alert = await screen.findByRole('alert'); expect(alert).toHaveTextContent('aproximadamente 1 hora');
+  expect(auth.signUp).toHaveBeenCalledOnce(); expect(auth.verify).toHaveBeenCalledWith(user); expect(auth.signOut).not.toHaveBeenCalled();
+  expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull(); expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('button', { name: 'Reintentar' })).toBeEnabled();
+});
+it('manually retries provisioning with the same identity and never polls the quota', async () => {
+  fetcher.mockResolvedValueOnce(json({ code: 'USER_NOT_FOUND' }, 404)).mockResolvedValueOnce(limited('60'));
+  mount(); act(() => observer(user)); await screen.findByRole('alert');
+  vi.useFakeTimers();
+  try { await act(async () => { await vi.advanceTimersByTimeAsync(86400000); }); expect(fetcher).toHaveBeenCalledTimes(2); expect(vi.getTimerCount()).toBe(0); }
+  finally { vi.useRealTimers(); }
+  fetcher.mockResolvedValueOnce(json({ code: 'USER_NOT_FOUND' }, 404)).mockResolvedValueOnce(json({ id: 'u', status: 'ACTIVE' }, 201)).mockResolvedValueOnce(json({ code: 'PROFILE_NOT_FOUND' }, 404));
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); await screen.findByText('Sin perfil: falta completar el registro.');
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/me', '/api/me/provision', '/api/me', '/api/me/provision', '/api/me/profile']);
+  expect(auth.signOut).not.toHaveBeenCalled(); expect(auth.signIn).not.toHaveBeenCalled(); expect(user.getIdToken).not.toHaveBeenCalledWith(true);
+});
+it('keeps the backend snapshot empty and recoverable on provisioning 429 despite the ACCOUNT_ prefix', async () => {
+  fetcher.mockResolvedValueOnce(json({ code: 'USER_NOT_FOUND' }, 404)).mockResolvedValueOnce(limited('604800'));
+  const controller = new SessionController(auth, new ApiClient(fetcher), false), dispose = controller.subscribe(() => {});
+  try {
+    act(() => observer(user)); await waitFor(() => expect(controller.getSnapshot().phase).toBe('recoverable'));
+    expect(controller.getSnapshot()).toMatchObject({ account: null, profile: null, operation: null, resetAt: null });
+    expect(controller.getSnapshot().error?.message).toContain('aproximadamente 7 días'); expect(auth.signOut).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  } finally { dispose(); }
+});
+it.each(['RATE_LIMIT_EXCEEDED', 'ACCOUNT_PROVISIONING_LIMIT_EXCEEDED'])('ready-session 429 %s never invalidates auth or retries bootstrap', async code => {
+  ready(); const controller = new SessionController(auth, new ApiClient(fetcher), false), dispose = controller.subscribe(() => {});
+  try {
+    act(() => observer(user)); await waitFor(() => expect(controller.getSnapshot().phase).toBe('ready'));
+    const before = controller.getSnapshot(), retry = vi.spyOn(controller, 'retry');
+    fetcher.mockResolvedValueOnce(limited('60', code));
+    await expect(controller.request('/me/provision', new AbortController().signal, 'POST')).rejects.toMatchObject({ status: 429, code, retryAfterSeconds: 60 });
+    expect(controller.getSnapshot()).toBe(before); expect(retry).not.toHaveBeenCalled(); expect(auth.signOut).not.toHaveBeenCalled(); expect(fetcher).toHaveBeenCalledTimes(3);
+  } finally { dispose(); }
+});
+it.each(['signout', 'replacement'])('rejects a late provisioning quota response after %s', async scenario => {
+  let resolve!: (value: Response) => void;
+  fetcher.mockResolvedValueOnce(json({ code: 'USER_NOT_FOUND' }, 404)).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  mount(); act(() => observer(user)); await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  const signal = fetcher.mock.calls[1]?.[1]?.signal;
+  if (scenario === 'signout') { confirmSignOut(); await screen.findByRole('button', { name: 'Ingresar' }); }
+  else { ready(); act(() => observer({ ...user, uid: 'replacement' })); await screen.findByText('Sin perfil: falta completar el registro.'); }
+  await act(async () => resolve(limited('120'))); expect(signal?.aborted).toBe(true); expect(screen.queryByText(/Los nuevos registros/)).toBeNull();
+  expect(auth.signOut).toHaveBeenCalledTimes(scenario === 'signout' ? 1 : 0);
+});
 it('Retry dispatches another backend request using receiver-sensitive default fetch', async () => {
   fetcher.mockRejectedValueOnce(new TypeError('Connection failed'));
   ready();
@@ -140,6 +203,19 @@ it('password reset validates, sends unauthenticated trimmed email and applies co
 it('failed reset does not claim delivery or start cooldown', async () => {
   fetcher.mockRejectedValueOnce(new Error()); mount(); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: 'Olvidé mi contraseña' }));
   await screen.findByRole('alert'); expect(screen.queryByText(/Si el email está registrado/)).not.toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Olvidé mi contraseña' })).toBeEnabled();
+});
+it.each([null, '90', 'malformed', '9999999999999999999999'])('password-reset 429 stays neutral without starting success cooldown (%s)', async retry => {
+  fetcher.mockResolvedValueOnce(limited(retry, 'RATE_LIMIT_EXCEEDED')); mount(); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: 'Olvidé mi contraseña' }));
+  const alert = await screen.findByRole('alert'); expect(alert).toHaveTextContent('Por ahora no se puede solicitar otra recuperación de acceso.');
+  if (retry === '90') expect(alert).toHaveTextContent('aproximadamente 2 minutos'); else expect(alert).not.toHaveTextContent('aproximadamente');
+  expect(alert).not.toHaveTextContent('private diagnostic'); expect(screen.queryByText(/Si el email está registrado/)).toBeNull(); expect(screen.queryByRole('button', { name: /Reenviar en/ })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Olvidé mi contraseña' })).toBeEnabled(); expect(fetcher).toHaveBeenCalledOnce(); expect(auth.signOut).not.toHaveBeenCalled(); expect(user.getIdToken).not.toHaveBeenCalled();
+});
+it('an explicit recovery request after a 429 still accepts generic 202 and the normal cooldown', async () => {
+  fetcher.mockResolvedValueOnce(limited('60', 'RATE_LIMIT_EXCEEDED')).mockResolvedValueOnce(json(null, 202));
+  mount(); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: 'Olvidé mi contraseña' })); await screen.findByRole('alert'); expect(fetcher).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button', { name: 'Olvidé mi contraseña' })); await screen.findByText('Si el email está registrado, te enviamos instrucciones para recuperar el acceso.');
+  expect(screen.getByRole('button', { name: /Reenviar en/ })).toBeDisabled(); expect(fetcher).toHaveBeenCalledTimes(2);
 });
 it('identity replacement aborts previous bootstrap and installs only the new session', async () => {
   let resolve: (value: Response) => void = () => {};
