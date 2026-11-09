@@ -33,6 +33,8 @@ it('shows four peer management cards and a standalone Account with one header re
   mount(); await ready();
   const account = screen.getByRole('button', { name: 'Cuenta' });
   expect(account.parentElement).toBe(screen.getByRole('button', { name: 'Tu perfil' }).parentElement);
+  expect(screen.getByRole('button', { name: 'Tu perfil' })).toHaveTextContent('Datos personales, bio, fotos y preguntas públicas.');
+  expect(screen.queryByRole('button', { name: 'Preguntas del perfil' })).toBeNull();
   expect(account).not.toHaveAttribute('aria-expanded'); expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
   fireEvent.click(account);
   expect(screen.getByRole('heading', { name: 'Cuenta', level: 2 })).toHaveFocus();

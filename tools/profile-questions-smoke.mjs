@@ -80,7 +80,7 @@ try {
   const results=[];
   for(const [width,height] of [[390,844],[1440,900]]) for(const status of ['ACTIVE','DRAFT']) {
     reset(status); await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<768}); await evaluate('renderQuestions()');
-    if(status==='ACTIVE') { await wait("!!document.querySelector('button[aria-label=\"Tu perfil\"]:not(:disabled)')",'Home');check(await evaluate("document.querySelectorAll('.home-management>button').length===4"),'four Home cards');await evaluate("document.querySelector('button[aria-label=\"Tu perfil\"]').click()"); }
+    if(status==='ACTIVE') { await wait("!!document.querySelector('button[aria-label=\"Tu perfil\"]:not(:disabled)')",'Home');check(await evaluate("document.querySelectorAll('.home-management>button').length===4"),'four Home cards');check(await evaluate("document.querySelector('button[aria-label=\"Tu perfil\"]').textContent.includes('preguntas públicas.')&&!Array.from(document.querySelectorAll('button')).some(n=>n.getClientRects().length&&n.textContent==='Preguntas del perfil')"),'profile questions text reference only');await screenshot(`home-profile-text-${width}`);await evaluate("document.querySelector('button[aria-label=\"Tu perfil\"]').click()"); }
     await wait("!!document.querySelector('.profile-form textarea:not(:disabled)')",'profile');
     await change('.profile-form textarea','Mi bio sin guardar ñ'); await evaluate("void(window.parentBio=document.querySelector('.profile-form textarea'))");
     await click('Responder o editar');await wait(visible('4 de 4 respondidas'),'overview');await screenshot(`overview-${status}-${width}`);

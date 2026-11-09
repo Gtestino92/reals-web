@@ -122,6 +122,9 @@ it.each(['ACTIVE', 'DRAFT'])('preserves unsaved profile details, bio and filters
   const filters = status === 'DRAFT' ? screen.getByRole('form', { name: 'Preferencias de búsqueda', hidden: true }) : null;
   if (filters) fireEvent.change(within(filters).getByLabelText('Intención'), { target: { value: 'FRIENDSHIP' } });
   await openProfileQuestions(); expect(screen.queryByRole('form', { name: 'Datos del perfil' })).toBeNull();
+  expect(history.state.trail).toEqual(status === 'ACTIVE' ? ['home', 'profile', 'profile-questions'] : ['home', 'profile-questions']);
+  expect(fetcher.mock.calls.filter(([path]) => path === '/api/reference/profile-questions')).toHaveLength(1);
+  expect(fetcher.mock.calls.filter(([path]) => path === '/api/me/profile/question-answers')).toHaveLength(1);
   fireEvent.click(screen.getByRole('button', { name: 'Responder o editar preguntas' })); fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' }));
   const editor = screen.getByLabelText('Tu respuesta'); fireEvent.change(editor, { target: { value: 'Borrador privado' } });
   expect(JSON.stringify(history.state)).not.toContain('Borrador privado');
@@ -212,7 +215,9 @@ it('loads saved preferences and saves only the filter contract, surviving a remo
   fireEvent.change(within(form).getByLabelText('Intención'),{ target:{ value:'FRIENDSHIP' } }); fireEvent.submit(form);
   await screen.findByText('Cambios guardados.');
   expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body))).toEqual({ intention:'FRIENDSHIP', lookingForGenders:profile?.lookingForGenders, preferredMinAge:27, preferredMaxAge:43, maxDistanceKm:62 });
-  fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' }));
+  const back = screen.getByRole('button',{ name:'Volver a Inicio' });
+  await waitFor(() => expect(back).toBeEnabled()); fireEvent.click(back);
+  await screen.findByRole('heading', { name: 'Inicio' });
   const entry = await screen.findByRole('button',{ name:'Preferencias' }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
   await screen.findByRole('form',{ name:'Preferencias de búsqueda' }); expect(screen.getByLabelText('Intención')).toHaveValue('FRIENDSHIP');
 });

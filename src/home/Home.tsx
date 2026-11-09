@@ -48,7 +48,7 @@ function ActivityCard({ item, onOpen }: { item: Activity; onOpen: (item: Activit
 }
 type ManagementSurface = 'profile' | 'preferences' | 'affinities' | 'account';
 const managementEntries = [
-  ['profile', 'Tu perfil', 'Datos personales, bio y fotos'],
+  ['profile', 'Tu perfil', 'Datos personales, bio, fotos y preguntas públicas.'],
   ['preferences', 'Preferencias', 'Tus filtros para encontrar personas'],
   ['affinities', 'Afinidades', 'Preguntas de compatibilidad'],
   ['account', 'Cuenta', 'Notificaciones, seguridad y sesi\u00f3n'],
