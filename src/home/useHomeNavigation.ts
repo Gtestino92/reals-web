@@ -1,24 +1,29 @@
 import { useLayoutEffect, useRef, useState } from 'react';
+import type { QuestionContext } from '../profile/affinities/presentation';
 import { object } from '../auth/api';
 
-const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications'] as const;
+const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection'] as const;
 export type HomeDestination = typeof destinations[number];
-interface Entry { owner: string; trail: HomeDestination[] }
+interface Entry { owner: string; trail: HomeDestination[]; question?: QuestionContext; profileQuestionId?: string }
 function destination(value: unknown): value is HomeDestination {
   return destinations.some(item => item === value);
 }
 function entry(value: unknown): Entry | null {
   if (!object(value) || typeof value.owner !== 'string' || !Array.isArray(value.trail) || !value.trail.length || value.trail[0] !== 'home' || !value.trail.every(destination)) return null;
-  return { owner: value.owner, trail: value.trail };
+  const q = value.question;
+  if (value.profileQuestionId !== undefined && typeof value.profileQuestionId !== 'string') return null;
+  if (q !== undefined && (!object(q) || typeof q.questionId !== 'string' || !['continue', 'category', 'review'].includes(String(q.source)) || typeof q.categoryId !== 'string' || typeof q.reviewAll !== 'boolean')) return null;
+  return { owner: value.owner, trail: value.trail, ...(typeof value.profileQuestionId === 'string' ? { profileQuestionId: value.profileQuestionId } : {}), ...(q === undefined ? {} : { question: { questionId: String(q.questionId), source: q.source === 'category' ? 'category' : q.source === 'review' ? 'review' : 'continue', categoryId: String(q.categoryId), reviewAll: q.reviewAll === true } }) };
 }
 
 // One authenticated Home owns its same-document entries, including nested Account.
-export function useHomeNavigation(canLeave: () => boolean) {
+export function useHomeNavigation(canLeave: () => boolean, enabled = true) {
   const [initial] = useState<Entry>(() => ({ owner: crypto.randomUUID(), trail: ['home'] }));
   const [state, setState] = useState(initial);
   const current = useRef(initial), guard = useRef(canLeave), moving = useRef(false);
   guard.current = canLeave;
   useLayoutEffect(() => {
+    if (!enabled) return;
     window.history.replaceState(current.current, '');
     const pop = (event: PopStateEvent) => {
       const previous = current.current, incoming = entry(event.state);
@@ -38,11 +43,11 @@ export function useHomeNavigation(canLeave: () => boolean) {
     };
     window.addEventListener('popstate', pop);
     return () => window.removeEventListener('popstate', pop);
-  }, []);
-  const open = (next: HomeDestination) => {
-    if (moving.current || !guard.current() || current.current.trail.at(-1) === next) return;
-    const value = { owner: initial.owner, trail: [...current.current.trail, next] };
-    window.history.pushState(value, ''); current.current = value; setState(value);
+  }, [enabled]);
+  const open = (next: HomeDestination, question?: QuestionContext, replace = false) => {
+    if (moving.current || !guard.current() || (current.current.trail.at(-1) === next && !replace)) return;
+    const value: Entry = { owner: initial.owner, trail: replace ? [...current.current.trail.slice(0, -1), next] : [...current.current.trail, next], ...(question ? { question } : {}) };
+    if (replace) window.history.replaceState(value, ''); else window.history.pushState(value, ''); current.current = value; setState(value);
   };
   const backTo = (target: HomeDestination) => {
     if (moving.current || !guard.current()) return;
@@ -55,5 +60,11 @@ export function useHomeNavigation(canLeave: () => boolean) {
       window.history.replaceState(next, ''); current.current = next; setState(next);
     }
   };
-  return { destination: state.trail.at(-1) ?? 'home', open, backTo };
+  const openProfileQuestion = (profileQuestionId: string) => {
+    if (moving.current || !guard.current() || current.current.trail.at(-1) === 'profile-question-editor') return;
+    const value: Entry = { owner: initial.owner, trail: [...current.current.trail, 'profile-question-editor'], profileQuestionId };
+    window.history.pushState(value, ''); current.current = value; setState(value);
+  };
+  return { destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
 }
+export type HomeNavigation = ReturnType<typeof useHomeNavigation>;

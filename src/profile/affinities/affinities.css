@@ -1,0 +1,11 @@
+﻿.affinities { display: grid; gap: 16px; min-width: 0; }
+.affinities > progress { width: 100%; accent-color: var(--color-secondary); }
+.affinity-actions { display: grid; gap: 12px; }
+.affinity-actions fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.affinity-actions legend { font-size: 1.25rem; margin-bottom: 16px; }
+.affinity-option { display: flex; align-items: center; gap: 12px; padding: 12px; min-height: 48px; border: 1px solid var(--color-outline-variant); border-radius: var(--radius-row); margin-bottom: 10px; cursor: pointer; overflow-wrap: anywhere; }
+.affinity-option:has(:checked) { border-color: var(--color-secondary); background: var(--color-surface-container-high); }
+.affinity-option:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.affinity-option input { accent-color: var(--color-primary); flex-shrink: 0; }
+.affinity-review-row { margin-bottom: 12px; }
+.affinity-home-card { background: var(--color-surface-container-high); }

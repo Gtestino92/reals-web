@@ -33,6 +33,8 @@ it('shows four peer management cards and a standalone Account with one header re
   mount(); await ready();
   const account = screen.getByRole('button', { name: 'Cuenta' });
   expect(account.parentElement).toBe(screen.getByRole('button', { name: 'Tu perfil' }).parentElement);
+  expect(screen.getByRole('button', { name: 'Tu perfil' })).toHaveTextContent('Datos personales, bio, fotos y preguntas públicas.');
+  expect(screen.queryByRole('button', { name: 'Preguntas del perfil' })).toBeNull();
   expect(account).not.toHaveAttribute('aria-expanded'); expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
   fireEvent.click(account);
   expect(screen.getByRole('heading', { name: 'Cuenta', level: 2 })).toHaveFocus();
@@ -71,6 +73,8 @@ beforeEach(() => {
   vi.stubGlobal('isSecureContext', true); vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { geolocation: { getCurrentPosition: geo } }));
   fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, o) => {
     switch (String(url)) {
+      case '/api/reference/affinity-questions': return json({ catalogVersion: 'empty', categories: [], questions: [] });
+      case '/api/me/profile/affinity-answers': return json({ answers: [] });
       case '/api/me': return json({ id: 'u', status: 'ACTIVE' });
       case '/api/me/profile': return json(profile);
       case '/api/me/home/status': return json(status);
@@ -182,7 +186,7 @@ it('pauses polling while hidden and refreshes on visible restoration', async () 
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(10000); }); expect(fetcher).not.toHaveBeenCalled();
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(0); });
-  expect(fetcher.mock.calls.map(c => c[0])).toEqual(['/api/me/home/status']);
+  expect(fetcher.mock.calls.map(c => c[0])).toEqual(['/api/me/home/status', '/api/reference/affinity-questions', '/api/me/profile/affinity-answers']);
 });
 it('sign-out during location acquisition prevents enqueue', async () => {
   let done: PositionCallback | undefined; geo.mockImplementation(ok => { done = ok; });
@@ -488,7 +492,7 @@ it.each(['home','search'])('keeps %s controls, DOM and focus unchanged during an
   fetcher.mockImplementation((url,options)=>url==='/api/me/home/status'?new Promise(r=>{done=r;}):base(url,options));
   fireEvent(document,new Event('visibilitychange'));await waitFor(()=>expect(done).toBeDefined());
   expect(root).toHaveAttribute('aria-busy','false');expect(button).toBeEnabled();expect(button).toHaveFocus();expect(button.closest('.home')).toBe(root);expect(screen.queryByText('Actualizando Inicio…')).toBeNull();
-  await act(async()=>done?.(json(status)));expect(button).toHaveFocus();expect(button).toBeEnabled();expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/api/me/home/status']);
+  await act(async()=>done?.(json(status)));expect(button).toHaveFocus();expect(button).toBeEnabled();expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/api/me/home/status', '/api/reference/affinity-questions', '/api/me/profile/affinity-answers']);
 });
 it('reconciles a changed foreground Home version and routes Search to the authoritative First Chat',async()=>{
   installFirstChatBackend();home.matchmaking.inQueue=true;mount();await ready();

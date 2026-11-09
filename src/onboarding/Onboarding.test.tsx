@@ -3,7 +3,9 @@ import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { OperationalApp as App } from '../App';
-import { ApiClient } from '../auth/api';
+import { ApiClient, object } from '../auth/api';
+import { questionCatalog, savedAnswer } from '../profile/questions/fixtures';
+import type { SavedAnswer } from '../profile/questions/contracts';
 import type { AuthService, Identity } from '../auth/firebase';
 import { defaults } from './contracts';
 import { emptyHome, homeStatus } from '../home/fixtures';
@@ -18,6 +20,7 @@ let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 const json = (body: unknown,status = 200) => new Response(JSON.stringify(body),{ status });
 const document = () => ({ type:'PRIVACY_NOTICE',version,requiredAction:'ACKNOWLEDGED',satisfied,url:'https://example.com/privacy' });
 beforeEach(() => {
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   profile = null; list = []; satisfied = true; version = 'v1';
   user = { uid:'f',emailVerified:true,getIdToken:vi.fn().mockResolvedValue('token'),reload:vi.fn().mockResolvedValue(undefined) };
   auth = { observe:vi.fn(next => { observer = next; next(user); return vi.fn(); }),signIn:vi.fn(),signUp:vi.fn(),google:vi.fn(),verify:vi.fn().mockResolvedValue(undefined),signOut:vi.fn().mockResolvedValue(undefined) };
@@ -80,6 +83,112 @@ async function openManagement(name: string) {
   const entry = await screen.findByRole('button', { name });
   await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
 }
+function installQuestions(initial: SavedAnswer[] = []) {
+  let answers = initial;
+  const catalog = questionCatalog(), base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (input, options) => {
+    const path = String(input), method = options?.method ?? 'GET';
+    if (path === '/api/reference/profile-questions') return json(catalog);
+    if (!path.startsWith('/api/me/profile/question-')) return base(input, options);
+    const body: unknown = options?.body ? JSON.parse(String(options.body)) : null;
+    if (method === 'PUT' && path.endsWith('/question-selections')) {
+      if (!object(body) || !Array.isArray(body.questionIds)) throw new Error('Invalid test selection');
+      const ids = body.questionIds; answers = answers.map(a => ({ ...a, selectedPosition: ids.includes(a.questionId) ? ids.indexOf(a.questionId) + 1 : null }));
+    } else if (method === 'PUT') {
+      if (!object(body) || typeof body.answer !== 'string') throw new Error('Invalid test answer');
+      const id = path.split('/').at(-1)!;
+      answers = [...answers.filter(a => a.questionId !== id), savedAnswer(id, { answer: body.answer, selectedPosition: answers.find(a => a.questionId === id)?.selectedPosition ?? null })];
+    } else if (method === 'DELETE') {
+      answers = answers.filter(a => !path.endsWith(`/${a.questionId}`));
+      const selected = answers.filter(a => a.selectedPosition !== null).sort((a,b) => (a.selectedPosition ?? 0) - (b.selectedPosition ?? 0));
+      answers = answers.map(a => ({ ...a, selectedPosition: selected.includes(a) ? selected.indexOf(a) + 1 : null }));
+    }
+    return json({ answers });
+  });
+  return { catalog };
+}
+async function openProfileQuestions() {
+  const entry = await screen.findByRole('button', { name: 'Responder o editar' });
+  await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  await screen.findByRole('button', { name: 'Responder o editar preguntas' });
+}
+it.each(['ACTIVE', 'DRAFT'])('preserves unsaved profile details, bio and filters through nested questions and history for %s', async status => {
+  installQuestions();
+  if (status === 'ACTIVE') await openManagement('Tu perfil');
+  else { profile = { ...initialProfile }; mount(); await screen.findByRole('heading', { name: 'Completá tu perfil' }); }
+  const form = await screen.findByRole('form', { name: 'Datos del perfil', hidden: status === 'DRAFT' });
+  const bio = within(form).getByLabelText('Bio opcional'), name = within(form).getByLabelText('Nombre visible');
+  fireEvent.change(bio, { target: { value: 'Mi bio sin guardar ñ' } }); fireEvent.change(name, { target: { value: 'Borrador' } });
+  const filters = status === 'DRAFT' ? screen.getByRole('form', { name: 'Preferencias de búsqueda', hidden: true }) : null;
+  if (filters) fireEvent.change(within(filters).getByLabelText('Intención'), { target: { value: 'FRIENDSHIP' } });
+  await openProfileQuestions(); expect(screen.queryByRole('form', { name: 'Datos del perfil' })).toBeNull();
+  expect(history.state.trail).toEqual(status === 'ACTIVE' ? ['home', 'profile', 'profile-questions'] : ['home', 'profile-questions']);
+  expect(fetcher.mock.calls.filter(([path]) => path === '/api/reference/profile-questions')).toHaveLength(1);
+  expect(fetcher.mock.calls.filter(([path]) => path === '/api/me/profile/question-answers')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Responder o editar preguntas' })); fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' }));
+  const editor = screen.getByLabelText('Tu respuesta'); fireEvent.change(editor, { target: { value: 'Borrador privado' } });
+  expect(JSON.stringify(history.state)).not.toContain('Borrador privado');
+  act(() => history.back()); await screen.findByRole('heading', { name: 'Responder preguntas' }); act(() => history.forward()); await screen.findByRole('heading', { name: 'Editar respuesta' }); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Borrador privado');
+  fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Responder preguntas' }); fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Responder o editar' })).toHaveFocus()); expect(bio).toHaveValue('Mi bio sin guardar ñ'); expect(name).toHaveValue('Borrador'); expect(form).toBeInTheDocument();
+  if (filters) expect(within(filters).getByLabelText('Intención')).toHaveValue('FRIENDSHIP');
+  expect(writes('PATCH')).toHaveLength(0); expect(writes('PUT')).toHaveLength(0);
+});
+it('edits and resaves outdated answers, orders public selection, clears it, deletes and keeps authoritative feedback', async () => {
+  installQuestions([savedAnswer('A', { current: false }), savedAnswer('B'), savedAnswer('C'), savedAnswer('D')]); await openManagement('Tu perfil'); await openProfileQuestions();
+  expect(screen.getByText('4 de 4 respondidas')).toBeVisible(); fireEvent.click(screen.getByRole('button', { name: 'Responder o editar preguntas' })); expect(screen.getByText('Versión anterior')).toBeVisible(); fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' }));
+  expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Respuesta A'); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await screen.findByText('Respuesta guardada'); expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: '<texto>\nsegunda línea' } }); expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled(); expect(screen.getByText('La respuesta debe escribirse en una sola línea.')).toBeVisible();
+  fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: '  Respuesta actualizada  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await waitFor(() => expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Respuesta actualizada'));
+  fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Responder preguntas' }); fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); fireEvent.click(screen.getByRole('button', { name: 'Elegir preguntas públicas' }));
+  expect(screen.getByRole('button', { name: 'Guardar selección' })).toBeDisabled();
+  for (const id of ['A','B','C']) fireEvent.click(within(screen.getByRole('article', { name: `Pregunta ${id}` })).getByRole('button', { name: 'Agregar' }));
+  fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta C' })).getByRole('button', { name: 'Quitar' }));
+  fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta C' })).getByRole('button', { name: 'Agregar' }));
+  expect(within(screen.getByRole('article', { name: 'Pregunta D' })).getByRole('button', { name: 'Agregar' })).toBeDisabled();
+  fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta C' })).getByRole('button', { name: 'Subir' })); fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta A' })).getByRole('button', { name: 'Bajar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar selección' })); await screen.findByText('Selección guardada'); expect(screen.getByText('3 de 3 elegidas para mostrar')).toBeVisible();
+  const selectionCall = writes('PUT').find(([path]) => String(path).endsWith('/question-selections')); expect(JSON.parse(String(selectionCall?.[1]?.body))).toEqual({ questionIds: ['C','A','B'] });
+  fireEvent.click(screen.getByRole('button', { name: 'Elegir preguntas públicas' })); fireEvent.click(screen.getByRole('button', { name: 'Limpiar selección' })); fireEvent.click(screen.getByRole('button', { name: 'Guardar selección' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); expect(screen.getByText('0 de 3 elegidas para mostrar')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Responder o editar preguntas' })); fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' })); fireEvent.click(screen.getByRole('button', { name: 'Eliminar' })); await screen.findByText('Respuesta eliminada'); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('');
+});
+it('retains answer and selection drafts after uncertain writes and does not redirect late completion', async () => {
+  installQuestions([savedAnswer(), savedAnswer('B')]); await openManagement('Tu perfil'); await openProfileQuestions();
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => options?.method === 'PUT' && String(path).includes('/question-') ? Promise.reject(new TypeError('offline')) : base(path, options));
+  fireEvent.click(screen.getByRole('button', { name: 'Responder o editar preguntas' })); fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' })); fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: 'Mi cambio' } }); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await screen.findByRole('alert'); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Mi cambio'); expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar consulta' })); await waitFor(() => expect(screen.getByRole('button', { name: 'Guardar' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Responder preguntas' }); fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); fireEvent.click(screen.getByRole('button', { name: 'Elegir preguntas públicas' }));
+  fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta B' })).getByRole('button', { name: 'Agregar' })); fireEvent.click(screen.getByRole('button', { name: 'Guardar selección' })); await screen.findByRole('alert'); expect(screen.getByText('Posición 1')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar consulta' })); await waitFor(() => expect(screen.getByRole('button', { name: 'Guardar selección' })).toBeEnabled());
+  let finish!: (r: Response) => void; fetcher.mockImplementation((path, options) => String(path).endsWith('/question-selections') && options?.method === 'PUT' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar selección' })); await waitFor(() => expect(finish).toBeDefined()); fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' });
+  await act(async () => finish(json({ answers: [savedAnswer('B', { selectedPosition: 1 })] }))); expect(screen.getByRole('heading', { name: 'Preguntas del perfil' })).toBeVisible(); expect(screen.queryByText('Selección guardada')).toBeNull();
+});
+it('returns to the list when the active question disappears and retains text on a semantic refresh', async () => {
+  const { catalog } = installQuestions([savedAnswer()]); await openManagement('Tu perfil'); await openProfileQuestions(); fireEvent.click(screen.getByRole('button', { name: 'Responder o editar preguntas' })); fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' }));
+  fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: 'Mi borrador' } }); catalog.questions[0]!.semanticVersion = 2; fireEvent.click(screen.getByRole('button', { name: 'Actualizar preguntas' })); await screen.findByText('Versión anterior. Guardá la respuesta para actualizarla.'); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Mi borrador');
+  catalog.questions = catalog.questions.filter(q => q.id !== 'A'); fireEvent.click(screen.getByRole('button', { name: 'Actualizar preguntas' })); await screen.findByRole('heading', { name: 'Responder preguntas' }); expect(screen.queryByRole('button', { name: 'Abrir: Pregunta A' })).toBeNull();
+});
+it('does not enter questions during profile writes or a photo crop', async () => {
+  installQuestions(); await openManagement('Tu perfil'); await screen.findByRole('form', { name: 'Datos del perfil' });
+  fireEvent.change(screen.getByLabelText('Agregar foto 1'), { target: { files: [new File(['image'], 'photo.jpg', { type: 'image/jpeg' })] } });
+  await screen.findByRole('dialog'); expect(screen.getByRole('button', { name: 'Responder o editar' })).toBeDisabled(); fireEvent.click(screen.getByRole('button', { name: 'Responder o editar' })); expect(history.state.trail.at(-1)).toBe('profile'); fireEvent.click(screen.getByText('Cancelar recorte'));
+  const base = fetcher.getMockImplementation()!; let finish!: (r: Response) => void;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' && options?.method === 'PATCH' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
+  fireEvent.submit(screen.getByRole('form', { name: 'Datos del perfil' })); await waitFor(() => expect(finish).toBeDefined()); expect(screen.getByRole('button', { name: 'Responder o editar' })).toBeDisabled(); fireEvent.click(screen.getByRole('button', { name: 'Responder o editar' })); expect(history.state.trail.at(-1)).toBe('profile');
+  await act(async () => finish(json(profile))); await screen.findByText('Cambios guardados.');
+});
+it('shares one history owner with the existing DRAFT interaction Home', async () => {
+  installQuestions(); profile = { ...initialProfile }; const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (path, options) => {
+    if (path === '/api/me/home') return json({ ...emptyHome(), profileStatus: 'DRAFT', activeInteractionsSummary: { activeInitialCount: 1, activeConnectionCount: 0, actionableConnectionCount: 0, hasPendingSchedulingConnection: false } });
+    return base(path, options);
+  });
+  mount(); await screen.findByRole('heading', { name: 'Inicio: interacciones vigentes' }); await waitFor(() => expect(screen.getByRole('button', { name: 'Responder o editar' })).toBeEnabled());
+  const owner = history.state.owner; await openProfileQuestions(); expect(history.state.owner).toBe(owner); expect(fetcher.mock.calls.filter(([path]) => path === '/api/reference/profile-questions')).toHaveLength(1);
+  act(() => history.back()); await screen.findByRole('heading', { name: 'Completá tu perfil' }); act(() => history.forward()); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); expect(history.state.owner).toBe(owner);
+});
 it('offers compact management entries and ACTIVE profile editing with photos and a focused return', async () => {
   profile = { ...initialProfile, status:'ACTIVE' }; mount();
   for (const name of ['Tu perfil','Preferencias','Afinidades','Cuenta']) expect(await screen.findByRole('button',{ name })).toBeVisible();
@@ -106,7 +215,9 @@ it('loads saved preferences and saves only the filter contract, surviving a remo
   fireEvent.change(within(form).getByLabelText('Intención'),{ target:{ value:'FRIENDSHIP' } }); fireEvent.submit(form);
   await screen.findByText('Cambios guardados.');
   expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body))).toEqual({ intention:'FRIENDSHIP', lookingForGenders:profile?.lookingForGenders, preferredMinAge:27, preferredMaxAge:43, maxDistanceKm:62 });
-  fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' }));
+  const back = screen.getByRole('button',{ name:'Volver a Inicio' });
+  await waitFor(() => expect(back).toBeEnabled()); fireEvent.click(back);
+  await screen.findByRole('heading', { name: 'Inicio' });
   const entry = await screen.findByRole('button',{ name:'Preferencias' }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
   await screen.findByRole('form',{ name:'Preferencias de búsqueda' }); expect(screen.getByLabelText('Intención')).toHaveValue('FRIENDSHIP');
 });
@@ -166,8 +277,8 @@ it('returns to waiting if the editor admission read finds an active queue', asyn
   await openManagement('Tu perfil'); await screen.findByRole('heading',{ name:'Buscando chat' });
   expect(screen.queryByRole('form')).toBeNull(); expect(writes('DELETE')).toHaveLength(0);
 });
-it('shows honest unavailable surfaces and signs out once from Account', async () => {
-  await openManagement('Afinidades'); expect(screen.getByRole('heading',{ name:'Próximamente' })).toBeVisible();
+it('opens affinity recovery and signs out once from Account', async () => {
+  await openManagement('Afinidades'); expect(screen.getByRole('heading',{ name:'Preguntas de afinidad' })).toBeVisible();
   expect(screen.queryByRole('progressbar')).toBeNull(); expect(screen.queryByRole('link')).toBeNull();
   fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' })); const entry = await screen.findByRole('button',{ name:'Cuenta' });
   await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);

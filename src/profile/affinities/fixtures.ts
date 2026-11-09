@@ -1,0 +1,3 @@
+import { parseCatalog } from './contracts';
+export const fixture = () => parseCatalog({ catalogVersion: 'v1', categories: [{ id: 'music', title: 'Música', displayOrder: 2 }, { id: 'plans', title: 'Planes', displayOrder: 1 }], questions: ['a', 'b', 'c'].map((id, i) => ({ id, categoryId: i === 2 ? 'plans' : 'music', prompt: `Pregunta ${id}`, semanticVersion: 1, contentVersion: 1, answerType: i === 2 ? 'ORDINAL_SCALE' : 'SINGLE_CHOICE', options: [{ code: 'B', label: 'Bastante', displayOrder: 2 }, { code: 'A', label: 'Nada', displayOrder: 1 }] })) });
+export const answer = (questionId = 'a', answerCode = 'A', questionSemanticVersion = 1) => ({ questionId, answerCode, questionSemanticVersion });
