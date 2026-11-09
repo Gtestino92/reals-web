@@ -47,7 +47,15 @@ try {
     await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await wait("!document.querySelector('dialog')",'Escape closes');
     await button('Aprobar fotografía');await button('Confirmar decisión');await wait("document.body.textContent.includes('No hay elementos.')",'authoritative queue refresh');
     check(await evaluate('writes.length===1&&writes[0].expectedPhotoVersion===42'),'exact version once');
-    await button('Reportes');await button('Prioritario · report');await wait("document.body.textContent.includes('<script>untrusted</script>')",'safe text evidence');
+    await button('Apelaciones');await button('penalty');await button('Ver reporte de origen');
+    await wait("document.body.textContent.includes('<script>untrusted</script>')",'authoritative source detail');
+    check(await evaluate("!document.querySelector('[aria-label=Lista]')&&!document.querySelector('select')&&!Array.from(document.querySelectorAll('button')).some(n=>n.textContent==='penalty'||n.textContent==='Siguiente')"),'context excludes appeal rows, filters and pagination');
+    check(await evaluate("calls.filter(x=>x.includes('/safety-reports')).join(',')==='/api/admin/safety-reports/report'"),'source context fetches detail only');
+    await button('Actualizar');await wait("!!document.querySelector('[aria-label=Detalle]')",'source refresh');
+    check(await evaluate("calls.filter(x=>x.includes('/safety-reports')).every(x=>x==='/api/admin/safety-reports/report')"),'refresh keeps source context');
+    await button('Volver a Apelaciones');await button('penalty');
+    check(await evaluate("!document.body.textContent.includes('<script>untrusted</script>')"),'return clears source evidence');
+    await button('Ver reporte de origen');await wait("document.body.textContent.includes('<script>untrusted</script>')",'reopen source');
     check(await evaluate("!document.querySelector('script[src=untrusted]')"),'no raw report HTML');
     await writeFile(`artifacts/admin/admin-${width}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
     check(await evaluate('document.documentElement.scrollWidth<=innerWidth'),'responsive width');

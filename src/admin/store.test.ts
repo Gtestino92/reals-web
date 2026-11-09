@@ -6,6 +6,75 @@ import { diag, photo, summary, appeal } from './fixtures';
 const tick = async () => { for(let i=0;i<10;i++) await Promise.resolve(); };
 function setup() { const request = vi.fn(async (_path: string, _signal: AbortSignal, _method?: string, _body?: unknown): Promise<unknown> => []); const store = new AdminStore({ request }); return { request,store }; }
 async function ready() { const r = setup(); r.request.mockResolvedValueOnce(diag).mockResolvedValueOnce([photo]); r.store.start(); await tick(); return r; }
+const sourceDetail = { report: summary, details: 'Source report', messages: [] };
+async function selectedAppeal() {
+  const r = await ready();
+  r.request.mockResolvedValueOnce([appeal]); r.store.navigate('appeals'); await tick();
+  await r.store.select(appeal); r.request.mockClear();
+  return r;
+}
+it('source report atomically clears appeal rows, fetches only detail and refreshes the same context', async () => {
+  const {store,request} = await selectedAppeal();
+  let finish: (value: unknown) => void = () => {};
+  request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  store.sourceReport('report');
+  expect(store.getSnapshot()).toMatchObject({section:'reports',sourceReportId:'report',rows:[],selected:null,busy:true});
+  expect(request).toHaveBeenCalledExactlyOnceWith('/admin/safety-reports/report',expect.any(AbortSignal));
+  finish(sourceDetail); await tick();
+  expect(store.getSnapshot().selected).toEqual(sourceDetail);
+  request.mockResolvedValueOnce(sourceDetail); await store.load();
+  expect(request.mock.calls.map(c => c[0])).toEqual(['/admin/safety-reports/report','/admin/safety-reports/report']);
+});
+it('return to appeals aborts source detail and ignores its late response', async () => {
+  const {store,request} = await selectedAppeal();
+  let finish: (value: unknown) => void = () => {};
+  request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce([appeal]);
+  store.sourceReport('report'); const signal=request.mock.calls[0]![1];
+  store.navigate('appeals'); await tick(); finish(sourceDetail); await tick();
+  expect(signal.aborted).toBe(true);
+  expect(store.getSnapshot()).toMatchObject({section:'appeals',sourceReportId:null,rows:[appeal],selected:null,busy:false});
+  expect(request.mock.calls.map(c => c[0])).toEqual(['/admin/safety-reports/report','/admin/penalty-appeals/pending']);
+});
+it.each([401,403])('source detail denial %s clears context and prevents further reads', async status => {
+  const {store,request} = await selectedAppeal();
+  request.mockRejectedValueOnce(new ApiError('authorization',status)); store.sourceReport('report'); await tick();
+  expect(store.getSnapshot()).toMatchObject({access:'denied',sourceReportId:null,rows:[],selected:null});
+  store.sourceReport('report'); store.navigate('appeals'); await store.load(); expect(request).toHaveBeenCalledTimes(1);
+});
+it.each([new ApiError('network'),new ApiError('backend',404),{...sourceDetail,report:{...summary,id:'other'}}])('source detail failure retains retry context without actionable stale data', async outcome => {
+  const {store,request} = await selectedAppeal();
+  if (outcome instanceof ApiError) request.mockRejectedValueOnce(outcome); else request.mockResolvedValueOnce(outcome);
+  store.sourceReport('report'); await tick();
+  expect(store.getSnapshot()).toMatchObject({section:'reports',sourceReportId:'report',rows:[],selected:null,busy:false});
+  expect(store.getSnapshot().error).not.toBe('');
+  request.mockResolvedValueOnce(sourceDetail); await store.load();
+  expect(store.getSnapshot().selected).toEqual(sourceDetail);
+});
+it('source navigation requires authorized, idle selected appeal and its exact link', async () => {
+  const {store,request} = await selectedAppeal();
+  store.sourceReport('other'); expect(request).not.toHaveBeenCalled();
+  request.mockImplementationOnce(() => new Promise(() => {}));
+  void store.decide('REJECT',payload('REJECT','review','','',appeal));
+  store.sourceReport('report'); store.navigate('reports'); expect(request).toHaveBeenCalledTimes(1);
+  expect(store.getSnapshot().section).toBe('appeals'); store.dispose();
+  store.sourceReport('report'); expect(store.getSnapshot()).toMatchObject({sourceReportId:null,rows:[],selected:null});
+});
+it.each(['confirmed','uncertain'] as const)('contextual %s decision reconciles by detail only and blocks on failed refresh', async outcome => {
+  const {store,request} = await selectedAppeal();
+  request.mockResolvedValueOnce(sourceDetail); store.sourceReport('report'); await tick();
+  request.mockClear();
+  if (outcome === 'confirmed') request.mockResolvedValueOnce({...summary,status:'DISMISSED'});
+  else request.mockRejectedValueOnce(new ApiError('network'));
+  request.mockRejectedValueOnce(new ApiError('network'));
+  await store.decide('dismissal',{notes:null});
+  expect(request.mock.calls.map(c=>c[0])).toEqual(['/admin/safety-reports/report/dismissal','/admin/safety-reports/report']);
+  expect(store.getSnapshot()).toMatchObject({sourceReportId:'report',rows:[],selected:null,blocked:true});
+  if (outcome === 'confirmed') expect(store.getSnapshot().notice).toContain('Decisión confirmada');
+  await store.decide('dismissal',{notes:null}); expect(request).toHaveBeenCalledTimes(2);
+  request.mockResolvedValueOnce({...sourceDetail,report:{...summary,status:'DISMISSED'}}); await store.load();
+  expect(store.getSnapshot().blocked).toBe(false);
+  await store.decide('dismissal',{notes:null}); expect(request).toHaveBeenCalledTimes(3);
+});
 it('only authorization GET runs before effective authorization', async () => { const {request,store} = setup(); request.mockImplementation(() => new Promise(() => {})); store.start(); expect(request).toHaveBeenCalledTimes(1); expect(store.getSnapshot().rows).toEqual([]); store.navigate('reports'); expect(request).toHaveBeenCalledTimes(1); store.dispose(); });
 it.each([401,403])('denial %s clears data and stops queries',async status => { const {request,store} = setup(); request.mockRejectedValue(new ApiError('authorization',status)); store.start(); await tick(); expect(store.getSnapshot().access).toBe('denied'); store.navigate('reports'); await store.load(); expect(request).toHaveBeenCalledTimes(1); });
 it('malformed diagnostics cannot grant access',async () => { const {request,store} = setup(); request.mockResolvedValue({}); store.start(); await tick(); expect(store.getSnapshot().access).toBe('error'); expect(request).toHaveBeenCalledTimes(1); });
