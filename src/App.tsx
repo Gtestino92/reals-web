@@ -4,7 +4,7 @@ import { SignOutButton } from './auth/SignOutButton';
 import { tabOwnershipEnabled } from './tabs/policy';
 import { TabGate } from './tabs/TabGate';
 import type { TabOwnershipManager } from './tabs/TabOwnershipManager';
-import { useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { LoginScreen } from './auth/LoginScreen';
 import { configureFirebase } from './auth/firebase';
 import type { FirebaseSetup } from './auth/firebase';
@@ -14,6 +14,8 @@ import { Onboarding } from './onboarding/Onboarding';
 import { SessionLoading } from './SessionLoading';
 import seal from './assets/reals-seal.png';
 import { Home } from './home/Home';
+
+const Admin = lazy(() => import('./admin/Admin'));
 
 type AppProps = { firebase?: FirebaseSetup; api?: ApiClient; ownership?: TabOwnershipManager };
 export function App(props: AppProps) {
@@ -33,6 +35,12 @@ export function OperationalApp({ firebase, api, ownership }: AppProps) {
 }
 function SessionApp({ controller }: { controller: SessionController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const [adminRoute, setAdminRoute] = useState(() => window.location.pathname === '/admin');
+  useLayoutEffect(() => {
+    const pop = () => setAdminRoute(window.location.pathname === '/admin');
+    window.addEventListener('popstate', pop);
+    return () => window.removeEventListener('popstate', pop);
+  }, []);
   const [chatActive, setChatActive] = useState(false);
   const [managementActive, setManagementActive] = useState(false);
   const [setupAccountAvailable, setSetupAccountAvailable] = useState(false);
@@ -49,6 +57,7 @@ function SessionApp({ controller }: { controller: SessionController }) {
     onSignIn={(email, password, keepSignedIn) => controller.authenticate('signIn', email, password, keepSignedIn)}
     onSignUp={(email, password, keepSignedIn) => controller.authenticate('signUp', email, password, keepSignedIn)}
     onGoogleSignIn={() => controller.authenticate('google')} onPasswordReset={controller.reset} />;
+  if (adminRoute && state.phase === 'ready') return <Suspense fallback={<SessionLoading />}><Admin key={state.account?.id} controller={controller} /></Suspense>;
   return <main className={chatShell ? "chat-page" : "login-page"}><section className={chatShell ? "chat-shell" : "login-panel"} aria-label={chatShell ? "Conversación activa" : undefined} aria-labelledby={chatShell ? undefined : "session-heading"}>
     {!chatShell && <header className="login-header"><div className="login-brand">
       <img className="login-seal" src={seal} alt="" width="54" height="54" />
