@@ -44,7 +44,7 @@ function Filters({ apply }: { apply: (query: string) => void }) {
   const [status,setStatus] = useState('PENDING'), [source,setSource] = useState(''), [reported,setReported] = useState(''), [reporter,setReporter] = useState('');
   return <form onSubmit={e => { e.preventDefault(); const params = new URLSearchParams({ status }); if (source) params.set('source',source); if (reported) params.set('reportedUserId',reported); if (reporter) params.set('reporterUserId',reporter); apply(params.toString()); }}><label>Estado<select value={status} onChange={e => setStatus(e.target.value)}>{statuses.map(s => <option key={s}>{s}</option>)}</select></label><label>Origen<select value={source} onChange={e => setSource(e.target.value)}><option value="">Todos</option>{sources.map(s => <option key={s}>{s}</option>)}</select></label><label>ID de usuario reportado<input value={reported} onChange={e => setReported(e.target.value)} /></label><label>ID de denunciante<input value={reporter} onChange={e => setReporter(e.target.value)} /></label><button>Filtrar reportes</button></form>;
 }
-export default function Admin({ controller }: { controller: SessionController }) {
+export default function Admin({ controller, onReturn, onNavigationBlockedChange }: { controller: SessionController; onReturn?: () => void; onNavigationBlockedChange?: ((blocked: boolean) => void) | undefined }) {
   const [store] = useState(() => new AdminStore(controller));
   const s = useSyncExternalStore(store.subscribe,store.getSnapshot);
   const [page,setPage] = useState(0);
@@ -56,7 +56,9 @@ export default function Admin({ controller }: { controller: SessionController })
     return () => { store.dispose(); meta.remove(); window.removeEventListener('pagehide',hide); window.removeEventListener('pageshow',show); };
   },[store]);
   useLayoutEffect(() => { setPage(0); },[s.rows]);
-  return <main className="admin"><header><h1>Reals Admin</h1><a href="/" onClick={event => { if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return; event.preventDefault(); void controller.leaveAdmin(); window.history.replaceState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); }}>Volver a Reals</a><SignOutButton onConfirm={controller.signOut} /></header>
+  useLayoutEffect(() => { onNavigationBlockedChange?.(s.busy && s.blocked); return () => onNavigationBlockedChange?.(false); }, [s.busy, s.blocked, onNavigationBlockedChange]);
+  const revoke = () => { void controller.revokeAdminAccess(); };
+  return <main className="admin"><header><h1>Reals Admin</h1><button disabled={s.busy && s.blocked} onClick={onReturn}>Volver a Reals</button><button disabled={s.busy} onClick={revoke}>Cerrar acceso administrativo</button><SignOutButton onConfirm={controller.signOut} /></header>
     {s.access === 'denied' ? <p role="status">Acceso no disponible para esta sesión.</p> : s.access === 'checking' ? <p role="status">Verificando acceso…</p> : s.access === 'error' ? <><p role="alert">No se pudo verificar el acceso.</p><button onClick={store.authorize}>Reintentar verificación</button></> : <>
       <nav aria-label="Secciones de administración">{sections.map(key => <button key={key} aria-current={s.section === key ? 'page' : undefined} disabled={s.busy} onClick={() => store.navigate(key)}>{labels[key]}</button>)}</nav>
       <h2>{labels[s.section]}</h2><button disabled={s.busy} onClick={() => void store.load()}>Actualizar</button>

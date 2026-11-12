@@ -10,6 +10,7 @@ import type { LoginErrorOwner } from './LoginScreen';
 
 type Phase = 'checking' | 'login' | 'authenticating' | 'loading' | 'ready' | 'restricted' | 'recoverable' | 'signingOut' | 'deletionRecovery' | 'temporarySuspension' | 'permanentAppeal';
 export interface SessionSnapshot {
+  authContextVersion?: number;
   adminWarning?: string | null;
   phase: Phase;
   suspensionExpiry?: string | null;
@@ -27,8 +28,38 @@ export interface SessionSnapshot {
   resetAt: number | null;
   verificationMessage: string | null;
 }
-const initial: SessionSnapshot = { adminWarning: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, phase: 'checking', account: null, profile: null, error: null, operation: null, resetMessage: null, resetAt: null, verificationMessage: null };
+const initial: SessionSnapshot = { authContextVersion: 0, adminWarning: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, phase: 'checking', account: null, profile: null, error: null, operation: null, resetMessage: null, resetAt: null, verificationMessage: null };
 export class SessionController {
+  private adminView = false;
+  private adminViewEpoch = 0;
+  setAdminView = (active: boolean) => {
+    if (this.adminView === active) return;
+    this.adminView = active; this.adminViewEpoch++;
+    if (!active) this.admin.suspendView();
+  };
+  checkAdminEligibility = async (signal: AbortSignal) => {
+    const generation = this.generation, user = this.user;
+    if (!user || !this.auth.googleContext || this.snapshot.phase !== 'ready' || this.snapshot.account?.status !== 'ACTIVE') return false;
+    const context = await this.auth.googleContext(user).catch(error => {
+      if (this.current(generation) && terminalCodes.has(errorCode(error))) this.admin.fail(error);
+      throw error;
+    });
+    signal.throwIfAborted();
+    if (!this.current(generation)) return false;
+    if (context.provider !== 'google.com') { this.admin.clear(); return false; }
+    const raw = await this.request('/admin-auth/status', signal);
+    signal.throwIfAborted();
+    if (!this.current(generation)) return false;
+    if (!object(raw) || typeof raw.configured !== 'boolean' || typeof raw.grantValid !== 'boolean') throw new ApiError('invalid');
+    if ((!raw.configured || !raw.grantValid) && this.admin.token()) this.admin.fail(new ApiError('authorization', 403, raw.configured ? 'ADMIN_MFA_REQUIRED' : 'ADMIN_MFA_NOT_CONFIGURED'));
+    return raw.configured;
+  };
+  private pageHide = () => { void this.leaveAdmin(); };
+  revokeAdminAccess = async () => {
+    const generation = this.generation;
+    await this.leaveAdmin();
+    if (this.current(generation) && this.adminView) await this.admin.check();
+  };
   readonly admin = new AdminAccess(
     (path, signal, method, body) => this.request(path, signal, method, body),
     () => { if (!this.user || !this.auth.googleContext) return Promise.reject(new Error('Google no está disponible. Cerrá sesión e ingresá con Google.')); return this.auth.googleContext(this.user); },
@@ -71,10 +102,11 @@ export class SessionController {
     if (!user || this.snapshot.phase !== 'ready') throw new DOMException('Sesión obsoleta', 'AbortError');
     const administrative = path.startsWith('/admin/') || path.startsWith('/admin-auth/');
     const grant = administrative ? this.admin.token() : undefined;
-    if (path.startsWith('/admin/') && (!grant || this.admin.getSnapshot().phase !== 'allowed')) throw new ApiError('authorization', 403, 'ADMIN_MFA_REQUIRED');
+    const viewEpoch = this.adminViewEpoch;
+    if (path.startsWith('/admin/') && (!this.adminView || !grant || this.admin.getSnapshot().phase !== 'allowed')) throw new ApiError('authorization', 403, 'ADMIN_MFA_REQUIRED');
     try {
       const result = await this.api.request(path, AbortSignal.any([signal, this.controller.signal]), user, method, body, administrative ? (path === '/admin-auth/revoke' ? 204 : 200) : undefined, !administrative, grant);
-      if (path.startsWith('/admin/') && (this.admin.token() !== grant || this.admin.getSnapshot().phase !== 'allowed')) throw new DOMException('Sesión obsoleta', 'AbortError');
+      if (path.startsWith('/admin/') && (!this.adminView || viewEpoch !== this.adminViewEpoch || this.admin.token() !== grant || this.admin.getSnapshot().phase !== 'allowed')) throw new DOMException('Sesión obsoleta', 'AbortError');
       if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
       return result;
     } catch (error) {
@@ -154,12 +186,20 @@ export class SessionController {
     const lease = this.ownership?.signal;
     lease?.addEventListener('abort', this.suspend, { once: true });
     if (this.listeners.size === 1) {
+      window.addEventListener('pagehide', this.pageHide);
       const epoch = ++this.observerEpoch;
       this.unsubscribe = this.auth.observe(user => {
         if (epoch !== this.observerEpoch || !this.listeners.size) return;
         if (!this.available() || this.snapshot.phase === 'signingOut') return;
         if (this.snapshot.phase === 'authenticating' && user) { this.user = user; return; }
-        if (this.user?.uid === user?.uid && ['loading', 'ready', 'restricted', 'recoverable', 'deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(this.snapshot.phase)) return;
+        if (this.user?.uid === user?.uid && ['loading', 'ready', 'restricted', 'recoverable', 'deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(this.snapshot.phase)) {
+          if (user && this.snapshot.phase === 'ready') {
+            this.user = user;
+            this.install({ authContextVersion: (this.snapshot.authContextVersion ?? 0) + 1 });
+            if (this.adminView) void this.admin.check();
+          }
+          return;
+        }
         this.replace(user);
       }, error => {
         if (epoch !== this.observerEpoch || !this.listeners.size) return;
@@ -171,13 +211,14 @@ export class SessionController {
       lease?.removeEventListener('abort', this.suspend);
       this.listeners.delete(listener);
       if (!this.listeners.size) {
+        window.removeEventListener('pagehide', this.pageHide);
         this.observerEpoch++;
         this.unsubscribe?.(); this.unsubscribe = undefined;
         this.invalidate(); this.locked = false; this.user = null;
       }
     };
   };
-  private invalidate() { this.admin.clear(); this.controller.abort(); this.controller = new AbortController(); return ++this.generation; }
+  private invalidate() { this.adminView = false; this.adminViewEpoch++; this.admin.clear(); this.controller.abort(); this.controller = new AbortController(); return ++this.generation; }
   private current(generation: number) { return this.available() && this.listeners.size > 0 && generation === this.generation; }
   private replace(user: Identity | null) {
     this.invalidate(); this.locked = false; this.user = user;

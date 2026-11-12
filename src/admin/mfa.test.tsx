@@ -83,11 +83,11 @@ it.each([false, true])('real pagehide retires access, pageshow persisted=%s requ
   await screen.findByLabelText('C\u00f3digo de seis d\u00edgitos');
   expect(h.auth.reauthenticateGoogle).not.toHaveBeenCalled(); expect(h.auth.signOut).not.toHaveBeenCalled();
 });
-it('browser Back is an explicit admin exit, not an incidental effect cleanup', async () => {
+it('browser Back switches to Reals without revoking retained authorization', async () => {
   const h = setup(); await submit(); await screen.findByText('Luc\u00eda');
   act(() => { history.replaceState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); });
-  await waitFor(() => expect(h.events).toContain('/api/admin-auth/revoke'));
-  expect(screen.queryByRole('heading', { name: 'Reals Admin' })).toBeNull();
+  await waitFor(() => expect(screen.queryByRole('heading', { name: 'Reals Admin' })).toBeNull());
+  expect(h.events).not.toContain('/api/admin-auth/revoke');
 });
 it('late verification cannot reopen administration after cancel/return', async () => {
   const h = setup(); await screen.findByLabelText('Código de seis dígitos'); let finish!: (r: Response) => void;

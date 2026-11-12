@@ -111,9 +111,24 @@ it('transfer of the real ownership lease retires the grant; reacquiring cannot r
   cleanups.push(first.stop, second.stop); first.start();
   await waitFor(() => expect(first.getSnapshot()).toBe('active'));
   const h = await setup(first), lease = first.signal;
+  act(() => { h.view.unmount(); h.session.setAdminView(false); });
+  expect(h.session.admin.token()).toBe(token);
   act(() => second.start());
   await waitFor(() => expect(second.getSnapshot()).toBe('active'));
   expect(lease.aborted).toBe(true); expect(h.session.admin.token()).toBeUndefined(); expect(screen.queryByText('Lucía')).toBeNull();
   act(() => first.request()); await waitFor(() => expect(first.getSnapshot()).toBe('active'));
   expect(h.session.admin.token()).toBeUndefined(); expect(h.auth.reauthenticateGoogle).not.toHaveBeenCalled();
+});
+it('normal mode retains the grant but blocks privileged calls and rejects results from an earlier admin visit', async () => {
+  const h = await setup(); let finish!: (r: Response) => void;
+  h.fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const old = h.session.request('/admin/diagnostics/matchmaking', new AbortController().signal);
+  const obsolete = expect(old).rejects.toMatchObject({ name: 'AbortError' });
+  await waitFor(() => expect(finish).toBeDefined());
+  act(() => { h.view.unmount(); h.session.setAdminView(false); });
+  expect(h.session.admin.token()).toBe(token);
+  await expect(h.session.request('/admin/diagnostics/matchmaking', new AbortController().signal)).rejects.toMatchObject({ code: 'ADMIN_MFA_REQUIRED' });
+  h.session.setAdminView(true); await act(async () => { await h.session.admin.check(); });
+  finish(new Response(JSON.stringify(diag))); await obsolete;
+  expect(h.session.admin.token()).toBe(token);
 });

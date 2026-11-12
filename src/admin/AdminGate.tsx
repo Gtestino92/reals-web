@@ -4,29 +4,31 @@ import { SignOutButton } from '../auth/SignOutButton';
 import Admin from './Admin';
 import './admin.css';
 
-export default function AdminGate({ controller }: { controller: SessionController }) {
+export default function AdminGate({ controller, onReturn, onNavigationBlockedChange }: { controller: SessionController; onReturn?: () => void; onNavigationBlockedChange?: ((blocked: boolean) => void) | undefined }) {
   const access = controller.admin;
   const state = useSyncExternalStore(access.subscribe, access.getSnapshot);
   const [code, setCode] = useState('');
   const [now, setNow] = useState(Date.now());
   useLayoutEffect(() => {
+    controller.setAdminView(true);
     void access.check();
     const visibility = () => { if (document.visibilityState === 'hidden') setCode(''); else void access.check(); };
-    const page = () => { setCode(''); void controller.leaveAdmin(); };
-    window.addEventListener('pagehide', page);
     window.addEventListener('pageshow', visibility);
     document.addEventListener('visibilitychange', visibility);
     // The operational session owns the grant; visual cleanup must not revoke it.
-    return () => { window.removeEventListener('pagehide', page); window.removeEventListener('pageshow', visibility); document.removeEventListener('visibilitychange', visibility); };
+    return () => { window.removeEventListener('pageshow', visibility); document.removeEventListener('visibilitychange', visibility); };
   }, [access, controller]);
   useLayoutEffect(() => {
     if (state.retryAt <= Date.now()) return;
     const timer = setInterval(() => { const time = Date.now(); setNow(time); if (time >= state.retryAt) clearInterval(timer); }, 500);
     return () => clearInterval(timer);
   }, [state.retryAt]);
-  if (state.phase === 'allowed') return <Admin controller={controller} />;
+  const back = () => {
+    if (onReturn) { onReturn(); return; }
+    controller.setAdminView(false); window.history.replaceState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate'));
+  };
+  if (state.phase === 'allowed') return <Admin controller={controller} onReturn={back} onNavigationBlockedChange={onNavigationBlockedChange} />;
   const remaining = Math.max(0, Math.ceil((state.retryAt - now) / 1000));
-  const back = () => { void controller.leaveAdmin(); window.history.replaceState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); };
   return <main className="admin"><h1>Verificación administrativa</h1>
     {state.phase === 'checking' && <p role="status">Consultando acceso…</p>}
     {state.phase === 'switch' && <p>Esta sesión no usa Google. Cerrá sesión e ingresá con Google con la misma cuenta de Reals; después volvé a /admin.</p>}

@@ -68,7 +68,7 @@ it('appeal requires notes and opens contextual source detail with safe return an
   expect(screen.queryByText('Source evidence')).toBeNull();
   expect(screen.queryByRole('heading',{name:'Reporte de origen de la apelación'})).toBeNull();
   expect(fetcher.mock.calls.filter(([p])=>p==='/api/admin/penalty-appeals/pending')).toHaveLength(2);
-  expect(location.pathname).toBe('/admin'); expect(history.state).toBeNull();
+  expect(location.pathname).toBe('/admin'); expect(history.state.trail.at(-1)).toBe('admin');
 });
 it('identity replacement clears existing data before second authorization',async()=>{await mount();await screen.findByText('Lucía');allowed=false;act(()=>observer({...user,uid:'ordinary'}));await screen.findByText(/Acceso administrativo denegado/);expect(screen.queryByText('Lucía')).toBeNull();});
 it('logout clears data and late reads cannot reinstall it',async()=>{await mount();await screen.findByText('Lucía');let finish:(r:Response)=>void=()=>{};fetcher.mockImplementationOnce(()=>new Promise(r=>{finish=r;}));fireEvent.click(screen.getByRole('button',{name:'Actualizar'}));act(()=>observer(null));await screen.findByRole('button',{name:'Ingresar'});await act(async()=>finish(json([photo])));expect(screen.queryByText('Lucía')).toBeNull();});

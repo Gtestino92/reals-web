@@ -49,3 +49,31 @@ it('never follows external history for explicit Home and rejects a foreign accou
   act(() => window.dispatchEvent(new PopStateEvent('popstate', { state: { owner: 'another-account', trail: ['home', 'profile'] } })));
   expect(result.current.destination).toBe('home');
 });
+it('uses same-document admin history and preserves Account Back/Forward without credentials', async () => {
+  const { result } = renderHook(() => useHomeNavigation(() => true));
+  act(() => result.current.open('account')); act(() => result.current.open('admin'));
+  expect(location.pathname).toBe('/admin'); expect(history.state.trail).toEqual(['home', 'account', 'admin']);
+  act(() => result.current.backTo('account')); await waitFor(() => expect(result.current.destination).toBe('account'));
+  expect(location.pathname).toBe('/'); act(() => history.forward()); await waitFor(() => expect(result.current.destination).toBe('admin'));
+  expect(location.pathname).toBe('/admin');
+});
+it('can block only administrative entry for unsaved forms while retaining ordinary Back behavior', async () => {
+  let dirty = false;
+  const { result } = renderHook(() => useHomeNavigation(target => target !== 'admin' || !dirty));
+  act(() => result.current.open('account')); dirty = true; act(() => result.current.open('admin'));
+  expect(result.current.destination).toBe('account'); expect(location.pathname).toBe('/');
+  act(() => result.current.backTo('home')); await waitFor(() => expect(result.current.destination).toBe('home'));
+});
+it('a foreign admin entry cannot restore a stale account view and same-depth guards never reload via history.go(0)', () => {
+  let allowed = true;
+  const { result } = renderHook(() => useHomeNavigation(() => allowed));
+  act(() => window.dispatchEvent(new PopStateEvent('popstate', { state: { owner: 'obsolete', trail: ['home', 'admin'] } })));
+  expect(result.current.destination).toBe('home'); expect(location.pathname).toBe('/');
+  act(() => result.current.open('account')); allowed = false;
+  const incoming = { owner: history.state.owner, trail: ['home', 'admin'] };
+  const go = vi.spyOn(history, 'go');
+  try {
+    act(() => { history.replaceState(incoming, '', '/admin'); window.dispatchEvent(new PopStateEvent('popstate', { state: incoming })); });
+    expect(result.current.destination).toBe('account'); expect(location.pathname).toBe('/'); expect(go).not.toHaveBeenCalledWith(0);
+  } finally { go.mockRestore(); }
+});

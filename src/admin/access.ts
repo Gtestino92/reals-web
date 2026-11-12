@@ -32,6 +32,11 @@ export class AdminAccess {
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   private install(patch: Partial<AccessState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); }
   clear = () => { this.abort.abort(); this.abort = new AbortController(); this.revision++; clearTimeout(this.expiry); this.grant = null; this.install({ ...initial, retryAt: this.state.retryAt }); };
+  suspendView = () => {
+    this.abort.abort(); this.abort = new AbortController(); this.revision++;
+    // Switching modes ends visual work, not the absolute authorization lifetime.
+    this.install({ ...initial, retryAt: this.state.retryAt });
+  };
   token = () => {
     if (this.grant && Date.now() >= this.grant.expires) this.fail(new ApiError('authorization', 403, 'ADMIN_GRANT_EXPIRED'));
     return this.grant?.token;

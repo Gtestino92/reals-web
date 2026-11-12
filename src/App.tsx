@@ -1,10 +1,11 @@
+import { useHomeNavigation } from './home/useHomeNavigation';
 import { AccountSuspension } from './auth/AccountSuspension';
 import { AccountDeletionRecovery } from './auth/AccountDeletionRecovery';
 import { SignOutButton } from './auth/SignOutButton';
 import { tabOwnershipEnabled } from './tabs/policy';
 import { TabGate } from './tabs/TabGate';
 import type { TabOwnershipManager } from './tabs/TabOwnershipManager';
-import { lazy, Suspense, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { LoginScreen } from './auth/LoginScreen';
 import { configureFirebase } from './auth/firebase';
 import type { FirebaseSetup } from './auth/firebase';
@@ -35,24 +36,11 @@ export function OperationalApp({ firebase, api, ownership }: AppProps) {
 }
 function SessionApp({ controller }: { controller: SessionController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const [adminRoute, setAdminRoute] = useState(() => window.location.pathname === '/admin');
   useLayoutEffect(() => {
-    const pop = () => {
-      const next = window.location.pathname === '/admin';
-      if (adminRoute && !next) void controller.leaveAdmin();
-      setAdminRoute(next);
-    };
-    window.addEventListener('popstate', pop);
-    return () => window.removeEventListener('popstate', pop);
-  }, [adminRoute, controller]);
-  const [chatActive, setChatActive] = useState(false);
-  const [managementActive, setManagementActive] = useState(false);
-  const [setupAccountAvailable, setSetupAccountAvailable] = useState(false);
-  useLayoutEffect(() => {
-    if (state.phase !== 'ready') { setChatActive(false); setManagementActive(false); setSetupAccountAvailable(false); }
+    // An explicit login always starts in ordinary Reals, even after a direct /admin URL.
+    if (state.phase === 'login' || state.phase === 'authenticating') window.history.replaceState(null, '', '/');
   }, [state.phase]);
-  const homeReady = state.phase === 'ready' && (state.profile?.status === 'ACTIVE' || managementActive);
-  const chatShell = chatActive && homeReady;
+  if (state.phase === 'ready') return <ReadySession key={state.account?.id} controller={controller} />;
   if (state.phase === 'login' || state.phase === 'authenticating') return <LoginScreen
     loading={state.operation === 'signIn' || state.operation === 'signUp'}
     googleLoading={state.operation === 'google'} passwordResetLoading={state.operation === 'reset'}
@@ -61,22 +49,47 @@ function SessionApp({ controller }: { controller: SessionController }) {
     onSignIn={(email, password, keepSignedIn) => controller.authenticate('signIn', email, password, keepSignedIn)}
     onSignUp={(email, password, keepSignedIn) => controller.authenticate('signUp', email, password, keepSignedIn)}
     onGoogleSignIn={() => controller.authenticate('google')} onPasswordReset={controller.reset} />;
-  if (adminRoute && state.phase === 'ready') return <Suspense fallback={<SessionLoading />}><Admin key={state.account?.id} controller={controller} /></Suspense>;
-  return <main className={chatShell ? "chat-page" : "login-page"}><section className={chatShell ? "chat-shell" : "login-panel"} aria-label={chatShell ? "Conversación activa" : undefined} aria-labelledby={chatShell ? undefined : "session-heading"}>
-    {!chatShell && <header className="login-header"><div className="login-brand">
+  return <main className="login-page"><section className="login-panel" aria-labelledby="session-heading">
+    <header className="login-header"><div className="login-brand">
       <img className="login-seal" src={seal} alt="" width="54" height="54" />
       <h1 id="session-heading">Reals</h1>
       <div className="brand-divider" aria-hidden="true"><span /></div>
-    </div></header>}
+    </div></header>
     {(state.phase === 'checking' || state.phase === 'loading') && <SessionLoading />}
     {state.phase === 'signingOut' && <p role="status">Cerrando sesión…</p>}
-    {state.phase === 'ready' && (homeReady ? <Home key={`${state.account?.id}-${state.profile?.id}`} controller={controller} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding key={state.account?.id} controller={controller} onAccountAvailableChange={setSetupAccountAvailable} />)}
     {(state.phase === 'temporarySuspension' || state.phase === 'permanentAppeal') && <AccountSuspension controller={controller} state={state} />}
     {state.phase === 'deletionRecovery' && <AccountDeletionRecovery controller={controller} state={state} />}
     {state.adminWarning && <p role="alert">{state.adminWarning}</p>}
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && !['deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(state.phase) && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
-    {!['deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(state.phase) && !chatShell && !homeReady && !setupAccountAvailable && state.phase !== 'checking' && <div className="session-actions"><SignOutButton disabled={state.phase === 'signingOut'} onConfirm={controller.signOut} /></div>}
+    {!['deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(state.phase) && state.phase !== 'checking' && <div className="session-actions"><SignOutButton disabled={state.phase === 'signingOut'} onConfirm={controller.signOut} /></div>}
+  </section></main>;
+}
+
+function ReadySession({ controller }: { controller: SessionController }) {
+  const state = controller.getSnapshot();
+  const blocked = useRef(false);
+  const reportBlocked = useCallback((value: boolean) => { blocked.current = value; }, []);
+  const adminBlocked = useRef(false);
+  const reportAdminBlocked = useCallback((value: boolean) => { adminBlocked.current = value; }, []);
+  const navigation = useHomeNavigation(target => !blocked.current && (target !== 'admin' || !adminBlocked.current));
+  const administrative = navigation.destination === 'admin';
+  const [chatActive, setChatActive] = useState(false);
+  const [managementActive, setManagementActive] = useState(false);
+  const [setupAccountAvailable, setSetupAccountAvailable] = useState(false);
+  const homeReady = state.profile?.status === 'ACTIVE' || managementActive;
+  const chatShell = chatActive && homeReady;
+  useLayoutEffect(() => {
+    controller.setAdminView(administrative);
+  }, [controller, administrative]);
+  if (administrative) return <Suspense fallback={<SessionLoading />}><Admin controller={controller} onReturn={() => navigation.backTo('account')} onNavigationBlockedChange={reportBlocked} /></Suspense>;
+  return <main className={chatShell ? 'chat-page' : 'login-page'}><section className={chatShell ? 'chat-shell' : 'login-panel'} aria-label={chatShell ? 'Conversaci\u00f3n activa' : undefined} aria-labelledby={chatShell ? undefined : 'session-heading'}>
+    {!chatShell && <header className="login-header"><div className="login-brand"><img className="login-seal" src={seal} alt="" width="54" height="54" /><h1 id="session-heading">Reals</h1><div className="brand-divider" aria-hidden="true"><span /></div></div></header>}
+    {homeReady ? <Home onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={navigation} onNavigationBlockedChange={reportBlocked} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={navigation} onNavigationBlockedChange={reportBlocked} onAccountAvailableChange={setSetupAccountAvailable} />}
+    {state.adminWarning && <p role="alert">{state.adminWarning}</p>}
+    {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
+    {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
+    {!chatShell && !homeReady && !setupAccountAvailable && <div className="session-actions"><SignOutButton onConfirm={controller.signOut} /></div>}
   </section></main>;
 }

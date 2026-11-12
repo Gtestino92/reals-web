@@ -5,6 +5,7 @@ import type { SessionController } from '../auth/session';
 import { ApiError, object } from '../auth/api';
 import { errorCode } from '../auth/errors';
 import './notification-settings.css';
+import { useAdminEligibility } from '../admin/useAdminEligibility';
 
 type Preferences = { activityEnabled: boolean; remindersEnabled: boolean; availabilityEnabled: boolean };
 const descriptions = {
@@ -17,7 +18,8 @@ function parse(value: unknown): Preferences {
   if (!object(value) || typeof value.activityEnabled !== 'boolean' || typeof value.remindersEnabled !== 'boolean' || typeof value.availabilityEnabled !== 'boolean') throw new ApiError('invalid');
   return { activityEnabled: value.activityEnabled, remindersEnabled: value.remindersEnabled, availabilityEnabled: value.availabilityEnabled };
 }
-export function AccountSection({ controller, disabled, setup = false, onBack, notificationsOpen = false, onNotificationsOpen, onNavigationBlockedChange }: { controller: SessionController; disabled: boolean; setup?: boolean; onBack?: () => void; notificationsOpen?: boolean; onNotificationsOpen?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
+export function AccountSection({ controller, disabled, setup = false, onBack, notificationsOpen = false, onNotificationsOpen, onNavigationBlockedChange, onAdministration, administrationDisabled = false }: { administrationDisabled?: boolean; controller: SessionController; disabled: boolean; setup?: boolean; onBack?: () => void; notificationsOpen?: boolean; onNotificationsOpen?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void; onAdministration?: (() => void) | undefined }) {
+  const adminEligible = useAdminEligibility(controller, !!onAdministration);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const dismissDelete = useCallback(() => setDeleteOpen(false), []);
   const [signOutOpen, setSignOutOpen] = useState(false);
@@ -78,6 +80,7 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
     {setup ? <header className="home-heading"><h3>Cuenta</h3><button type="button" className="login-button login-outlined" aria-label="Cuenta" aria-expanded={expanded} aria-controls="account-options" disabled={blocked} onClick={() => setExpanded(v => !v)}>{expanded ? 'Ocultar' : 'Abrir'}</button></header> : <header className="home-heading"><h2>Cuenta</h2><button className="login-button login-outlined" disabled={busy || view === 'password'} onClick={onBack}>Volver a Inicio</button></header>}
     {(!setup || expanded) && <div id="account-options" className={setup ? undefined : 'home-card'}>
       {!setup && <button ref={notificationsButton} className="login-button login-outlined" disabled={blocked} onClick={() => { onNotificationsOpen?.(); read(); }}>Notificaciones</button>}
+      {adminEligible && <button className="login-button login-outlined" disabled={administrationDisabled || blocked || view === 'password' || signOutOpen || deleteOpen} onClick={() => { if (!administrationDisabled && !owner.current?.locked && !view && !signOutOpen && !deleteOpen) onAdministration?.(); }}>Administración</button>}
 
       {!setup && controller.hasPasswordProvider === true && <button className="login-button login-outlined" disabled={blocked} onClick={() => { setError(''); setView('password'); }}>Cambiar contraseña de Reals</button>}
       {!setup && import.meta.env.DEV && <section><h4>Apoyar Reals</h4><p>Si te gusta Reals y querés ayudar a sostener el proyecto, podés hacer un aporte voluntario. No te da beneficios dentro de la app.</p><a className="login-button login-outlined" href="https://cafecito.app/reals-app" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Apoyar en Cafecito</a></section>}
