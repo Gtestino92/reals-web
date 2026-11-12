@@ -1,5 +1,6 @@
 import { ApiError, object, parseProfile } from '../auth/api';
 import type { Profile } from '../auth/api';
+import { browserUrl } from '../shared/browserUrl';
 
 export const genders = ['MALE', 'FEMALE', 'NON_BINARY', 'OTHER'] as const;
 export const intentions = ['DATE', 'FRIENDSHIP', 'CASUAL'] as const;
@@ -25,8 +26,7 @@ export interface LegalDocument { type: string; version: string; requiredAction: 
 export const defaults: Fields = { displayName: '', birthDate: '', gender: 'MALE', lookingForGenders: ['FEMALE'], intention: 'DATE', city: '', countryCode: '', bio: '', preferredMinAge: 18, preferredMaxAge: 45, maxDistanceKm: 50 };
 export function invalid(): never { throw new ApiError('invalid'); }
 export function safeUrl(value: unknown): string {
-  if (typeof value !== 'string') return invalid();
-  try { const url = new URL(value); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return invalid(); return value; } catch { return invalid(); }
+  return browserUrl(value) ?? invalid();
 }
 export function countries(raw: unknown): Country[] {
   if (!Array.isArray(raw)) return invalid();

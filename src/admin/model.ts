@@ -1,5 +1,6 @@
 import { ApiError, object } from '../auth/api';
 import { parseAppeal } from '../auth/suspension';
+import { browserUrl } from '../shared/browserUrl';
 export type Section = 'photos' | 'reports' | 'appeals' | 'diagnostics';
 export type Row = Record<string, unknown>;
 export const statuses = ['PENDING', 'DISMISSED', 'DISMISSED_ABUSIVE_OR_UNJUSTIFIED', 'CONFIRMED'];
@@ -56,6 +57,5 @@ export function decisionResult(raw: unknown, section: Section): Row {
 }
 // Only backend-provided media fields reach this function, never URLs embedded in text.
 export function mediaUrl(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  try { const url = new URL(raw); return url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost','127.0.0.1'].includes(url.hostname) && import.meta.env.DEV) ? raw : null; } catch { return null; }
+  return browserUrl(raw);
 }

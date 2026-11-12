@@ -1,4 +1,5 @@
 import { ApiError, object } from '../auth/api';
+import { browserUrl } from '../shared/browserUrl';
 const invalid = (): never => { throw new ApiError('invalid'); };
 export const str = (v: unknown): string => typeof v === 'string' && v.length > 0 ? v : invalid();
 const num = (v: unknown): number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : invalid();
@@ -53,7 +54,7 @@ export function parseMessage(v: unknown, chatId: string, participants: string[])
   }
   if (v.audio != null) {
     const a = v.audio; if (!object(a)) return invalid();
-    const url = str(a.url); if (!/^https?:\/\//i.test(url)) return invalid();
+    const url = browserUrl(a.url) ?? invalid();
     audio = { url, durationMillis: num(a.durationMillis), sizeBytes: num(a.sizeBytes), contentType: str(a.contentType) };
   }
   if (v.reactionType != null && v.reactionType !== 'HEART') return invalid();

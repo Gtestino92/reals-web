@@ -1,5 +1,16 @@
 # Android-first migration and First Chat parity
 
+## Browser URL validation hardening — 2026-11-12
+
+Scoped audit against main `531f277`: Android `src/prod/res/xml/network_security_config.xml` forbids cleartext; local permits localhost, 127.0.0.1 and emulator 10.0.2.2. Inspected `ProfilePhotoImageRequests.kt` and `ProfilePhotoUrlHelpersTest.kt` (signed URLs remain unchanged), `LegalMappers.kt` / `LegalMappersTest.kt` / `LegalRequirementsScreen.kt` (backend URL passed to external URI handler), and `ChatAudioPlaybackController.kt` (URL passed to playback). Backend commons API photo/audio contracts require fresh read URLs and no client persistence. No Android or backend changes.
+
+| Relevant behavior | Before → after / Web locations | Evidence / remaining differences |
+| --- | --- | --- |
+| Production transport; local media | PARTIAL → COMPLETE for tested URL boundaries: shared `browserUrl.ts`, onboarding `safeUrl`, chat `parseMessage`, admin `mediaUrl` require HTTPS, allowing HTTP only in development on localhost/127.0.0.1. | `browserUrl.test.ts` covers photos, legal, chat and admin. Android emulator-only 10.0.2.2 is intentionally excluded from the documented browser/ADB workflow. Actual deployed transport remains unverified. |
+| Signed URLs | COMPLETE → COMPLETE: preserve original paths/query strings exactly, without URL serialization. | Complex signed HTTPS and MinIO HTTP strings tested across all four boundaries. No real storage signature/deployment test claimed. |
+| Rejected input / recovery | PARTIAL → COMPLETE within this scope: reject malformed, relative, unsupported-scheme and credential-bearing URLs before consumption; retain existing invalid-response errors and admin media omission. | Focused contract and existing onboarding/chat/admin tests; no new retry or lifecycle policy. |
+| Visual structure; gestures/animation; navigation/Back; loading/disabled/empty states; focus/keyboard/accessibility/scroll; mobile/desktop layout; timers/polling/background and backend actions | Existing parity classifications unchanged: no presentation, navigation, state mutation, resource ownership or request-ordering changes. | Browser checks and screenshot comparison not repeated for this pure URL boundary change; wider gaps remain in their existing entries below. Legal opener/referrer and media referrer protections unchanged. |
+
 ## Preventive modularity refactor — 2026-11-12
 
 Scope: composition only, based on Web `7ccf106`; no Android/backend changes.
