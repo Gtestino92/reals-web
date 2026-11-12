@@ -4,6 +4,21 @@ import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 let fixture;const requests=[];
+const charMap = {
+  '<': '\\u003C',
+  '>': '\\u003E',
+  '/': '\\u002F',
+  '\\': '\\\\',
+  '\b': '\\b',
+  '\f': '\\f',
+  '\n': '\\n',
+  '\r': '\\r',
+  '\t': '\\t',
+  '\0': '\\0',
+  '\u2028': '\\u2028',
+  '\u2029': '\\u2029'
+};
+function escapeUnsafeChars(str){return str.replace(/[<>\/\\\b\f\n\r\t\0\u2028\u2029]/g,x=>charMap[x]);}
 function reset(kind='home'){fixture={kind,version:1,delay:0,expire:false,matchState:'CHAT_ACTIVE',partner:'PENDING',mine:'PENDING',inQueue:false,holdRead:false,passive:[],writes:[]};}
 reset();
 const server=createServer(async(req,res)=>{const current=fixture;
@@ -56,7 +71,7 @@ try {
   const delay=ms=>new Promise(r=>setTimeout(r,ms));
 
   const baseline=process.argv.includes('--baseline'),evidence=[];const check=(v,label)=>{if(!v&&!baseline)throw Error(label);console.log(baseline?'MEASURE':'PASS',label);};
-  await evaluate(`(async()=>{const {default:React}=await import('/node_modules/.vite/deps/react.js'),{default:ReactDOM}=await import('/node_modules/.vite/deps/react-dom_client.js'),{App}=await import('/src/App.tsx'),{ApiClient}=await import('/src/auth/api.ts');document.getElementById('root').style.display='none';const el=document.createElement('div');document.body.append(el);window.mountCount=0;window.cleanupCount=0;window.visibilityLog=[];document.addEventListener('visibilitychange',()=>visibilityLog.push(document.visibilityState));let root;function Probe(){React.useEffect(()=>{mountCount++;return()=>cleanupCount++;},[]);return React.createElement(App,{firebase:{service:{observe:next=>{next({uid:'fixture',emailVerified:true,getIdToken:async()=>'synthetic',reload:async()=>{}});return()=>{}},signOut:async()=>{window.signouts=(window.signouts??0)+1}},localVerification:false},api:new ApiClient((path,options)=>fetch(${JSON.stringify(origin)}+String(path).slice(4),options))});}window.renderFixture=()=>{root?.unmount();root=ReactDOM.createRoot(el);root.render(React.createElement(React.StrictMode,null,React.createElement(Probe)));};Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition:ok=>ok({coords:{latitude:12,longitude:-21,accuracy:25},timestamp:Date.now()})}});renderFixture();})()`);
+  await evaluate(`(async()=>{const {default:React}=await import('/node_modules/.vite/deps/react.js'),{default:ReactDOM}=await import('/node_modules/.vite/deps/react-dom_client.js'),{App}=await import('/src/App.tsx'),{ApiClient}=await import('/src/auth/api.ts');document.getElementById('root').style.display='none';const el=document.createElement('div');document.body.append(el);window.mountCount=0;window.cleanupCount=0;window.visibilityLog=[];document.addEventListener('visibilitychange',()=>visibilityLog.push(document.visibilityState));let root;function Probe(){React.useEffect(()=>{mountCount++;return()=>cleanupCount++;},[]);return React.createElement(App,{firebase:{service:{observe:next=>{next({uid:'fixture',emailVerified:true,getIdToken:async()=>'synthetic',reload:async()=>{}});return()=>{}},signOut:async()=>{window.signouts=(window.signouts??0)+1}},localVerification:false},api:new ApiClient((path,options)=>fetch(${escapeUnsafeChars(JSON.stringify(origin))}+String(path).slice(4),options))});}window.renderFixture=()=>{root?.unmount();root=ReactDOM.createRoot(el);root.render(React.createElement(React.StrictMode,null,React.createElement(Probe)));};Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition:ok=>ok({coords:{latitude:12,longitude:-21,accuracy:25},timestamp:Date.now()})}});renderFixture();})()`);
   const click=async selector=>{await evaluate('document.querySelector('+JSON.stringify(selector)+').scrollIntoView({block:"center"})');const p=await evaluate('(()=>{const r=document.querySelector('+JSON.stringify(selector)+').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()');await call('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',clickCount:1});await call('Input.dispatchMouseEvent',{type:'mouseReleased',...p,button:'left',clickCount:1});await delay(40);};
   const waitFor=async(expression,label)=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await delay(40);}throw Error(label);};
   const sample=async(selector)=>evaluate(`(()=>{const e=document.querySelector(${escapeUnsafeForEval(JSON.stringify(selector))}),r=e?.getBoundingClientRect();return{busy:document.querySelector('.home')?.getAttribute('aria-busy'),opacity:e?getComputedStyle(e).opacity:null,background:e?getComputedStyle(e).backgroundColor:null,disabled:e?.disabled,rect:r?.toJSON(),focus:document.activeElement?.tagName+':'+(document.activeElement?.getAttribute('aria-label')??document.activeElement?.id??''),focusPreserved:document.activeElement===window.focusedControl,scroll:document.querySelector('.chat-timeline')?.scrollTop,mountCount,cleanupCount,documents:performance.getEntriesByType('navigation').length};})()`);
