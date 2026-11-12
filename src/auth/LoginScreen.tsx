@@ -2,7 +2,6 @@ import { useEffect, useReducer, useState } from 'react';
 import seal from '../assets/reals-seal.png';
 import googleIcon from '../assets/google-g.png';
 import './login.css';
-import { SignOutButton } from './SignOutButton';
 
 type AuthMode = 'signIn' | 'signUp';
 export type LoginErrorOwner = AuthMode | 'shared';
@@ -10,7 +9,6 @@ export type LoginErrorOwner = AuthMode | 'shared';
 export interface LoginScreenProps {
   loading?: boolean;
   sessionLoading?: boolean;
-  onCancelSession?: (() => void) | undefined;
   googleLoading?: boolean;
   passwordResetLoading?: boolean;
   error?: string | null;
@@ -57,7 +55,6 @@ function useResetCooldown(deadline: number | null) {
 export function LoginScreen({
   loading = false,
   sessionLoading = false,
-  onCancelSession,
   googleLoading = false,
   passwordResetLoading = false,
   error = null,
@@ -167,9 +164,6 @@ export function LoginScreen({
             {googleLoading ? 'Conectando con Google...' : 'Continuar con Google'}
           </button>
         </form>
-        <div className="login-session-feedback">
-          {sessionLoading && onCancelSession && <SignOutButton onConfirm={onCancelSession} />}
-        </div>
       </section>
     </main>
   );

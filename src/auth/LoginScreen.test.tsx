@@ -192,17 +192,15 @@ it('returns from sign-up with Escape without submitting or losing email', () => 
   expect(actions.onSignIn).not.toHaveBeenCalled();
 });
 
-it('owns a fixed feedback region across checking, login, authentication and bootstrap', () => {
-  const props = callbacks(); const cancel = vi.fn();
+it('keeps the inputs and loading feedback without offering logout during bootstrap', () => {
+  const props = callbacks();
   const view = render(<LoginScreen {...props} sessionLoading />);
-  const region = document.querySelector('.login-session-feedback'), input = screen.getByLabelText('Email');
-  expect(region).toBeInTheDocument(); expect(input).toBeDisabled();
+  const input = screen.getByLabelText('Email');
+  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull(); expect(input).toBeDisabled();
   view.rerender(<LoginScreen {...props} />); expect(input).toBeEnabled();
-  expect(document.querySelector('.login-session-feedback')).toBe(region); expect(region).toBeEmptyDOMElement();
   view.rerender(<LoginScreen {...props} googleLoading />); expect(input).toBeDisabled();
-  view.rerender(<LoginScreen {...props} sessionLoading onCancelSession={cancel} />);
-  expect(document.querySelector('.login-session-feedback')).toBe(region);
+  view.rerender(<LoginScreen {...props} sessionLoading />);
   expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión');
-  expect(region).toContainElement(screen.getByRole('button', { name: 'Cerrar sesión' }));
+  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
   expect(screen.getByLabelText('Email')).toBe(input); expect(input).toBeDisabled();
 });

@@ -34,6 +34,7 @@ it.each(['password', 'google'])('keeps the login DOM through %s authentication a
   await waitFor(() => expect(finish).toBeDefined());
   expect(document.querySelector('.login-panel')).toBe(panel); expect(screen.getByLabelText('Email')).toBe(email);
   expect(email).toBeDisabled(); expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
   expect(screen.getByRole('button', { name: provider === 'google' ? 'Conectando con Google...' : 'Ingresando...' })).toBeDisabled();
   expect(screen.queryByText('Preparando Reals…')).toBeNull(); expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
   await act(async () => finish(json({ id: 'u', status: 'ACTIVE' })));
@@ -116,11 +117,14 @@ it('restores existing session exactly once under StrictMode', async () => {
 it('sign out cancels pending fetch and rejects its late response', async () => {
   let resolve: (value: Response) => void = () => {};
   fetcher.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  mount(); act(() => observer(user)); await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+  const controller = new SessionController(auth, new ApiClient(fetcher), false), dispose = controller.subscribe(() => {});
+  try {
+  observer(user); await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
   const signal = fetcher.mock.calls[0]?.[1]?.signal;
-  confirmSignOut(); await screen.findByRole('button', { name: 'Ingresar' });
+  controller.signOut(); await waitFor(() => expect(controller.getSnapshot().phase).toBe('login'));
   expect(signal?.aborted).toBe(true); await act(async () => resolve(json({ id: 'u', status: 'ACTIVE' })));
-  expect(screen.getByRole('button', { name: 'Ingresar' })).toBeVisible(); expect(fetcher).toHaveBeenCalledOnce();
+  expect(controller.getSnapshot().phase).toBe('login'); expect(fetcher).toHaveBeenCalledOnce();
+  } finally { dispose(); }
 });
 it('transient backend failure preserves Firebase and retry recovers existing profile', async () => {
   fetcher.mockRejectedValueOnce(new TypeError()).mockResolvedValueOnce(json({ id: 'u', status: 'ACTIVE' })).mockResolvedValueOnce(json({ id: 'p', userId: 'u', status: 'ACTIVE' }));
@@ -182,12 +186,15 @@ it.each(['RATE_LIMIT_EXCEEDED', 'ACCOUNT_PROVISIONING_LIMIT_EXCEEDED'])('ready-s
 it.each(['signout', 'replacement'])('rejects a late provisioning quota response after %s', async scenario => {
   let resolve!: (value: Response) => void;
   fetcher.mockResolvedValueOnce(json({ code: 'USER_NOT_FOUND' }, 404)).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  mount(); act(() => observer(user)); await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  const controller = new SessionController(auth, new ApiClient(fetcher), false), dispose = controller.subscribe(() => {});
+  try {
+  observer(user); await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
   const signal = fetcher.mock.calls[1]?.[1]?.signal;
-  if (scenario === 'signout') { confirmSignOut(); await screen.findByRole('button', { name: 'Ingresar' }); }
-  else { ready(); act(() => observer({ ...user, uid: 'replacement' })); await screen.findByText('Sin perfil: falta completar el registro.'); }
-  await act(async () => resolve(limited('120'))); expect(signal?.aborted).toBe(true); expect(screen.queryByText(/Los nuevos registros/)).toBeNull();
+  if (scenario === 'signout') { controller.signOut(); await waitFor(() => expect(controller.getSnapshot().phase).toBe('login')); }
+  else { ready(); observer({ ...user, uid: 'replacement' }); await waitFor(() => expect(controller.getSnapshot().phase).toBe('ready')); }
+  await act(async () => resolve(limited('120'))); expect(signal?.aborted).toBe(true); expect(controller.getSnapshot().error).toBeNull();
   expect(auth.signOut).toHaveBeenCalledTimes(scenario === 'signout' ? 1 : 0);
+  } finally { dispose(); }
 });
 it('Retry dispatches another backend request using receiver-sensitive default fetch', async () => {
   fetcher.mockRejectedValueOnce(new TypeError('Connection failed'));

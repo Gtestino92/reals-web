@@ -41,7 +41,7 @@ function SessionApp({ controller }: { controller: SessionController }) {
   }, [state.phase]);
   if (state.phase === 'ready') return <ReadySession key={state.account?.id} controller={controller} />;
   if (['checking', 'loading', 'login', 'authenticating'].includes(state.phase)) return <LoginScreen
-    sessionLoading={state.phase === 'checking' || state.phase === 'loading'} onCancelSession={state.phase === 'loading' ? controller.signOut : undefined}
+    sessionLoading={state.phase === 'checking' || state.phase === 'loading'}
     loading={state.operation === 'signIn' || state.operation === 'signUp'}
     googleLoading={state.operation === 'google'} passwordResetLoading={state.operation === 'reset'}
     error={state.error?.message ?? state.adminWarning ?? null} errorOwner={state.error?.owner ?? (state.adminWarning ? 'shared' : null)}

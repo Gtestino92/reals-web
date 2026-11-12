@@ -591,6 +591,10 @@ Validation for this follow-up: final full Vitest PASS 1137/48 files with `--maxW
 
 ### Foreground continuity, login bounds and OTP feedback (base `25950ae`)
 
+Login follow-up at `471d396`: removed bootstrap's “Cerrar sesión” action and its empty reserved space. The login now matches Android's form-only busy state; Account/Admin and failed-session recovery retain their existing logout actions. Authentication and bootstrap ownership are unchanged.
+
+Validation: login/App focused 76/76 PASS; full Vitest with `--maxWorkers=2` 1154/1154 PASS in 48 files; typecheck/build/diff check PASS. Synthetic desktop/mobile Chromium smoke and visual login inspection PASS. Bootstrap cancellation/late-response coverage now invokes SessionController directly instead of the removed button; no cancellation/security test was dropped. Existing bundle-size warning and real-device/Firebase validation limits remain.
+
 Residual flicker at `64eff2e`: consistent pending login text through backend bootstrap; loaded affinity summary no longer adds a temporary row during foreground refresh; initial authorized Home has noninteractive structural loading placeholders. Android busy/loaded-model principles are retained; skeleton appearance is a Web adaptation (PARTIAL visual parity). See the [measured residual flicker review](lifecycle-ux-review.md#residual-flicker-follow-up-64eff2e) for invariants and synthetic browser evidence.
 
 Focused follow-up at `fadc3fb`: explicit administrative closure now retires authority and returns Home without a new MFA challenge; ordinary return still retains the grant. Google confirmation appears only for stale authentication. These are authorized Web admin adaptations (PLATFORM-LIMITED Android comparison: no corresponding admin feature); see the action/response matrix in [admin security](admin-security.md#explicit-administrative-closure-fadc3fb-follow-up).

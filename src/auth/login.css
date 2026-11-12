@@ -135,8 +135,6 @@
 .login-google { display: flex; align-items: center; justify-content: center; gap: 10px; }
 .login-google img { flex: none; }
 .login-description { min-height: 3em; }
-.login-session-feedback { display: flex; justify-content: flex-end; align-items: center; min-height: 48px; margin-top: 14px; }
-.login-session-feedback > .login-button { padding-inline: 12px; }
 
 /* Keep the brand mounted when authentication disables a focused mobile input.
    Natural document scrolling accommodates the virtual keyboard without a
