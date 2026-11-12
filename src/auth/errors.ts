@@ -2,6 +2,12 @@ export function errorCode(error: unknown): string {
   return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : '';
 }
 const messages: Record<string, string> = {
+  APP_CHECK_NOT_CONFIGURED: 'Falta configurar App Check para esta aplicación Web. Contactá al operador.',
+  MISSING_APP_CHECK_TOKEN: 'Falta la verificación App Check. Contactá al operador.',
+  INVALID_APP_CHECK_TOKEN: 'App Check rechazó esta aplicación. Revisá la configuración con el operador.',
+  APP_CHECK_VERIFICATION_UNAVAILABLE: 'No se pudo verificar App Check. Revisá la conexión e intentá nuevamente.',
+  'auth/user-mismatch': 'La cuenta de Google no coincide con esta sesión. Elegí la misma cuenta de Reals.',
+  'auth/admin-google-required': 'La confirmación no produjo una sesión reciente de Google. Cerrá sesión e ingresá con Google con la misma cuenta de Reals.',
   'auth/persistence-unavailable': 'No pudimos configurar la duración de la sesión. Recargá la página e intentá nuevamente.',
   'auth/invalid-credential': 'No se pudo iniciar sesión. Revisá el email y la contraseña. Si eliminaste tu cuenta, creá una nueva.',
   'auth/wrong-password': 'Revisá el email y la contraseña.',

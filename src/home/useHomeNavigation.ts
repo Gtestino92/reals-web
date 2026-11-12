@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { QuestionContext } from '../profile/affinities/presentation';
 import { object } from '../auth/api';
 
-const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection'] as const;
+const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection', 'admin'] as const;
 export type HomeDestination = typeof destinations[number];
 interface Entry { owner: string; trail: HomeDestination[]; question?: QuestionContext; profileQuestionId?: string }
 function destination(value: unknown): value is HomeDestination {
@@ -17,53 +17,55 @@ function entry(value: unknown): Entry | null {
 }
 
 // One authenticated Home owns its same-document entries, including nested Account.
-export function useHomeNavigation(canLeave: () => boolean, enabled = true) {
-  const [initial] = useState<Entry>(() => ({ owner: crypto.randomUUID(), trail: ['home'] }));
+export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolean, enabled = true) {
+  const [initial] = useState<Entry>(() => ({ owner: crypto.randomUUID(), trail: window.location.pathname === '/admin' ? ['home', 'admin'] : ['home'] }));
   const [state, setState] = useState(initial);
   const current = useRef(initial), guard = useRef(canLeave), moving = useRef(false);
   guard.current = canLeave;
+  const path = (value: Entry) => value.trail.at(-1) === 'admin' ? '/admin' : '/';
   useLayoutEffect(() => {
     if (!enabled) return;
-    window.history.replaceState(current.current, '');
+    window.history.replaceState(current.current, '', path(current.current));
     const pop = (event: PopStateEvent) => {
       const previous = current.current, incoming = entry(event.state);
       moving.current = false;
       if (incoming?.owner === previous.owner) {
-        if (!guard.current() && incoming.trail.length !== previous.trail.length) {
-          moving.current = true;
-          window.history.go(previous.trail.length - incoming.trail.length);
+        if (!guard.current(incoming.trail.at(-1)) && incoming.trail.join('/') !== previous.trail.join('/')) {
+          const delta = previous.trail.length - incoming.trail.length;
+          if (delta) { moving.current = true; window.history.go(delta); }
+          else window.history.replaceState(previous, '', path(previous));
           return;
         }
         current.current = incoming; setState(incoming);
       } else {
         // A stale identity's entry cannot restore its screens into this account.
         const next: Entry = guard.current() ? { owner: previous.owner, trail: ['home'] } : previous;
-        window.history.replaceState(next, ''); current.current = next; setState(next);
+        window.history.replaceState(next, '', path(next)); current.current = next; setState(next);
       }
     };
     window.addEventListener('popstate', pop);
     return () => window.removeEventListener('popstate', pop);
   }, [enabled]);
   const open = (next: HomeDestination, question?: QuestionContext, replace = false) => {
-    if (moving.current || !guard.current() || (current.current.trail.at(-1) === next && !replace)) return;
+    if (moving.current || !guard.current(next) || (current.current.trail.at(-1) === next && !replace)) return;
     const value: Entry = { owner: initial.owner, trail: replace ? [...current.current.trail.slice(0, -1), next] : [...current.current.trail, next], ...(question ? { question } : {}) };
-    if (replace) window.history.replaceState(value, ''); else window.history.pushState(value, ''); current.current = value; setState(value);
+    if (replace) window.history.replaceState(value, '', path(value)); else window.history.pushState(value, '', path(value)); current.current = value; setState(value);
   };
-  const backTo = (target: HomeDestination) => {
-    if (moving.current || !guard.current()) return;
+  const backTo = (target: HomeDestination, replace = false) => {
+    if (moving.current || !guard.current(target)) return;
     const value = current.current, index = value.trail.lastIndexOf(target);
     const installed = entry(window.history.state);
-    if (index >= 0 && index < value.trail.length - 1 && installed?.owner === value.owner) {
+    if (!replace && index >= 0 && index < value.trail.length - 1 && installed?.owner === value.owner) {
       moving.current = true; window.history.go(index - value.trail.length + 1);
     } else if (value.trail.at(-1) !== target) {
       const next: Entry = { owner: value.owner, trail: target === 'home' ? ['home'] : ['home', target] };
-      window.history.replaceState(next, ''); current.current = next; setState(next);
+      window.history.replaceState(next, '', path(next)); current.current = next; setState(next);
     }
   };
   const openProfileQuestion = (profileQuestionId: string) => {
     if (moving.current || !guard.current() || current.current.trail.at(-1) === 'profile-question-editor') return;
     const value: Entry = { owner: initial.owner, trail: [...current.current.trail, 'profile-question-editor'], profileQuestionId };
-    window.history.pushState(value, ''); current.current = value; setState(value);
+    window.history.pushState(value, '', path(value)); current.current = value; setState(value);
   };
   return { destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
 }

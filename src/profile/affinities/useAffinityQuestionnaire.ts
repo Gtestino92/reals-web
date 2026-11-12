@@ -7,7 +7,8 @@ import { answerable, validAnswer } from './presentation';
 interface State { catalog: Catalog | null; answers: Answer[]; busy: boolean; uncertain: boolean; error: string }
 interface Owner { identity: string; lifetime: AbortController; read: AbortController | null; serial: number; mutation: boolean; uncertain: boolean }
 const empty: State = { catalog: null, answers: [], busy: false, uncertain: false, error: '' };
-export function useAffinityQuestionnaire(controller: SessionController) {
+export function useAffinityQuestionnaire(controller: SessionController, active = true) {
+  const foreground = useRef(active); foreground.current = active;
   const session = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const identity = session.phase === 'ready' ? `${session.account?.id}/${session.profile?.id}` : '';
   const [state, setState] = useState(empty), latest = useRef(empty), owner = useRef<Owner | null>(null);
@@ -19,7 +20,8 @@ export function useAffinityQuestionnaire(controller: SessionController) {
     const read = new AbortController(), serial = ++r.serial;
     r.read = read;
     const signal = AbortSignal.any([read.signal, r.lifetime.signal]);
-    install({ ...latest.current, busy: true, error: '' });
+    r.uncertain = true;
+    install({ ...latest.current, busy: true, uncertain: true, error: '' });
     try {
       const [catalog, answers] = await Promise.all([controller.request('/reference/affinity-questions', signal).then(parseCatalog), controller.request('/me/profile/affinity-answers', signal).then(parseAnswers)]);
       if (valid(r, serial)) { r.uncertain = false; install({ catalog, answers, busy: false, uncertain: false, error: '' }); }
@@ -32,17 +34,17 @@ export function useAffinityQuestionnaire(controller: SessionController) {
     if (!identity || !controller.snapshot.profile) return;
     const r: Owner = { identity, lifetime: new AbortController(), read: null, serial: 0, mutation: false, uncertain: false };
     owner.current = r; void refresh();
-    const resume = () => { if (document.visibilityState === 'visible') void refresh(); };
+    const resume = () => { if (foreground.current && document.visibilityState === 'visible') void refresh(); };
     document.addEventListener('visibilitychange', resume);
     return () => { document.removeEventListener('visibilitychange', resume); r.lifetime.abort(); r.read?.abort(); if (owner.current === r) owner.current = null; };
   }, [controller, identity]); // Each identity owns all reads and writes; no polling.
   const mutate = async (questionId: string, answerCode: string | null): Promise<Answer[] | null> => {
     const r = owner.current, snapshot = latest.current;
-    if (!r || r.mutation || r.uncertain || !snapshot.catalog || !valid(r, r.serial)) return null;
+    if (!r || r.mutation || r.read || r.uncertain || !snapshot.catalog || !valid(r, r.serial)) return null;
     const q = answerable(snapshot.catalog).find(q => q.id === questionId);
     if (!q || (answerCode !== null && !q.options.some(o => o.code === answerCode))) return null;
     if (answerCode === validAnswer(q, snapshot.answers)?.answerCode) return snapshot.answers;
-    r.mutation = true; r.read?.abort(); r.read = null;
+    r.mutation = true;
     const serial = ++r.serial;
     install({ ...snapshot, busy: true, error: '' });
     try {

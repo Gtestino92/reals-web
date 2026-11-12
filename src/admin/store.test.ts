@@ -6,6 +6,33 @@ import { diag, photo, summary, appeal } from './fixtures';
 const tick = async () => { for(let i=0;i<10;i++) await Promise.resolve(); };
 function setup() { const request = vi.fn(async (_path: string, _signal: AbortSignal, _method?: string, _body?: unknown): Promise<unknown> => []); const store = new AdminStore({ request }); return { request,store }; }
 async function ready() { const r = setup(); r.request.mockResolvedValueOnce(diag).mockResolvedValueOnce([photo]); r.store.start(); await tick(); return r; }
+it('foreground reconciliation retains rows and blocks duplicate reads without replacing healthy content', async () => {
+  const { store, request } = await ready(); const rows = store.getSnapshot().rows;
+  let finish!: (value: unknown) => void;
+  request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })); request.mockClear();
+  const read = store.load(true); void store.load(true);
+  expect(store.getSnapshot()).toMatchObject({ rows, busy: false, refreshing: true, selected: null });
+  expect(store.getSnapshot().rows).toBe(rows); expect(request).toHaveBeenCalledOnce();
+  finish([photo]); await read; expect(store.getSnapshot()).toMatchObject({ refreshing: false, blocked: false, rows: [photo] });
+});
+it('selection supersedes a foreground read; its late result cannot replace the selected context', async () => {
+  const { store, request } = await ready(); let finish!: (value: unknown) => void;
+  request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const read = store.load(true), signal = request.mock.calls.at(-1)![1];
+  await store.select(photo); expect(signal.aborted).toBe(true);
+  finish([]); await read; expect(store.getSnapshot()).toMatchObject({ selected: photo, rows: [photo], refreshing: false });
+});
+it.each([new ApiError('network'), new ApiError('authorization', 403)])('foreground failure preserves recovery or clears denied data: %s', async error => {
+  const { store, request } = await ready(); request.mockRejectedValueOnce(error); await store.load(true);
+  if (error.status === 403) expect(store.getSnapshot()).toMatchObject({ access: 'denied', rows: [], refreshing: false });
+  else expect(store.getSnapshot()).toMatchObject({ access: 'allowed', rows: [photo], blocked: true, refreshing: false });
+});
+it('disposal aborts foreground reconciliation and rejects its late response', async () => {
+  const { store, request } = await ready(); let finish!: (value: unknown) => void;
+  request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const read = store.load(true), signal = request.mock.calls.at(-1)![1]; store.dispose(); finish([photo]); await read;
+  expect(signal.aborted).toBe(true); expect(store.getSnapshot()).toMatchObject({ access: 'checking', rows: [], refreshing: false });
+});
 const sourceDetail = { report: summary, details: 'Source report', messages: [] };
 async function selectedAppeal() {
   const r = await ready();

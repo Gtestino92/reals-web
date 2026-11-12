@@ -97,7 +97,7 @@ export class ChatSession {
     const signal = AbortSignal.any([read.signal, this.lifetime.signal]), serial = ++this.serial;
     this.install({ busy: !this.state.chat });
     try { await this.load(signal, serial, full); if (this.current(serial) && !silent) this.install({ error: '', reactionFeedback: null, messageError: false }); }
-    catch (error) { if (this.current(serial) && !signal.aborted && !this.terminalError(error)) this.install({ blocked: true, error: 'No pudimos actualizar el chat. Revisá tu conexión y presioná Actualizar.' }); }
+    catch (error) { if (this.current(serial) && !signal.aborted && !this.terminalError(error)) this.install({ blocked: true, error: 'No pudimos actualizar el chat. Revisá tu conexión y usá Reintentar conexión.' }); }
     finally { if (this.current(serial)) { this.read = null; this.install({ busy: false }); } }
   };
   private async write(path: string, method: string, body: unknown, outgoing?: Outgoing) {
@@ -126,7 +126,7 @@ export class ChatSession {
     } catch (error) {
       if (!this.current(serial)) return;
       if (this.terminalError(error)) return;
-      if (accepted) { this.install({ blocked: true, messageError: !!outgoing, reactionFeedback: method === 'PUT' ? 'error' : null, error: 'La acción fue confirmada, pero no pudimos actualizar el chat. Presioná Actualizar; no hace falta repetirla.' }); return; }
+      if (accepted) { this.install({ blocked: true, messageError: !!outgoing, reactionFeedback: method === 'PUT' ? 'error' : null, error: 'La acción fue confirmada, pero no pudimos actualizar el chat. Usá Reintentar conexión; no hace falta repetirla.' }); return; }
       const ambiguous = !(error instanceof ApiError) || error.status === 0 || error.status >= 500 || error.kind === 'invalid';
       const code = error instanceof ApiError ? error.code : '';
       this.install({ blocked: true, messageError: !!outgoing, reactionFeedback: method === 'PUT' ? 'error' : null, error: outgoing && ambiguous ? 'Envío sin confirmar. Actualizá antes de reintentar; conservamos el mismo mensaje.' : code === 'CHAT_APPROVAL_TOO_EARLY' || code.includes('PARTICIPATION') || code.includes('APPROVAL') ? 'Todavía no se cumplen los requisitos para aprobar. Seguí conversando y actualizá el estado.' : 'No pudimos completar la acción. Actualizá el estado antes de volver a intentar.',

@@ -1,3 +1,4 @@
+import type { AppCheckTokenProvider } from './appCheck';
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { maxRetryAfterSeconds, terminalCodes } from './errors';
 import type { Identity } from './firebase';
@@ -12,25 +13,36 @@ function parseRetryAfter(value: string | null): number | undefined {
   return Number.isSafeInteger(seconds) && seconds <= maxRetryAfterSeconds ? seconds : undefined;
 }
 export function object(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
+function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    if (signal.aborted) { signal.removeEventListener('abort', abort); abort(); }
+  });
+}
 export class ApiClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis), private readonly ownership?: TabOwnershipManager) {}
-  withOwnership(ownership?: TabOwnershipManager) { return new ApiClient(this.fetcher, ownership); }
-  async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true): Promise<unknown> {
+  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis), private readonly ownership?: TabOwnershipManager, private readonly appCheckToken?: AppCheckTokenProvider) {}
+  withOwnership(ownership?: TabOwnershipManager) { return new ApiClient(this.fetcher, ownership, this.appCheckToken); }
+  withAppCheck(provider?: AppCheckTokenProvider) { return new ApiClient(this.fetcher, this.ownership, provider); }
+  async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true, adminGrant?: string): Promise<unknown> {
     this.ownership?.assert();
     if (this.ownership) signal = AbortSignal.any([signal, this.ownership.signal]);
     for (let attempt = 0; attempt < 2; attempt++) {
       signal.throwIfAborted();
       const headers: Record<string, string> = {};
       if (user) {
-        const token = await user.getIdToken(attempt === 1);
+        const token = await abortable(user.getIdToken(attempt === 1), signal);
         if (!token.trim()) throw new ApiError('authorization', 401, 'INVALID_TOKEN');
         headers.Authorization = `Bearer ${token}`;
       }
+      if (this.appCheckToken && path !== '/ping' && !path.startsWith('/local-dev/')) headers['X-Firebase-AppCheck'] = await abortable(this.appCheckToken(), signal);
+      if (adminGrant && (path.startsWith('/admin/') || path.startsWith('/admin-auth/'))) headers['X-Reals-Admin-Grant'] = adminGrant;
       signal.throwIfAborted();
       const multipart = body instanceof FormData;
       if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
       let response: Response;
-      try { response = await this.fetcher(`/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...(path.startsWith('/admin/') ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
+      try { response = await this.fetcher(`/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...((path.startsWith('/admin/') || path.startsWith('/admin-auth/')) ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
       catch { signal.throwIfAborted(); throw new ApiError('network'); }
       signal.throwIfAborted();
       if (!response.ok) {
@@ -39,7 +51,7 @@ export class ApiClient {
         try { raw = await response.json(); } catch { signal.throwIfAborted(); throw new ApiError('invalid', response.status, '', {}, retryAfter); }
         signal.throwIfAborted();
         if (!object(raw) || typeof raw.code !== 'string') throw new ApiError('invalid', response.status, '', {}, retryAfter);
-        if (response.status === 401 && raw.code === 'INVALID_TOKEN' && user && attempt === 0 && refreshInvalidToken) continue;
+        if (response.status === 401 && raw.code === 'INVALID_TOKEN' && user && attempt === 0 && refreshInvalidToken && !path.startsWith('/admin/') && !path.startsWith('/admin-auth/')) continue;
         throw new ApiError(response.status === 401 || response.status === 403 ? 'authorization' : 'backend', response.status, raw.code, {
           ...(typeof raw.error === 'string' ? { error: raw.error } : {}),
           ...(typeof raw.message === 'string' ? { message: raw.message } : {}),

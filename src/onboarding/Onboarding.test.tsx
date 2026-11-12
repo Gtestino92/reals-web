@@ -166,8 +166,8 @@ it('retains answer and selection drafts after uncertain writes and does not redi
 });
 it('returns to the list when the active question disappears and retains text on a semantic refresh', async () => {
   const { catalog } = installQuestions([savedAnswer()]); await openManagement('Tu perfil'); await openProfileQuestions(); fireEvent.click(screen.getByRole('button', { name: 'Responder o editar preguntas' })); fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' }));
-  fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: 'Mi borrador' } }); catalog.questions[0]!.semanticVersion = 2; fireEvent.click(screen.getByRole('button', { name: 'Actualizar preguntas' })); await screen.findByText('Versión anterior. Guardá la respuesta para actualizarla.'); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Mi borrador');
-  catalog.questions = catalog.questions.filter(q => q.id !== 'A'); fireEvent.click(screen.getByRole('button', { name: 'Actualizar preguntas' })); await screen.findByRole('heading', { name: 'Responder preguntas' }); expect(screen.queryByRole('button', { name: 'Abrir: Pregunta A' })).toBeNull();
+  fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: 'Mi borrador' } }); catalog.questions[0]!.semanticVersion = 2; refreshView(); await screen.findByText('Versión anterior. Guardá la respuesta para actualizarla.'); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Mi borrador');
+  catalog.questions = catalog.questions.filter(q => q.id !== 'A'); refreshView(); await screen.findByRole('heading', { name: 'Responder preguntas' }); expect(screen.queryByRole('button', { name: 'Abrir: Pregunta A' })).toBeNull();
 });
 it('does not enter questions during profile writes or a photo crop', async () => {
   installQuestions(); await openManagement('Tu perfil'); await screen.findByRole('form', { name: 'Datos del perfil' });
@@ -320,10 +320,10 @@ it('records exactly the required legal action and version', async () => { satisf
 it('recovers a stale legal version without silently accepting the new version', async () => { satisfied = false; mount(); await screen.findByRole('heading',{ name:'Antes de continuar' }); version = 'v2'; fireEvent.click(screen.getByRole('button',{ name:'Confirmar lectura' })); await screen.findByText(/Versión v2/); expect(satisfied).toBe(false); expect(screen.getByRole('button',{ name:'Confirmar lectura' })).toBeEnabled(); });
 it('uses a single country dropdown and validates without a mutation', async () => { mount(); const form = await createForm(); expect(within(form).queryByLabelText('Buscar país')).not.toBeInTheDocument(); expect(within(form).getByLabelText('País')).toHaveValue('AR'); expect(within(form).getByRole('option',{ name:'España' })).toBeInTheDocument(); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'x' } }); fireEvent.submit(form); expect(await screen.findByRole('alert')).toHaveTextContent('Nombre visible'); expect(writes('POST')).toHaveLength(0); });
 it('updates details and filters using separate contracts', async () => { profile = { ...initialProfile }; mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
-  fireEvent.click(screen.getByText('Datos del perfil',{ selector:'summary' })); const details = screen.getByRole('form',{ name:'Datos del perfil' }); fireEvent.change(within(details).getByLabelText('Ciudad'),{ target:{ value:'Rosario' } }); fireEvent.submit(details); await waitFor(() => expect(profile?.city).toBe('Rosario')); await waitFor(() => expect(screen.getByRole('button',{ name:'Actualizar estado' })).toBeEnabled()); expect(JSON.parse(String(writes('PATCH')[0]?.[1]?.body))).not.toHaveProperty('intention');
+  fireEvent.click(screen.getByText('Datos del perfil',{ selector:'summary' })); const details = screen.getByRole('form',{ name:'Datos del perfil' }); fireEvent.change(within(details).getByLabelText('Ciudad'),{ target:{ value:'Rosario' } }); fireEvent.submit(details); await waitFor(() => expect(profile?.city).toBe('Rosario')); await waitFor(() => expect(window.document.querySelector('.onboarding')).toHaveAttribute('aria-busy', 'false')); expect(JSON.parse(String(writes('PATCH')[0]?.[1]?.body))).not.toHaveProperty('intention');
   fireEvent.click(screen.getByText('Preferencias de búsqueda',{ selector:'summary' })); const filters = screen.getByRole('form',{ name:'Preferencias de búsqueda' }); fireEvent.change(within(filters).getByLabelText('Intención'),{ target:{ value:'FRIENDSHIP' } }); fireEvent.submit(filters); await waitFor(() => expect(profile?.intention).toBe('FRIENDSHIP')); expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body))).not.toHaveProperty('city');
 });
-it('reorders all placements and deletes by ID with confirmation', async () => { profile = { ...initialProfile }; list = [initialPhoto,{ ...initialPhoto,id:'second',position:2 }]; vi.spyOn(window,'confirm').mockReturnValue(true); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); reorderWithKeyboard(1,2); await waitFor(() => expect(list[0]?.position).toBe(2)); await waitFor(() => expect(screen.getByRole('button',{ name:'Actualizar estado' })).toBeEnabled()); expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body)).placements).toEqual([{ photoId:'second',position:1 },{ photoId:'photo',position:2 }]); fireEvent.click(screen.getByRole('button',{ name:'Eliminar foto 2' })); await waitFor(() => expect(list).toHaveLength(1)); expect(writes('DELETE')[0]?.[0]).toBe('/api/me/profile/photos/photo'); });
+it('reorders all placements and deletes by ID with confirmation', async () => { profile = { ...initialProfile }; list = [initialPhoto,{ ...initialPhoto,id:'second',position:2 }]; vi.spyOn(window,'confirm').mockReturnValue(true); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); reorderWithKeyboard(1,2); await waitFor(() => expect(list[0]?.position).toBe(2)); await waitFor(() => expect(window.document.querySelector('.onboarding')).toHaveAttribute('aria-busy', 'false')); expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body)).placements).toEqual([{ photoId:'second',position:1 },{ photoId:'photo',position:2 }]); fireEvent.click(screen.getByRole('button',{ name:'Eliminar foto 2' })); await waitFor(() => expect(list).toHaveLength(1)); expect(writes('DELETE')[0]?.[0]).toBe('/api/me/profile/photos/photo'); });
 it.each(['EMAIL_NOT_VERIFIED','PROFILE_PHOTOS_REQUIRED','PROFILE_PERSON_PHOTO_REQUIRED','PROFILE_FULL_BODY_PHOTO_REQUIRED','PROFILE_PHOTO_MODERATION_NOT_APPROVED','PROFILE_AUTHENTICITY_VERIFICATION_REQUIRED','LEGAL_ACTION_REQUIRED','PROFILE_NOT_ACTIVATABLE'])('retains draft after activation rejection %s', async code => {
   profile = { ...initialProfile }; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/activation') ? Promise.resolve(json({ code },409)) : original(input,options)); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); fireEvent.click(screen.getByRole('button',{ name:'Activar perfil' })); await screen.findByRole('alert'); expect(screen.queryByRole('heading',{ name:'Inicio' })).not.toBeInTheDocument(); expect(profile.status).toBe('DRAFT');
 });
@@ -357,7 +357,7 @@ it('keeps authoritative order on failed reorder and refreshes before retry', asy
 it('blocks malformed backend responses and permits retry without losing Firebase', async () => {
   profile = { ...initialProfile }; const original = fetcher.getMockImplementation()!; let malformed = true;
   fetcher.mockImplementation((input,options) => String(input).endsWith('/photos') && malformed ? Promise.resolve(json({ wrong:true })) : original(input,options));
-  mount(); await screen.findByRole('alert'); expect(auth.signOut).not.toHaveBeenCalled(); malformed = false; fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' })); await screen.findByRole('heading',{ name:'Completá tu perfil' });
+  mount(); await screen.findByRole('alert'); expect(auth.signOut).not.toHaveBeenCalled(); malformed = false; refreshView(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
 });
 it('routes an empty legal catalog directly to creation', async () => {
   const original = fetcher.getMockImplementation()!;
@@ -399,7 +399,7 @@ it('fails closed on inconsistent legal status and recovers only after authoritat
   expect(writes('POST')).toHaveLength(0);
   expect(auth.signOut).not.toHaveBeenCalled();
   inconsistent = false;
-  fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  refreshView();
   await screen.findByRole('form',{ name:'Crear perfil' });
 });
 it.each(['network','server','malformed'])('allows DRAFT completion and updates when auxiliary Home fails: %s', async failure => {
@@ -452,7 +452,8 @@ it.each([false,true])('Home retry installs only authoritative interaction state 
   await waitFor(() => expect(screen.queryByRole('heading',{ name:'Inicio no disponible' })).not.toBeInTheDocument());
   expect(!!screen.queryByRole('heading',{ name:'Inicio: interacciones vigentes' })).toBe(existing);
   expect(writes('POST')).toHaveLength(0);
-  unavailable = true; fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  if (existing) await waitFor(() => expect(window.document.querySelector('.home')).toHaveAttribute('aria-busy', 'false'));
+  unavailable = true; act(() => window.document.dispatchEvent(new Event('visibilitychange')));
   await screen.findByRole('heading',{ name:'Inicio no disponible' });
   expect(screen.queryByRole('heading',{ name:'Inicio: interacciones vigentes' })).not.toBeInTheDocument();
   expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled();
@@ -484,7 +485,7 @@ it.each([401,403])('propagates Home authorization HTTP %s with a nonterminal cod
   expect(auth.signOut).not.toHaveBeenCalled();
   expect(fetcher.mock.calls.filter(x => String(x[0]).endsWith('/home'))).toHaveLength(1);
   denied = false;
-  fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  refreshView();
   await screen.findByRole('heading',{ name:'Completá tu perfil' });
   expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled();
 });
@@ -528,10 +529,11 @@ it('enables activation after Firebase reload confirms email verification', async
 });
 const technicalStatus = /Firebase autenticado|Comprobando sesión de Firebase|Cargando sesión del backend|Sesión del backend lista|La sesión del backend no está lista/i;
 function expectPreparing() {
-  expect(screen.getByRole('status')).toHaveTextContent('Preparando Reals…');
+  expect(screen.getByRole('status').textContent).toMatch(/Preparando (Reals|tu sesión(?: de forma segura)?)…/);
   expect(screen.getByRole('heading',{ name:'Reals',level:1 })).toBeVisible();
-  expect(screen.queryByRole('button',{ name:'Ingresar' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button',{ name:'Actualizar estado' })).not.toBeInTheDocument();
+  const login = screen.queryByRole('button',{ name:'Ingresar' });
+  if (login) expect(login).toBeDisabled();
+  expect(screen.queryByRole('button',{ name:'Consultar estado' })).not.toBeInTheDocument();
   expect(screen.queryByText('Actualizando estado…')).not.toBeInTheDocument();
   expect(screen.getByRole('main').textContent).not.toMatch(technicalStatus);
 }
@@ -568,7 +570,7 @@ it.each([
     expect(screen.queryByRole('button',{ name:'Ingresar' })).not.toBeInTheDocument();
     expect(screen.getByRole('main').textContent).not.toMatch(technicalStatus);
     expect(visibleFrames.length).toBeGreaterThan(0);
-    for (const frame of visibleFrames) { expect(frame).not.toMatch(technicalStatus); expect(frame).not.toContain('Iniciar sesión'); expect(frame).toContain('Reals'); }
+    for (const frame of visibleFrames) { expect(frame).not.toMatch(technicalStatus); expect(frame).toContain('Reals'); }
   } finally { observed.disconnect(); }
 });
 it.each(['signIn','signUp','google'] as const)('navigates from %s without exposing technical authenticated checkpoints', async operation => {
@@ -597,7 +599,7 @@ it('replaces initial onboarding loading with a recoverable error and restores lo
   mount(); await screen.findByRole('alert');
   expect(screen.queryByText('Preparando Reals…')).not.toBeInTheDocument();
   expect(screen.getByRole('button',{ name:'Cerrar sesión' })).toBeEnabled();
-  offline = false; fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  offline = false; refreshView();
   await waitFor(() => expect(finish).toBeDefined()); expectPreparing();
   await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[] })));
   await screen.findByRole('heading',{ name:'Crear perfil' });
@@ -695,7 +697,7 @@ it('shows transient upload guidance during reconciliation and an actionable erro
   let finish: ((response: Response) => void) | undefined; let refreshing = false;
   fetcher.mockImplementation((input,options) => refreshing && String(input).endsWith('/photos') ? new Promise(resolve => { finish = resolve; }) : original(input,options));
   mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
-  refreshing = true; fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  refreshing = true; refreshView();
   await waitFor(() => expect(finish).toBeDefined());
   expect(screen.getByRole('button',{ name:'Agregar en posición 1' })).toBeDisabled();
   expect(screen.getByRole('button',{ name:'Agregar en posición 1' })).toHaveAccessibleDescription(/Estamos actualizando/);
@@ -811,6 +813,34 @@ it('reconciles a reorder that persisted before a network failure and blocks dupl
   await screen.findByRole('alert');
   expect(screen.getByRole('article',{ name:'Foto 4' })).toHaveAttribute('data-photo-id','photo');
   expect(screen.getByRole('button',{ name:'Reordenar foto 4' })).toBeDisabled(); expect(writes('PUT')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button',{ name:'Actualizar estado' }));
+  refreshView();
   await waitFor(() => expect(screen.getByRole('button',{ name:'Reordenar foto 4' })).toBeEnabled()); expect(writes('PUT')).toHaveLength(1);
+});
+
+function refreshView() {
+  const recovery = screen.queryByRole('button', { name: /^(Reintentar|Consultar estado)$/ });
+  if (recovery) fireEvent.click(recovery);
+  else act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+}
+
+it.each(['Tu perfil', 'Preferencias'])('retains the confirmed %s form across delayed and failed revisits', async destination => {
+  await openManagement(destination);
+  const title = destination === 'Tu perfil' ? 'Datos del perfil' : 'Preferencias de búsqueda';
+  const form = await screen.findByRole('form', { name: title });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
+  await screen.findByRole('heading', { name: 'Inicio' });
+  await waitFor(() => expect(screen.getByRole('button', { name: destination })).toBeEnabled());
+  const base = fetcher.getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementation((url, options) => url === '/api/me/profile' ? new Promise(resolve => { finish = resolve; }) : base(url, options));
+  fireEvent.click(screen.getByRole('button', { name: destination }));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(screen.getByRole('form', { name: title })).toBe(form);
+  expect(form.querySelector('input')).toBeDisabled();
+  expect(window.document.querySelector('.session-loading')).toBeNull();
+  await act(async () => finish(json({ code: 'SERVICE_UNAVAILABLE' }, 503)));
+  await screen.findByRole('alert');
+  expect(form).toBeVisible(); expect(form.querySelector('input')).toBeDisabled();
+  expect(writes(destination === 'Tu perfil' ? 'PATCH' : 'PUT')).toHaveLength(0);
 });

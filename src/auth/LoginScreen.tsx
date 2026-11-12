@@ -8,6 +8,7 @@ export type LoginErrorOwner = AuthMode | 'shared';
 
 export interface LoginScreenProps {
   loading?: boolean;
+  sessionLoading?: boolean;
   googleLoading?: boolean;
   passwordResetLoading?: boolean;
   error?: string | null;
@@ -53,6 +54,7 @@ function useResetCooldown(deadline: number | null) {
 
 export function LoginScreen({
   loading = false,
+  sessionLoading = false,
   googleLoading = false,
   passwordResetLoading = false,
   error = null,
@@ -69,7 +71,7 @@ export function LoginScreen({
   const [password, setPassword] = useState('');
   const [keepSignedIn, setKeepSignedIn] = useState(false);
   const cooldown = useResetCooldown(passwordResetAvailableAtMillis);
-  const busy = loading || googleLoading || passwordResetLoading;
+  const busy = loading || googleLoading || passwordResetLoading || sessionLoading;
   const signIn = mode === 'signIn';
   const visibleError = error !== null && (
     errorOwner === 'shared' || errorOwner === mode || (errorOwner === null && signIn)
@@ -91,9 +93,9 @@ export function LoginScreen({
             <div className="brand-divider" aria-hidden="true"><span /></div>
           </div>
           <h2 id="login-heading">{signIn ? 'Iniciar sesión' : 'Creá tu cuenta'}</h2>
-          <p id="login-description">{signIn
-            ? 'Ingresá con tu email y contraseña para continuar.'
-            : 'Registrate con tu email y contraseña para empezar.'}</p>
+          <p id="login-description" className="login-description">{sessionLoading || loading || googleLoading
+            ? <span role="status">Preparando tu sesión de forma segura…</span>
+            : signIn ? 'Ingresá con tu email y contraseña para continuar.' : 'Registrate con tu email y contraseña para empezar.'}</p>
         </header>
         <form
           className="login-form"

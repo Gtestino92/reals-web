@@ -23,3 +23,34 @@
 @media (max-width: 700px) { .admin { padding: 16px; } .admin-panels { grid-template-columns: minmax(0,1fr); } }
 
 .admin-thumbnail { width: 48px; height: 48px; object-fit: cover; vertical-align: middle; margin-right: 10px; }
+
+.admin-mfa-modal { width: min(460px, calc(100vw - 32px)); box-sizing: border-box; padding: 24px; color: var(--color-on-surface); background: var(--color-surface); border: 1px solid var(--color-outline); border-radius: 14px; max-height: calc(100dvh - 32px); overflow: auto; }
+.admin-mfa-modal::backdrop { background: #0008; }
+.admin-mfa-modal header { justify-content: space-between; gap: 8px; }
+.admin-mfa-modal h2 { flex: 1; margin: 0; font-family: var(--font-display); font-weight: 400; }
+.admin-otp-field { position: relative; }
+.admin-mfa-modal { --admin-confirmed: #24654b; }
+.admin-otp-slots { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.admin-otp-slots span { position: relative; min-height: 54px; display: grid; place-items: center; border: 1px solid var(--color-outline); border-radius: 8px; font: 1.5rem monospace; }
+.admin-otp-field:focus-within .admin-otp-slot-active { outline: 2px solid var(--color-secondary); outline-offset: 2px; }
+.admin-otp-caret { display: none; width: 2px; height: 1.5rem; background: var(--color-primary); }
+.admin-otp-field:focus-within .admin-otp-caret { display: block; animation: admin-otp-blink 1s step-end infinite; }
+.admin-otp-field[data-feedback=pending] .admin-otp-slots { opacity: .65; }
+.admin-otp-field[data-feedback=invalid] .admin-otp-slots span { border-color: var(--color-error); }
+.admin-otp-field[data-feedback=success] .admin-otp-slots span { animation: admin-otp-success 120ms ease-out both; color: var(--admin-confirmed); }
+.admin-otp-field[data-feedback=success] span:nth-child(2) { animation-delay: 45ms; }
+.admin-otp-field[data-feedback=success] span:nth-child(3) { animation-delay: 90ms; }
+.admin-otp-field[data-feedback=success] span:nth-child(4) { animation-delay: 135ms; }
+.admin-otp-field[data-feedback=success] span:nth-child(5) { animation-delay: 180ms; }
+.admin-otp-field[data-feedback=success] span:nth-child(6) { animation-delay: 225ms; }
+.admin-otp-feedback { min-height: 1.5em; margin-block: 12px; }
+.admin-otp-verified { color: var(--admin-confirmed); }
+@keyframes admin-otp-blink { 50% { opacity: 0; } }
+@keyframes admin-otp-success { from { background: var(--color-surface); border-color: var(--color-outline); } to { background: color-mix(in srgb, var(--admin-confirmed) 12%, var(--color-surface)); border-color: var(--admin-confirmed); } }
+@media (prefers-color-scheme: dark) { .admin-mfa-modal { --admin-confirmed: #8ad7ac; } }
+@media (prefers-reduced-motion: reduce) {
+  .admin-otp-field:focus-within .admin-otp-caret { animation: none; }
+  .admin-otp-field[data-feedback=success] .admin-otp-slots span { animation: none; background: color-mix(in srgb, var(--admin-confirmed) 12%, var(--color-surface)); border-color: var(--admin-confirmed); }
+}
+.admin-otp-field input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .01; font-size: 24px; }
+@media (max-width: 420px) { .admin-mfa-modal { padding: 18px; } .admin-otp-slots { gap: 6px; } }

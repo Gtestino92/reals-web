@@ -6,7 +6,7 @@ const sdk = vi.hoisted(() => ({
   initializeApp: vi.fn(() => ({})), initializeAuth: vi.fn(), onAuthStateChanged: vi.fn(),
   setPersistence: vi.fn<(_auth: unknown, persistence: string) => Promise<void>>(), signInWithEmailAndPassword: vi.fn(),
   createUserWithEmailAndPassword: vi.fn(), signInWithPopup: vi.fn(), sendEmailVerification: vi.fn(), signOut: vi.fn(),
-  reauthenticateWithCredential: vi.fn(), updatePassword: vi.fn(), EmailAuthProvider: { credential: vi.fn() },
+  reauthenticateWithPopup: vi.fn(), getIdTokenResult: vi.fn(), reauthenticateWithCredential: vi.fn(), updatePassword: vi.fn(), EmailAuthProvider: { credential: vi.fn() },
 }));
 vi.mock('firebase/app', () => ({ getApps: () => [], initializeApp: sdk.initializeApp }));
 vi.mock('firebase/auth', () => ({ ...sdk, browserLocalPersistence: 'local', browserSessionPersistence: 'session', browserPopupRedirectResolver: 'popup', GoogleAuthProvider: class {} }));
@@ -192,4 +192,24 @@ it('ownership loss between reauthentication and update prevents password mutatio
   sdk.reauthenticateWithCredential.mockImplementationOnce(async () => { ownership.stop(); });
   await expect(setup.service.changePassword!(identity, 'synthetic', 'synthetic-next')).rejects.toHaveProperty('name', 'AbortError');
   expect(sdk.updatePassword).not.toHaveBeenCalled(); expect(sdk.auth.currentUser).toBe(identity); expect(sdk.signOut).not.toHaveBeenCalled();
+});
+
+it('opens Google reauthentication synchronously and checks refreshed provider and auth_time', async () => {
+  sdk.auth.currentUser = user;
+  sdk.reauthenticateWithPopup.mockResolvedValue({ user });
+  sdk.getIdTokenResult.mockResolvedValue({ signInProvider: 'google.com', authTime: new Date().toISOString() });
+  const pending = service().reauthenticateGoogle!(user);
+  expect(sdk.reauthenticateWithPopup).toHaveBeenCalledOnce();
+  await pending; expect(sdk.getIdTokenResult).toHaveBeenCalledWith(user, true);
+});
+it.each(['password', 'stale', 'future', 'malformed'])('rejects unsuitable Google reauthentication token: %s', async scenario => {
+  sdk.auth.currentUser = user; sdk.reauthenticateWithPopup.mockResolvedValue({ user });
+  sdk.getIdTokenResult.mockResolvedValue({ signInProvider: scenario === 'password' ? 'password' : 'google.com', authTime: scenario === 'malformed' ? 'bad' : new Date(Date.now() + (scenario === 'future' ? 60000 : -300000)).toISOString() });
+  await expect(service().reauthenticateGoogle!(user)).rejects.toThrow();
+});
+it('does not install Google reauthentication after identity replacement', async () => {
+  sdk.auth.currentUser = user;
+  sdk.reauthenticateWithPopup.mockImplementation(async () => { sdk.auth.currentUser = { ...user, uid: 'other' }; });
+  await expect(service().reauthenticateGoogle!(user)).rejects.toThrow();
+  expect(sdk.getIdTokenResult).not.toHaveBeenCalled();
 });

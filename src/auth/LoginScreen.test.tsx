@@ -191,3 +191,16 @@ it('returns from sign-up with Escape without submitting or losing email', () => 
   expect(screen.getByLabelText('Email')).toHaveValue('persona@example.com');
   expect(actions.onSignIn).not.toHaveBeenCalled();
 });
+
+it('keeps the inputs and loading feedback without offering logout during bootstrap', () => {
+  const props = callbacks();
+  const view = render(<LoginScreen {...props} sessionLoading />);
+  const input = screen.getByLabelText('Email');
+  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull(); expect(input).toBeDisabled();
+  view.rerender(<LoginScreen {...props} />); expect(input).toBeEnabled();
+  view.rerender(<LoginScreen {...props} googleLoading />); expect(input).toBeDisabled();
+  view.rerender(<LoginScreen {...props} sessionLoading />);
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión');
+  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
+  expect(screen.getByLabelText('Email')).toBe(input); expect(input).toBeDisabled();
+});

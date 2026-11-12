@@ -22,7 +22,7 @@ it('offers confirmed exceptional sign-out after initial Home failure, while pres
   const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => url === '/api/me/home/status' ? Promise.reject(new TypeError('offline')) : base(url, options));
   mount(); await screen.findByRole('alert');
-  expect(screen.getByRole('button', { name: 'Actualizar' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Reintentar' })).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Cuenta' })).toBeNull();
 
   fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' })); expect(auth.signOut).not.toHaveBeenCalled();
@@ -141,7 +141,7 @@ it.each(['network','http','malformed'])('reconciles uncertain enqueue %s without
   mount(); await ready(); fireEvent.click(search()); const cancel = await screen.findByRole('button', { name: 'Cancelar búsqueda' });
   await screen.findByRole('alert'); expect(cancel).toBeDisabled(); expect(writes()).toHaveLength(1);
   expect(screen.queryByRole('button', { name: 'Reintentar ubicación' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Actualizar' })); await waitFor(() => expect(cancel).toBeEnabled()); expect(writes()).toHaveLength(1);
+  refreshView(); await waitFor(() => expect(cancel).toBeEnabled()); expect(writes()).toHaveLength(1);
 });
 it('cancel failure reconciles queue and requires an explicit refresh', async () => {
   home.matchmaking.inQueue = true;
@@ -162,7 +162,7 @@ it('polls status only until version/dirty/due marker changes and stops on unmoun
 it('rejects an obsolete refresh after tab restoration supersedes it', async () => {
   mount(); await ready(); let finish: ((r: Response) => void) | undefined;
   fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+  refreshView();
   await waitFor(() => expect(finish).toBeDefined());
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');act(() => document.dispatchEvent(new Event('visibilitychange')));
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');act(() => document.dispatchEvent(new Event('visibilitychange')));
@@ -172,14 +172,14 @@ it('rejects an obsolete refresh after tab restoration supersedes it', async () =
 it('clears Home and ignores late requests after an external sign-out', async () => {
   mount(); await ready(); let finish: (r: Response) => void = () => {};
   fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+  refreshView();
   act(() => observer(null));
   await screen.findByRole('button', { name: 'Ingresar' }); await act(async () => finish(json(homeStatus())));
   expect(screen.queryByText('Hola, Lucía')).toBeNull(); expect(writes()).toHaveLength(0);
 });
 it('preserves summaries when authoritative profile changes to DRAFT', async () => {
   mount(); await ready(); profile.status = 'DRAFT'; home.profileStatus = 'DRAFT'; home.pendingActions = [{ type: 'VISUAL_REVIEW', matchId: 'm', chatId: null }];
-  fireEvent.click(screen.getByRole('button', { name: 'Actualizar' })); await screen.findByText('Tu perfil está en borrador'); expect(await screen.findByRole('button', { name: 'Ver Actividad' })).toBeVisible(); expect(search()).toBeDisabled();
+  refreshView(); await screen.findByText('Tu perfil está en borrador'); expect(await screen.findByRole('button', { name: 'Ver Actividad' })).toBeVisible(); expect(search()).toBeDisabled();
 });
 it.each(['version','due'])('refreshes full Home for a status %s change', async mode => {
   vi.useFakeTimers();
@@ -207,11 +207,11 @@ it('malformed Home fails closed and retry recovers', async () => {
   const original = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, o) => String(url) === '/api/me/home' ? Promise.resolve(json({})) : original(url, o));
   mount(); await screen.findByRole('alert'); expect(screen.queryByRole('button', { name: 'Buscar chat' })).toBeNull();
-  fetcher.mockImplementation(original); fireEvent.click(screen.getByRole('button', { name: 'Actualizar' })); await ready(); expect(search()).toBeEnabled();
+  fetcher.mockImplementation(original); refreshView(); await ready(); expect(search()).toBeEnabled();
 });
 it('terminal authentication loss during Home refresh returns to login', async () => {
   mount(); await ready(); fetcher.mockImplementation(async () => json({ code: 'INVALID_TOKEN' }, 401));
-  fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+  refreshView();
   await screen.findByRole('button', { name: 'Ingresar' }); expect(auth.signOut).toHaveBeenCalledOnce(); expect(screen.queryByText('Hola, Lucía')).toBeNull();
 });
 it('failed reconciliation blocks further queue writes', async () => {
@@ -221,7 +221,7 @@ it('failed reconciliation blocks further queue writes', async () => {
     return original(url, o);
   });
   mount(); await ready(); fireEvent.click(search()); await screen.findByRole('alert');
-  expect(screen.queryByRole('button', { name: 'Buscar chat' })).toBeNull(); expect(screen.getByRole('button', { name: 'Actualizar' })).toBeEnabled(); expect(writes()).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: 'Buscar chat' })).toBeNull(); expect(screen.getByRole('button', { name: 'Consultar estado' })).toBeEnabled(); expect(writes()).toHaveLength(1);
 });
 it('opens Activity and returns with heading focus without fetching again', async () => {
   home.pendingActions = [{ type: 'VISUAL_REVIEW', matchId: 'v', chatId: null }];
@@ -318,7 +318,7 @@ it('keeps uncertain canceled admission visible even if a later DELETE succeeds',
   expect(screen.getByRole('heading', { name: 'Revisá tu búsqueda' })).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Volver a Inicio' })).toBeNull();
   expect(writes().map(([, o]) => o?.method)).toEqual(['POST','DELETE']);
-  fireEvent.click(screen.getByRole('button', { name: 'Actualizar' })); await waitFor(() => expect(search()).toBeEnabled());
+  refreshView(); await waitFor(() => expect(search()).toBeEnabled());
 });
 it('shows restored queue membership on the dedicated surface', async () => {
   home.matchmaking.inQueue = true; mount(); await ready();
@@ -343,7 +343,7 @@ it('retries a pre-POST timeout on the same screen with no full Home refresh or d
   mount(); await ready(); fetcher.mockClear(); fireEvent.click(search());
   const retry = await screen.findByRole('button', { name: 'Reintentar ubicación' });
   expect(screen.getByRole('alert')).toHaveTextContent('Se agotó el tiempo'); expect(fetcher).not.toHaveBeenCalled();
-  expect(screen.queryByRole('button', { name: 'Actualizar' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull();
   fireEvent.click(retry); fireEvent.click(retry);
   await confirmed(); await act(async () => oldCallback?.(position()));
   expect(geo).toHaveBeenCalledTimes(3); expect(writes()).toHaveLength(1);
@@ -545,9 +545,9 @@ it('waits for all parallel projections before installing the reconciled Home', a
   mount(); await ready(); const original = fetcher.getMockImplementation()!;
   let finish!: (response: Response) => void;
   fetcher.mockImplementation((url, options) => url === '/api/me/profile' ? new Promise(done => { finish = done; }) : original(url, options));
-  fetcher.mockClear(); fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+  fetcher.mockClear(); refreshView();
   await waitFor(() => expect(finish).toBeDefined());
-  expect(fetcher.mock.calls.some(([url]) => url === '/api/me/home')).toBe(true); expect(search()).toBeDisabled();
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/me/home')).toBe(true); expect(screen.getByText('Hola, Lucía')).toBeVisible();
   await act(async () => finish(json(profile))); await ready(); expect(search()).toBeEnabled();
 });
 it('browser Back dismisses sign-out and restores the owned Account entry', async () => {
@@ -557,4 +557,30 @@ it('browser Back dismisses sign-out and restores the owned Account entry', async
   try { act(() => history.back()); await waitFor(() => expect(restored).toHaveBeenCalledTimes(2)); }
   finally { window.removeEventListener('popstate', restored); }
   expect(screen.queryByRole('dialog')).toBeNull(); expect(history.state.trail.at(-1)).toBe('account'); expect(auth.signOut).not.toHaveBeenCalled();
+});
+
+function refreshView() {
+  const recovery = screen.queryByRole('button', { name: /^(Reintentar|Consultar estado)$/ });
+  if (recovery) fireEvent.click(recovery);
+  else { status.version++; act(() => document.dispatchEvent(new Event('visibilitychange'))); }
+}
+
+it('retains loaded affinity card content across a foreground refresh', async () => {
+  mount(); await ready(); await waitFor(() => expect(screen.queryByText('Cargando afinidades…')).toBeNull());
+  const card = screen.getByRole('button', { name: 'Afinidades' }), account = screen.getByRole('button', { name: 'Cuenta' });
+  const content = card.textContent;
+  const base = fetcher.getMockImplementation()!; let finish!: (value: Response) => void;
+  fetcher.mockImplementation((url, options) => url === '/api/reference/affinity-questions' ? new Promise(resolve => { finish = resolve; }) : base(url, options));
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(card.textContent).toBe(content); expect(screen.getByRole('button', { name: 'Cuenta' })).toBe(account);
+});
+
+it('renders a noninteractive structure while the first Home projection is pending', async () => {
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => url === '/api/me/home' ? new Promise(() => {}) : base(url, options));
+  mount(); await screen.findByText('Actualizando Inicio…');
+  expect(document.querySelector('.home-placeholder')).toHaveAttribute('aria-hidden', 'true');
+  expect(document.querySelectorAll('.home-placeholder-card')).toHaveLength(4);
+  expect(screen.queryByRole('button', { name: 'Cuenta' })).toBeNull();
 });

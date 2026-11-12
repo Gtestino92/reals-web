@@ -22,7 +22,8 @@ export function useProfileQuestions(controller: SessionController, active: boole
     const read = new AbortController(), serial = ++r.serial;
     r.read = read;
     const signal = AbortSignal.any([read.signal, r.lifetime.signal]);
-    install({ ...latest.current, busy: true, error: '' });
+    r.uncertain = true;
+    install({ ...latest.current, busy: true, uncertain: true, error: '' });
     try {
       const [catalog, answers] = await Promise.all([
         controller.request('/reference/profile-questions', signal).then(parseQuestionCatalog),
@@ -49,7 +50,7 @@ export function useProfileQuestions(controller: SessionController, active: boole
   }, [active, identity, controller]);
   const mutate = async (operation: QuestionMutation): Promise<SavedAnswer[] | null> => {
     const r = owner.current, snapshot = latest.current;
-    if (!r || r.mutation || r.uncertain || !snapshot.catalog || !valid(r, r.serial)) return null;
+    if (!r || r.mutation || r.read || r.uncertain || !snapshot.catalog || !valid(r, r.serial)) return null;
     let path = '/me/profile/question-selections', method = 'PUT', body: unknown;
     if (operation.kind === 'selection') {
       if (!selectionValid(operation.questionIds, snapshot.catalog, snapshot.answers)) return null;
@@ -66,7 +67,7 @@ export function useProfileQuestions(controller: SessionController, active: boole
         body = { answer: validateAnswer(operation.answer).normalized };
       }
     }
-    r.mutation = true; r.read?.abort(); r.read = null;
+    r.mutation = true;
     const serial = ++r.serial;
     install({ ...snapshot, busy: true, error: '' });
     try {

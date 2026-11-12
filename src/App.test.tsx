@@ -25,6 +25,58 @@ function credentials() {
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: ' test@example.com ' } });
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password' } });
 }
+it.each(['password', 'google'])('keeps the login DOM through %s authentication and a slow backend bootstrap', async provider => {
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementation(path => path === '/api/me' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(json({ code: 'PROFILE_NOT_FOUND' }, 404)));
+  mount(true); login(); credentials();
+  const panel = document.querySelector('.login-panel'), email = screen.getByLabelText('Email');
+  fireEvent.click(screen.getByRole('button', { name: provider === 'google' ? 'Continuar con Google' : 'Ingresar' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(document.querySelector('.login-panel')).toBe(panel); expect(screen.getByLabelText('Email')).toBe(email);
+  expect(email).toBeDisabled(); expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
+  expect(screen.getByRole('button', { name: provider === 'google' ? 'Conectando con Google...' : 'Ingresando...' })).toBeDisabled();
+  expect(screen.queryByText('Preparando Reals…')).toBeNull(); expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
+  await act(async () => finish(json({ id: 'u', status: 'ACTIVE' })));
+  await screen.findByText('Sin perfil: falta completar el registro.');
+});
+
+it('restores an existing session without rendering an intermediate login form', async () => {
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementation(path => path === '/api/me' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(json({ code: 'PROFILE_NOT_FOUND' }, 404)));
+  mount(true);
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión…');
+  expect(screen.queryByRole('form')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Reals' })).toBeVisible();
+  act(() => observer(user)); await waitFor(() => expect(finish).toBeDefined());
+  expect(screen.queryByLabelText('Email')).toBeNull(); expect(screen.queryByRole('form')).toBeNull();
+  await act(async () => finish(json({ id: 'u', status: 'ACTIVE' })));
+  await screen.findByText('Sin perfil: falta completar el registro.');
+  expect(screen.queryByLabelText('Email')).toBeNull();
+});
+
+it('shows interactive login immediately when Firebase confirms no existing session', () => {
+  mount(true); expect(screen.queryByRole('form')).toBeNull();
+  login();
+  expect(screen.getByLabelText('Email')).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Ingresar' })).toBeEnabled();
+  expect(screen.queryByText('Preparando tu sesión…')).toBeNull();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('keeps the restored-session shell until bootstrap resolves and shows an actionable failure', async () => {
+  let fail!: (reason: Error) => void;
+  fetcher.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
+  mount(true);
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión…');
+  expect(screen.queryByRole('form')).toBeNull();
+  act(() => observer(user)); await waitFor(() => expect(fail).toBeDefined());
+  expect(screen.queryByRole('form')).toBeNull();
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión…');
+  expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
+  await act(async () => fail(new TypeError('offline')));
+  expect(screen.getByRole('alert')).toBeVisible(); expect(screen.getByRole('button', { name: 'Reintentar' })).toBeEnabled();
+});
 beforeEach(() => {
   user = { uid: 'f', emailVerified: false, getIdToken: vi.fn().mockResolvedValue('test-token'), reload: vi.fn().mockResolvedValue(undefined) };
   auth = { observe: vi.fn(next => { observer = next; return vi.fn(); }), signIn: vi.fn().mockResolvedValue(user), signUp: vi.fn().mockResolvedValue(user), google: vi.fn().mockResolvedValue(user), verify: vi.fn().mockResolvedValue(undefined), signOut: vi.fn().mockResolvedValue(undefined) };
@@ -91,11 +143,14 @@ it('restores existing session exactly once under StrictMode', async () => {
 it('sign out cancels pending fetch and rejects its late response', async () => {
   let resolve: (value: Response) => void = () => {};
   fetcher.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  mount(); act(() => observer(user)); await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+  const controller = new SessionController(auth, new ApiClient(fetcher), false), dispose = controller.subscribe(() => {});
+  try {
+  observer(user); await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
   const signal = fetcher.mock.calls[0]?.[1]?.signal;
-  confirmSignOut(); await screen.findByRole('button', { name: 'Ingresar' });
+  controller.signOut(); await waitFor(() => expect(controller.getSnapshot().phase).toBe('login'));
   expect(signal?.aborted).toBe(true); await act(async () => resolve(json({ id: 'u', status: 'ACTIVE' })));
-  expect(screen.getByRole('button', { name: 'Ingresar' })).toBeVisible(); expect(fetcher).toHaveBeenCalledOnce();
+  expect(controller.getSnapshot().phase).toBe('login'); expect(fetcher).toHaveBeenCalledOnce();
+  } finally { dispose(); }
 });
 it('transient backend failure preserves Firebase and retry recovers existing profile', async () => {
   fetcher.mockRejectedValueOnce(new TypeError()).mockResolvedValueOnce(json({ id: 'u', status: 'ACTIVE' })).mockResolvedValueOnce(json({ id: 'p', userId: 'u', status: 'ACTIVE' }));
@@ -157,12 +212,15 @@ it.each(['RATE_LIMIT_EXCEEDED', 'ACCOUNT_PROVISIONING_LIMIT_EXCEEDED'])('ready-s
 it.each(['signout', 'replacement'])('rejects a late provisioning quota response after %s', async scenario => {
   let resolve!: (value: Response) => void;
   fetcher.mockResolvedValueOnce(json({ code: 'USER_NOT_FOUND' }, 404)).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  mount(); act(() => observer(user)); await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  const controller = new SessionController(auth, new ApiClient(fetcher), false), dispose = controller.subscribe(() => {});
+  try {
+  observer(user); await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
   const signal = fetcher.mock.calls[1]?.[1]?.signal;
-  if (scenario === 'signout') { confirmSignOut(); await screen.findByRole('button', { name: 'Ingresar' }); }
-  else { ready(); act(() => observer({ ...user, uid: 'replacement' })); await screen.findByText('Sin perfil: falta completar el registro.'); }
-  await act(async () => resolve(limited('120'))); expect(signal?.aborted).toBe(true); expect(screen.queryByText(/Los nuevos registros/)).toBeNull();
+  if (scenario === 'signout') { controller.signOut(); await waitFor(() => expect(controller.getSnapshot().phase).toBe('login')); }
+  else { ready(); observer({ ...user, uid: 'replacement' }); await waitFor(() => expect(controller.getSnapshot().phase).toBe('ready')); }
+  await act(async () => resolve(limited('120'))); expect(signal?.aborted).toBe(true); expect(controller.getSnapshot().error).toBeNull();
   expect(auth.signOut).toHaveBeenCalledTimes(scenario === 'signout' ? 1 : 0);
+  } finally { dispose(); }
 });
 it('Retry dispatches another backend request using receiver-sensitive default fetch', async () => {
   fetcher.mockRejectedValueOnce(new TypeError('Connection failed'));

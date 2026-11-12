@@ -5,6 +5,7 @@ import type { SessionController } from '../auth/session';
 import { ApiError, object } from '../auth/api';
 import { errorCode } from '../auth/errors';
 import './notification-settings.css';
+import './password-dialog.css';
 
 type Preferences = { activityEnabled: boolean; remindersEnabled: boolean; availabilityEnabled: boolean };
 const descriptions = {
@@ -64,15 +65,15 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
       <div className="brand-divider" aria-hidden="true"><span/></div>
     </header>
     <p className="notification-platform">Estos ajustes se aplican actualmente a las notificaciones push de Android. Las notificaciones del navegador se configurarán por separado cuando estén disponibles.</p>
-    <div className="notification-rows">{preferences && groups.map(([key, label]) => <label className="notification-row" key={key}>
+    <div className="notification-rows">{!preferences && busy && groups.map(([key]) => <div className="notification-row home-placeholder" aria-hidden="true" key={key}><span/><span/></div>)}{preferences && groups.map(([key, label]) => <label className="notification-row" key={key}>
       <span className="notification-copy"><span className="notification-title" id={`${notificationId}-${key}-title`}>{label}</span><span className="notification-description" id={`${notificationId}-${key}-description`}>{descriptions[key]}</span></span>
       <span className="notification-switch-target"><input type="checkbox" role="switch" className="notification-switch" aria-labelledby={`${notificationId}-${key}-title`} aria-describedby={`${notificationId}-${key}-description`} checked={preferences[key]} disabled={blocked || uncertain} onChange={e => { const requested = { ...preferences, [key]: e.target.checked }; void run(async signal => { notificationAction.current = 'write'; setUncertain(true); const value = parse(await controller.request('/me/notification-preferences', signal, 'PUT', requested)); signal.throwIfAborted(); setPreferences(value); setUncertain(false); }); }}/></span>
     </label>)}</div>
     <div className="notification-feedback">
       <p role="status">{busy ? notificationAction.current === 'write' ? 'Guardando preferencias…' : preferences ? 'Actualizando preferencias…' : 'Cargando notificaciones…' : ''}</p>
-      {error && <p role="alert" className="notification-error">{notificationAction.current === 'write' ? 'No pudimos confirmar el cambio. Actualizá las notificaciones antes de volver a intentar.' : 'No pudimos cargar las preferencias. Revisá tu conexión y usá «Actualizar notificaciones».'}</p>}
+      {error && <p role="alert" className="notification-error">{notificationAction.current === 'write' ? 'No pudimos confirmar el cambio. Consultá el estado antes de volver a intentar.' : 'No pudimos cargar las preferencias. Revisá tu conexión y usá «Consultar estado».'}</p>}
     </div>
-    <button className="login-button login-outlined" disabled={blocked} onClick={read}>Actualizar notificaciones</button>
+    {(error || uncertain) && <button className="login-button login-outlined" disabled={blocked} onClick={read}>Consultar estado</button>}
   </section>;
   return <section className={setup ? 'home-card home-account' : 'home-account'} aria-label="Cuenta" aria-busy={busy}>
     {setup ? <header className="home-heading"><h3>Cuenta</h3><button type="button" className="login-button login-outlined" aria-label="Cuenta" aria-expanded={expanded} aria-controls="account-options" disabled={blocked} onClick={() => setExpanded(v => !v)}>{expanded ? 'Ocultar' : 'Abrir'}</button></header> : <header className="home-heading"><h2>Cuenta</h2><button className="login-button login-outlined" disabled={busy || view === 'password'} onClick={onBack}>Volver a Inicio</button></header>}
@@ -94,13 +95,18 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
 }
 function PasswordForm({ busy, operationError, onCancel, onSubmit }: { busy: boolean; operationError: string; onCancel: () => void; onSubmit: (current: string, next: string) => void }) {
   const [current, setCurrent] = useState(''), [next, setNext] = useState(''), [confirm, setConfirm] = useState(''), [error, setError] = useState('');
+  const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { const node = dialog.current; node?.showModal(); return () => node?.close(); }, []);
   useEffect(() => { if (operationError === 'La contraseña actual no es correcta.') setCurrent(''); }, [operationError]);
-  return <dialog ref={dialog} aria-label="Cambiar contraseña de Reals" onCancel={e => { e.preventDefault(); if (!busy) onCancel(); }}><form aria-label="Cambiar contraseña de Reals" onSubmit={e => { e.preventDefault(); if (busy) return; const invalid = !current.trim() ? 'Ingresá tu contraseña actual.' : !next.trim() ? 'Ingresá una nueva contraseña.' : next !== confirm ? 'Las contraseñas nuevas no coinciden.' : next.length < 6 ? 'La nueva contraseña debe tener al menos 6 caracteres.' : current === next ? 'La nueva contraseña debe ser distinta de la actual.' : ''; setError(invalid); if (!invalid) onSubmit(current, next); }}><h4>Cambiar contraseña de Reals</h4><p>Actualizá la contraseña que usás para iniciar sesión en Reals con tu email. Tu contraseña de Google no cambia.</p>
-    <label>Contraseña actual<input type="password" autoComplete="current-password" value={current} disabled={busy} onChange={e => setCurrent(e.target.value)}/></label>
-    <label>Nueva contraseña<input type="password" autoComplete="new-password" value={next} disabled={busy} onChange={e => setNext(e.target.value)}/></label>
-    <label>Repetir nueva contraseña<input type="password" autoComplete="new-password" value={confirm} disabled={busy} onChange={e => setConfirm(e.target.value)}/></label>
-    {(error || operationError) && <p role="alert">{error || operationError}</p>}<button disabled={busy}>{busy ? 'Guardando…' : 'Guardar contraseña'}</button><button type="button" disabled={busy} onClick={onCancel}>Cancelar</button>
+  return <dialog ref={dialog} className="password-dialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} onCancel={e => { e.preventDefault(); if (!busy) onCancel(); }}><form aria-label="Cambiar contraseña de Reals" aria-busy={busy} onSubmit={e => { e.preventDefault(); if (busy) return; const invalid = !current.trim() ? 'Ingresá tu contraseña actual.' : !next.trim() ? 'Ingresá una nueva contraseña.' : next !== confirm ? 'Las contraseñas nuevas no coinciden.' : next.length < 6 ? 'La nueva contraseña debe tener al menos 6 caracteres.' : current === next ? 'La nueva contraseña debe ser distinta de la actual.' : ''; setError(invalid); if (!invalid) onSubmit(current, next); }}>
+    <header><h2 id={`${id}-title`}>Cambiar contraseña de Reals</h2><p id={`${id}-description`}>Actualizá la contraseña que usás para iniciar sesión en Reals con tu email. Tu contraseña de Google no cambia.</p><div className="brand-divider" aria-hidden="true"><span/></div></header>
+    <div className="password-fields">
+      <div className="login-field"><input id={`${id}-current`} type="password" autoComplete="current-password" placeholder=" " value={current} disabled={busy} onChange={e => setCurrent(e.target.value)}/><label htmlFor={`${id}-current`}>Contraseña actual</label></div>
+      <div className="login-field"><input id={`${id}-new`} type="password" autoComplete="new-password" placeholder=" " value={next} disabled={busy} onChange={e => setNext(e.target.value)}/><label htmlFor={`${id}-new`}>Nueva contraseña</label></div>
+      <div className="login-field"><input id={`${id}-confirm`} type="password" autoComplete="new-password" placeholder=" " value={confirm} disabled={busy} onChange={e => setConfirm(e.target.value)}/><label htmlFor={`${id}-confirm`}>Repetir nueva contraseña</label></div>
+    </div>
+    {(error || operationError) && <p role="alert" className="login-error password-error">{error || operationError}</p>}
+    <div className="password-actions"><button type="button" className="login-button login-outlined" disabled={busy} onClick={onCancel}>Cancelar</button><button type="submit" className="login-button login-primary" disabled={busy}>{busy ? 'Guardando…' : 'Guardar contraseña'}</button></div>
   </form></dialog>;
 }

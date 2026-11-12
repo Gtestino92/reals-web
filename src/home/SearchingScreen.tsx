@@ -17,7 +17,7 @@ export function SearchingScreen({ phase, error, busy, blocked, inQueue, onCancel
     <p role="status">{content.body}</p>
     {error && <p role="alert" className="home-error">{error}</p>}
     {(canCancel || busy || inQueue) && <button className="login-button login-primary" disabled={!canCancel} onClick={onCancel}>Cancelar búsqueda</button>}
-    {canRetryLocation ? <button className="login-button login-primary" onClick={onRetryLocation}>Reintentar ubicación</button> : (error || phase === 'failed') && <button className="login-button login-outlined" disabled={busy} onClick={onRefresh}>Actualizar</button>}
+    {canRetryLocation ? <button className="login-button login-primary" onClick={onRetryLocation}>Reintentar ubicación</button> : (error || phase === 'failed') && <button className="login-button login-outlined" disabled={busy} onClick={onRefresh}>Consultar estado</button>}
     {phase === 'failed' && !inQueue && !busy && !blocked && <button className="login-button login-outlined" onClick={onBack}>Volver a Inicio</button>}
     {inQueue && phase === 'failed' && <p>El servidor todavía informa una búsqueda activa.</p>}
   </div>;

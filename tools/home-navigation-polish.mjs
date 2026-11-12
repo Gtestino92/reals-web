@@ -82,7 +82,7 @@ try {
         await evaluate("document.querySelector('button[aria-label=Cuenta]').click()");await waitFor("!!document.querySelector('.home-account')?.getClientRects().length",'Account opened');
         await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Volver a Inicio'&&n.getClientRects().length).click()");
         await waitFor("history.state.trail.length===1&&!document.querySelector('.home-search').closest('[hidden]')",'explicit return consumes entry');
-        await evaluate('history.forward()');await waitFor("history.state.trail.at(-1)==='account'&&!!document.querySelector('.home-account')?.getClientRects().length",'Forward restores Account');
+        await waitFor("!!document.querySelector('.home-search button:not(:disabled)')",'Home reconciliation before Forward');await evaluate('history.forward()');await waitFor("history.state.trail.at(-1)==='account'&&!!document.querySelector('.home-account')?.getClientRects().length",'Forward restores Account');
         await evaluate('history.back()');await waitFor("history.state.trail.length===1",'Back restores Home');
         await waitFor("!!document.querySelector('.home-search button:not(:disabled)')",'reconciled Home');
       }
@@ -98,18 +98,19 @@ try {
       await evaluate('history.forward()');await waitFor("!!document.querySelector('.account-notifications')",'Forward restores notifications');
       await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Volver a Cuenta').click()");await waitFor("history.state.trail.at(-1)==='account'",'explicit nested return');
       reset();fixture.failHome=true;await evaluate('window.signouts=0;renderFixture()');await waitFor("!!document.querySelector('.home [role=alert]')",'initial Home failure');
-      acceptDialog=true;await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Cerrar sesión'&&n.getClientRects().length).click()");await waitFor('signouts===1','recovery sign-out');
+      acceptDialog=true;await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Cerrar sesión'&&n.getClientRects().length).click()");await evaluate("document.querySelector('dialog .login-primary').click()");await waitFor('signouts===1','recovery sign-out');
       for(const failure of [false,true]){
         reset();fixture.profileStatus='DRAFT';fixture.failDeletion=failure;await evaluate('window.signouts=0;renderFixture()');
         await waitFor("!!document.querySelector('button[aria-label=Cuenta]:not(:disabled)')",'setup Account');
         await evaluate("document.querySelector('button[aria-label=Cuenta]').click()");acceptDialog=true;
         await evaluate("(()=>{const b=Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Eliminar cuenta');b.click();b.click()})()");
+        await evaluate("document.querySelector('dialog .deletion-destructive').click()");
         await waitFor(failure?"!!document.querySelector('.home-account [role=alert]')":"signouts===1",'deletion result');
         check(fixture.deletions===1,'single setup recoverable deletion');
         if(failure){
           check(await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Eliminar cuenta').disabled&&signouts===0"),'uncertain deletion stays blocked');
           await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Consultar estado de la cuenta').click()");
-          await waitFor("!!document.querySelector('.session-actions button')",'authoritative deleted-account recovery');
+          await waitFor("!!document.querySelector('.deletion-recovery')",'authoritative deleted-account recovery');
           check(fixture.deletions===1,'account reconciliation never replays deletion');
         }
       }

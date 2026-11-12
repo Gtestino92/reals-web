@@ -25,7 +25,7 @@ async function mount(status = 'AVAILABLE') {
   fetcher.mockResolvedValueOnce(banned()).mockResolvedValueOnce(appeal(status));
   render(<StrictMode><OperationalApp firebase={{service:auth,localVerification:false}} api={new ApiClient(fetcher)}/></StrictMode>);
   act(()=>observer(user));
-  await waitFor(()=>expect(screen.getByRole('button',{name:'Actualizar estado'})).toBeEnabled());
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Consultar estado'})).toBeEnabled());
 }
 function draft(value='Solicito revisión') { fireEvent.change(screen.getByRole('textbox'),{target:{value}}); }
 it.each([undefined,'bad','2026-02-31T00:00:00Z','2020-01-01T00:00:00Z','2030-01-01T00:00:00Z'])('temporary suspension handles %s without clock transitions',async expiresAt=>{
@@ -34,10 +34,10 @@ it.each([undefined,'bad','2026-02-31T00:00:00Z','2020-01-01T00:00:00Z','2030-01-
   expect(await screen.findByRole('heading',{name:'Cuenta suspendida temporalmente'})).toHaveFocus();
   expect(screen.queryByText(/Vencimiento informado/)!==null).toBe(!!expiresAt && !['bad','2026-02-31T00:00:00Z'].includes(expiresAt));
   expect(fetcher).toHaveBeenCalledOnce();
-  fetcher.mockResolvedValueOnce(banned('ACCOUNT_TEMPORARILY_BANNED',expiresAt));click('Actualizar estado');
+  fetcher.mockResolvedValueOnce(banned('ACCOUNT_TEMPORARILY_BANNED',expiresAt));click('Consultar estado');
   await waitFor(()=>expect(fetcher).toHaveBeenCalledTimes(2));
-  await waitFor(()=>expect(screen.getByRole('button',{name:'Actualizar estado'})).toBeEnabled());
-  fetcher.mockResolvedValueOnce(json(active)).mockResolvedValueOnce(json({id:'p',userId:'u',status:'DRAFT'}));click('Actualizar estado');
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Consultar estado'})).toBeEnabled());
+  fetcher.mockResolvedValueOnce(json(active)).mockResolvedValueOnce(json({id:'p',userId:'u',status:'DRAFT'}));click('Consultar estado');
   await screen.findByText('Perfil confirmado: DRAFT');
 });
 it.each(['AVAILABLE','PENDING','REJECTED'])('loads %s without normal endpoints or writes; Back stays restricted',async status=>{
@@ -63,7 +63,7 @@ it.each(['201','offline','conflict','401'])('reconciles %s POST without replay',
 it('retains draft and uncertainty across failed reconciliation; only GET unlocks another action',async()=>{
   await mount();draft();fetcher.mockRejectedValueOnce(new TypeError()).mockRejectedValueOnce(new TypeError());click('Solicitar revisión');await screen.findByRole('alert');
   expect(screen.getByRole('textbox')).toHaveValue('Solicito revisión');expect(screen.getByRole('button',{name:'Solicitar revisión'})).toBeDisabled();
-  fetcher.mockResolvedValueOnce(appeal());click('Actualizar estado');await waitFor(()=>expect(screen.getByRole('button',{name:'Solicitar revisión'})).toBeEnabled());
+  fetcher.mockResolvedValueOnce(appeal());click('Consultar estado');await waitFor(()=>expect(screen.getByRole('button',{name:'Solicitar revisión'})).toBeEnabled());
   expect(fetcher.mock.calls.at(-1)?.[1]?.method).toBe('GET');
 });
 it('rejects oversized controller input', () => { expect(validStatement('a'.repeat(1001))).toBe(false); expect(validStatement('a'.repeat(1000))).toBe(true); });
@@ -76,7 +76,7 @@ it('validates UTF-16 boundaries, plain text and trimmed blank statements',async(
 it.each([{status:'FUTURE',banActive:true},{status:'AVAILABLE',banActive:false},{status:'APPROVED',banActive:true},{status:'PENDING',banActive:false},{status:'REJECTED',banActive:false},{status:'AVAILABLE'},null])('fails closed for %j and refreshes explicitly',async raw=>{
   fetcher.mockResolvedValueOnce(banned()).mockResolvedValueOnce(json(raw));render(<OperationalApp firebase={{service:auth,localVerification:false}} api={new ApiClient(fetcher)}/>);act(()=>observer(user));
   await screen.findByRole('alert');expect(screen.queryByRole('textbox')).toBeNull();expect(fetcher).toHaveBeenCalledTimes(2);
-  fetcher.mockResolvedValueOnce(appeal('PENDING'));click('Actualizar estado');await screen.findByRole('heading',{name:'Revisión solicitada'});
+  fetcher.mockResolvedValueOnce(appeal('PENDING'));click('Consultar estado');await screen.findByRole('heading',{name:'Revisión solicitada'});
 });
 it.each(['success','transient','temporary','permanent','deleted'])('approved appeal bootstrap %s honors authoritative result',async mode=>{
   fetcher.mockResolvedValueOnce(banned()).mockResolvedValueOnce(appeal('APPROVED'));

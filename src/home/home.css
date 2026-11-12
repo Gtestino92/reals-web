@@ -13,6 +13,12 @@ html:has(.home) { scrollbar-gutter: stable; }
 .home-card { min-width: 0; border: 1px solid var(--color-outline-variant); border-radius: var(--radius-card); background: var(--color-surface); padding: 24px; }
 .home-search { border-color: var(--color-secondary); background: var(--color-primary-container); }
 .home-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.home-placeholder { display: grid; gap: 24px; }
+.home-loading-status { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.home-placeholder-search { min-height: 218px; }
+.home-placeholder-card { min-height: 180px; }
+.home-placeholder span { display: block; height: 16px; max-width: 80%; margin-block: 16px; border-radius: 4px; background: var(--color-outline-variant); }
+.home-placeholder span:first-child { height: 24px; width: 45%; }
 .home-notice { padding: 16px; border-inline-start: 3px solid var(--color-secondary); background: var(--color-secondary-container); border-radius: var(--radius-extra-small); }
 .home-terminal-notice { display:flex; align-items:center; gap:8px; }
 .home-terminal-notice > span { flex:1; min-width:0; }
@@ -56,3 +62,11 @@ html:has(.home) { scrollbar-gutter: stable; }
 .home-account dialog { width: min(440px, 90vw); max-height: 90dvh; overflow: auto; padding: 24px; border: 1px solid var(--color-outline); border-radius: 16px; color: var(--color-on-surface); background: var(--color-surface); }
 .home-account dialog::backdrop { background: rgb(0 0 0 / 50%); }
 @media (max-width: 340px) { .home-account .home-heading { flex-direction: column; align-items: stretch; } }
+
+.home-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.home-admin-entry { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; width: auto; padding: 8px 12px; }
+.session-header { position: relative; }
+.session-admin-entry { position: absolute; right: 0; top: 0; }
+
+.management-placeholder .placeholder-field { margin-block: 24px; }
+.management-placeholder .placeholder-field span:last-child { height: 44px; max-width: 100%; }

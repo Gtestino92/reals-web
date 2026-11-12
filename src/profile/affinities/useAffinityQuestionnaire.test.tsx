@@ -39,12 +39,14 @@ it('handles definite rejection without fabricating success', async () => {
   const { controller, request } = setup(); const { result } = renderHook(() => useAffinityQuestionnaire(controller)); await waitFor(() => expect(result.current.catalog).not.toBeNull());
   request.mockRejectedValueOnce(new ApiError('backend', 400, 'INVALID_AFFINITY_ANSWER')); await act(async () => { await result.current.mutate('a', 'A'); }); expect(result.current.error).toBeTruthy(); expect(result.current.uncertain).toBe(false); expect(result.current.answers).toEqual([]);
 });
-it('synchronous gate excludes duplicate writes and stale reads', async () => {
+it('blocks writes during revalidation and excludes duplicate writes', async () => {
   const { controller, request } = setup(); const { result } = renderHook(() => useAffinityQuestionnaire(controller)); await waitFor(() => expect(result.current.catalog).not.toBeNull());
   const stale = deferred<unknown>(); request.mockReturnValueOnce(stale.promise); let read!: Promise<void>; act(() => { read = result.current.refresh(); });
+  const before = request.mock.calls.length; await act(async () => { expect(await result.current.mutate('a', 'A')).toBeNull(); }); expect(request).toHaveBeenCalledTimes(before);
+  await act(async () => { stale.resolve(fixture()); await read; });
   const write = deferred<unknown>(); request.mockReturnValueOnce(write.promise); let first!: Promise<unknown>; act(() => { first = result.current.mutate('a', 'A'); });
   await act(async () => { expect(await result.current.mutate('b', 'B')).toBeNull(); write.resolve({ answers: [answer()] }); await first; });
-  await act(async () => { stale.resolve(fixture()); await read; }); expect(result.current.answers).toEqual([answer()]);
+  expect(result.current.answers).toEqual([answer()]);
 });
 it.each(['ready', 'login'] as const)('rejects late mutations after identity transition %s', async phase => {
   const { controller, request, replace } = setup(); const { result } = renderHook(() => useAffinityQuestionnaire(controller)); await waitFor(() => expect(result.current.catalog).not.toBeNull());
@@ -77,13 +79,13 @@ it('retains the local selection on uncertain failure and reconciles before anoth
   function Probe() { const model = useAffinityQuestionnaire(controller), navigation = useHomeNavigation(() => true); return <><button onClick={() => navigation.open('affinities')}>Afinidades</button><AffinityQuestionnaire model={model} navigation={navigation}/></>; }
   render(<Probe/>); fireEvent.click(screen.getByText('Afinidades')); await screen.findByText('Empezar'); fireEvent.click(screen.getByText('Empezar')); fireEvent.click(screen.getByLabelText('Nada'));
   request.mockRejectedValueOnce(new ApiError('network')); fireEvent.click(screen.getByText('Siguiente')); await screen.findByRole('alert'); expect(screen.getByLabelText('Nada')).toBeChecked(); expect(screen.getByText('Siguiente')).toBeDisabled();
-  fireEvent.click(screen.getByText('Reintentar')); await waitFor(() => expect(screen.getByText('Siguiente')).toBeEnabled()); expect(screen.getByLabelText('Nada')).toBeChecked(); fireEvent.click(screen.getByText('Siguiente')); await screen.findByText('Pregunta b');
+  fireEvent.click(screen.getByText('Reintentar consulta')); await waitFor(() => expect(screen.getByText('Siguiente')).toBeEnabled()); expect(screen.getByLabelText('Nada')).toBeChecked(); fireEvent.click(screen.getByText('Siguiente')); await screen.findByText('Pregunta b');
 });
 it('falls back to the source parent when a refreshed question disappears', async () => {
   const { controller, request } = setup();
   function Probe() { const model = useAffinityQuestionnaire(controller), navigation = useHomeNavigation(() => true); return <><button onClick={() => navigation.open('affinities')}>Afinidades</button><AffinityQuestionnaire model={model} navigation={navigation}/></>; }
   render(<Probe/>); fireEvent.click(screen.getByText('Afinidades')); await screen.findByText('Empezar'); fireEvent.click(screen.getByText('Explorar por categoría')); fireEvent.click(screen.getAllByText('Empezar categoría')[0]!);
-  const catalog = fixture(); catalog.questions = catalog.questions.filter(q => q.id !== 'a'); request.mockResolvedValueOnce(catalog); fireEvent.click(screen.getByText('Actualizar preguntas')); await screen.findAllByText('Empezar categoría'); expect(history.state.trail.at(-1)).toBe('affinity-categories');
+  const catalog = fixture(); catalog.questions = catalog.questions.filter(q => q.id !== 'a'); request.mockResolvedValueOnce(catalog); act(() => document.dispatchEvent(new Event('visibilitychange'))); await screen.findAllByText('Empezar categoría'); expect(history.state.trail.at(-1)).toBe('affinity-categories');
 });
 it('rejects a mutation from a revoked tab through SessionController and ApiClient', async () => {
   const ownership = new TabOwnershipManager(); vi.spyOn(ownership, 'getSnapshot').mockReturnValue('active'); vi.spyOn(ownership, 'assert').mockImplementation(() => {});

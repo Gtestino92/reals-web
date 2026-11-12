@@ -1,13 +1,19 @@
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { defaults, genders, genderLabels, intentions, intentionLabels, normalize, preferenceLabels, validate } from './contracts';
 import type { Country, Fields, FullProfile } from './contracts';
 import { AgeRangeSlider } from './AgeRangeSlider';
 
-export function ProfileForm({ profile, catalog, countryError, retryCountries, busy, submit, mode = 'create' }: { profile?: FullProfile; catalog: Country[]; countryError: string; retryCountries: () => void; busy: boolean; submit: (fields: Fields, mode: 'create' | 'details' | 'filters') => void; mode?: 'create' | 'details' | 'filters' }) {
+export function ProfileForm({ profile, catalog, countryError, retryCountries, busy, submit, mode = 'create', onDirtyChange }: { onDirtyChange?: ((dirty: boolean) => void) | undefined; profile?: FullProfile; catalog: Country[]; countryError: string; retryCountries: () => void; busy: boolean; submit: (fields: Fields, mode: 'create' | 'details' | 'filters') => void; mode?: 'create' | 'details' | 'filters' }) {
   // null means automatic country selection for a new profile, never an API value.
   const [fields, setFields] = useState<Omit<Fields, 'countryCode'> & { countryCode: string | null }>(() => ({
     ...(profile ?? defaults), countryCode: profile?.countryCode ?? (mode === 'create' ? null : ''),
   }));
+  const detailKeys = ['displayName', 'birthDate', 'gender', 'city', 'countryCode', 'bio'] as const;
+  const filterKeys = ['lookingForGenders', 'intention', 'preferredMinAge', 'preferredMaxAge', 'maxDistanceKm'] as const;
+  const keys = mode === 'create' ? [...detailKeys, ...filterKeys] : mode === 'details' ? detailKeys : filterKeys;
+  const baseline = profile ?? { ...defaults, countryCode: mode === 'create' ? null : '' };
+  const dirty = keys.some(key => JSON.stringify(fields[key]) !== JSON.stringify(baseline[key]));
+  useLayoutEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
   const [errors, setErrors] = useState<string[]>([]);
   const countryCode = fields.countryCode ?? (catalog.some(c => c.code === 'AR') ? 'AR' : '');
   const countryAvailable = catalog.some(c => c.code === countryCode);
