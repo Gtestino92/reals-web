@@ -1,4 +1,4 @@
-// Start Vite on 5175; node tools/admin-smoke.mjs. Synthetic identities/API only.
+// Start a fresh Vite process on 5175 (no prior HMR edits); node tools/admin-smoke.mjs. Synthetic identities/API only.
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -24,10 +24,14 @@ try {
     document.getElementById('root').remove();const el=document.createElement('div');document.body.append(el);let root;
     window.renderAdmin=(admin=true)=>{root?.unmount();history.replaceState(null,'','/admin');window.writes=[];window.calls=[];window.queue=Array.from({length:21},(_,i)=>({...fixtures.photo,photoId:'p'+i,displayName:'Foto '+i,readUrl:'data:invalid'}));
       let next;window.replaceIdentity=()=>next({uid:'ordinary',emailVerified:true,getIdToken:async()=>'ordinary',reload:async()=>{}});
-      root=ReactDOM.createRoot(el);root.render(React.createElement(OperationalApp,{firebase:{service:{observe:observer=>{next=observer;observer({uid:admin?'admin':'ordinary',emailVerified:true,getIdToken:async()=>admin?'admin':'ordinary',reload:async()=>{}});return()=>{}},signOut:async()=>next(null)},localVerification:false},api:new ApiClient(async(path,o)=>{window.calls.push(path);let data,status=200;
+      root=ReactDOM.createRoot(el);root.render(React.createElement(OperationalApp,{firebase:{service:{googleContext:async()=>({provider:'google.com',authTime:Date.now()}),reauthenticateGoogle:async()=>{},observe:observer=>{next=observer;observer({uid:admin?'admin':'ordinary',emailVerified:true,getIdToken:async()=>admin?'admin':'ordinary',reload:async()=>{}});return()=>{}},signOut:async()=>next(null)},localVerification:false},api:new ApiClient(async(path,o)=>{window.calls.push(path);if(o.headers['X-Firebase-AppCheck']!=='synthetic-app-check')throw Error('Missing App Check');if(path.startsWith('/api/admin/')&&o.headers['X-Reals-Admin-Grant']!=='A'.repeat(43))throw Error('Missing grant');let data,status=200;
         if(path==='/api/me')data={id:'u',status:'ACTIVE'};
         else if(path==='/api/me/profile')data={id:'p',userId:'u',status:'DRAFT'};
-        else if(o.headers.Authorization==='Bearer ordinary'){status=403;data={code:'ACCESS_DENIED'};}
+        else if(o.headers.Authorization==='Bearer ordinary'){status=403;data={code:'ADMIN_ACCESS_DENIED'};}
+        else if(path.endsWith('/admin-auth/status'))data={configured:true,grantValid:o.headers['X-Reals-Admin-Grant']==='A'.repeat(43)};
+        else if(path.endsWith('/admin-auth/verify')){if(JSON.parse(o.body).code!=='012345')throw Error('Leading zeros lost');if(window.verifyFailure){const code=window.verifyFailure;window.verifyFailure=null;return new Response(JSON.stringify({code}),{status:code==='ADMIN_MFA_RATE_LIMITED'?429:400,headers:{'Retry-After':'1'}});}data={grant:'A'.repeat(43),expiresAt:new Date(Date.now()+900000).toISOString()};}
+        else if(path.endsWith('/admin-auth/revoke'))return new Response(null,{status:204});
+
         else if(o.method==='POST'){window.writes.push(JSON.parse(o.body));await new Promise(r=>setTimeout(r,100));window.queue=[];data={...fixtures.photo,moderationStatus:'APPROVED'};}
         else if(path.endsWith('/diagnostics/matchmaking'))data=fixtures.diag;
         else if(path.endsWith('/profile-photos/review'))data=window.queue;
@@ -35,12 +39,37 @@ try {
         else if(path.endsWith('/safety-reports/report'))data={report:fixtures.summary,details:'<script>untrusted</script>',messages:[],evidence:null,penalty:null};
         else if(path.endsWith('/penalty-appeals/pending'))data=[fixtures.appeal];
         else {status=404;data={code:'NOT_FOUND'};}
-        return new Response(JSON.stringify(data),{status});})}));};
+        return new Response(JSON.stringify(data),{status});}).withAppCheck(async()=>'synthetic-app-check')}));};
   })()`);
   await mkdir('artifacts/admin',{recursive:true});const results=[];
   for(const width of [390,1440]){
     await call('Emulation.setDeviceMetricsOverride',{width,height:width<700?844:900,deviceScaleFactor:1,mobile:width<700});
-    await evaluate('renderAdmin()');await button('Siguiente');await wait("document.body.textContent.includes('Foto 20')",'local page 2');
+    await evaluate('renderAdmin()');
+    await wait("!!document.getElementById('admin-totp')",'MFA input');
+    check(await evaluate("calls.every(p=>!p.startsWith('/api/admin/'))"),'no privileged requests before MFA');
+    check(await evaluate("document.getElementById('admin-totp').inputMode==='numeric'&&document.getElementById('admin-totp').type==='text'"),'numeric keyboard with leading-zero preservation');
+    await writeFile(`artifacts/admin/mfa-${width}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+    check(await evaluate('document.documentElement.scrollWidth<=innerWidth'),'MFA responsive width');
+    for(const failure of ['ADMIN_MFA_INVALID_CODE','ADMIN_MFA_RATE_LIMITED']){
+      await evaluate(`window.verifyFailure=${JSON.stringify(failure)};document.getElementById('admin-totp').focus()`);await call('Input.insertText',{text:'012345'});await button('Verificar c\u00f3digo');
+      await wait("!!document.querySelector('[role=alert]')",'explicit MFA failure');
+      check(await evaluate("calls.every(p=>!p.startsWith('/api/admin/'))"),'MFA failure never loads privileged resources');
+      if(!await evaluate("!!document.getElementById('admin-totp')"))throw Error('MFA failure must retain the code form');
+      check(await evaluate("document.getElementById('admin-totp').value===''"),'submitted code cleared');
+      await wait("!document.getElementById('admin-totp').disabled",'Retry-After cooldown');
+    }
+    await evaluate("document.getElementById('admin-totp').focus()");await call('Input.insertText',{text:'012345'});await button('Verificar c\u00f3digo');
+    await button('Siguiente');await wait("document.body.textContent.includes('Foto 20')",'local page 2');
+    const beforeSwitch=await evaluate("({timeOrigin:performance.timeOrigin,verifies:calls.filter(p=>p==='/api/admin-auth/verify').length,bootstraps:calls.filter(p=>p==='/api/me').length})");
+    await evaluate("window.panelBeforeSwitch=document.querySelector('main');window.visibilityProbe={hidden:0,pagehide:0};document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')visibilityProbe.hidden++});window.addEventListener('pagehide',()=>visibilityProbe.pagehide++)");
+    const other=await call('Target.createTarget',{url:'about:blank'});await call('Target.activateTarget',{targetId:other.targetId});await delay(1000);
+    await call('Target.activateTarget',{targetId:target.id});await wait("document.visibilityState==='visible'",'return to Reals tab');await delay(100);
+    const afterSwitch=await evaluate("({timeOrigin:performance.timeOrigin,verifies:calls.filter(p=>p==='/api/admin-auth/verify').length,bootstraps:calls.filter(p=>p==='/api/me').length,revokes:calls.filter(p=>p==='/api/admin-auth/revoke').length,samePanel:panelBeforeSwitch===document.querySelector('main'),probe:visibilityProbe})");
+    check(afterSwitch.probe.hidden>0&&afterSwitch.probe.pagehide===0,'unrelated tab triggers visibility, not pagehide');
+    check(beforeSwitch.timeOrigin===afterSwitch.timeOrigin,'same document after tab switch');
+    check(afterSwitch.samePanel,'same backoffice DOM after tab switch');
+    check(afterSwitch.revokes===0&&afterSwitch.verifies===beforeSwitch.verifies&&afterSwitch.bootstraps===beforeSwitch.bootstraps,'no revoke, MFA retry or Firebase bootstrap on tab switch');
+    await call('Target.closeTarget',{targetId:other.targetId});
     await button('Foto 20 · Posición 1');await button('Aprobar fotografía');
     check(await evaluate("document.activeElement.textContent==='Cancelar'"),'confirmation cancel focus');
     check(await evaluate('writes.length===0'),'no optimistic write');
@@ -59,10 +88,10 @@ try {
     check(await evaluate("!document.querySelector('script[src=untrusted]')"),'no raw report HTML');
     await writeFile(`artifacts/admin/admin-${width}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
     check(await evaluate('document.documentElement.scrollWidth<=innerWidth'),'responsive width');
-    await evaluate('replaceIdentity()');await wait("document.body.textContent.includes('Acceso no disponible')",'identity replacement denied');
+    await evaluate('replaceIdentity()');await wait("document.body.textContent.includes('Acceso administrativo denegado')",'identity replacement denied');
     check(await evaluate("!document.body.textContent.includes('untrusted')"),'private evidence cleared');
-    await evaluate('renderAdmin(false)');await wait("document.body.textContent.includes('Acceso no disponible')",'ordinary identity denied');
-    check(await evaluate("calls.filter(x=>x.includes('/admin/')).length===1"),'nonadmin only probes authorization');
+    await evaluate('renderAdmin(false)');await wait("document.body.textContent.includes('Acceso administrativo denegado')",'ordinary identity denied');
+    check(await evaluate("calls.filter(x=>x.includes('/admin/')).length===0"),'nonadmin never loads privileged resources');
     check(await evaluate('localStorage.length===0&&sessionStorage.length===0'),'no persistent admin data');results.push({width,passed:true});
   }
   await writeFile('artifacts/admin/results.json',JSON.stringify(results,null,2));

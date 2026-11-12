@@ -181,3 +181,26 @@ The Vite development server on `localhost`, `127.0.0.1` or IPv6 loopback disable
 To test ownership locally, set `VITE_ENFORCE_TAB_OWNERSHIP=true` in `.env.local` and restart Vite. Passing a real manager explicitly in ownership tests also forces enforcement. This flag only opts loopback Vite development into enforcement; `false` cannot disable it on deployed hosts. A production build/`npm run preview` enforces ownership even on loopback. A remote host served by Vite also enforces it: Vite DEV is not the backend Dev environment. Public client configuration is not a security/anti-fraud boundary.
 
 Targeted Chromium regression: start `npm run dev -- --host 127.0.0.1 --port 5174` with the local flag unset/false, then run `node tools/runtime-refinements-browser.mjs`. It compares baseline/current queue timing with synthetic geolocation/token/HTTP delays, checks two independent local logins, explicit enabled takeover, and the real sign-out modal/Back/Escape/focus behavior. No live Firebase/SQL records are touched.
+
+## Local Web App Check Debug Provider
+
+The ignored `.env.local` uses these public configuration names (never put a debug credential in an environment variable):
+
+```dotenv
+VITE_FIREBASE_APP_CHECK_PROVIDER=enterprise
+VITE_FIREBASE_APP_CHECK_SITE_KEY=<registered public Enterprise site key>
+VITE_FIREBASE_APP_CHECK_DEBUG=true
+```
+
+The existing Web Firebase App ID must match the registered Web app; the local configuration has been checked against the supplied ID. The local-only flag requires Vite DEV=true, PROD=false and exactly `localhost` or `127.0.0.1`; LAN IPs, IPv6 loopback, lookalike hosts, preview/production builds and absent/false flags do not enable debug. Initialization sets `self.FIREBASE_APPCHECK_DEBUG_TOKEN = true` before `initializeAppCheck()`. No generated debug token is supplied as a string or stored/logged by application code. Firebase's official SDK generates the credential, prints its local console registration message and manages its own IndexedDB storage. Do not export that storage, put credentials in source/env files or share console captures. See [Firebase's official Web debug workflow](https://firebase.google.com/docs/app-check/web/debug-provider).
+
+Chrome / Firebase Console steps:
+
+1. Restart the Vite process serving your browser to load the new environment: `npm run dev -- --host 127.0.0.1`. Open `http://127.0.0.1:5173/admin` in Chrome (use Vite's reported port if different). Keep the same hostname and browser profile throughout. Open DevTools Console. Sign in with the existing Google/Reals account if needed; the first protected API request invokes App Check.
+2. Locate the SDK's **App Check debug token** message in Chrome Console. This is the browser debug credential, not the App Check JWT or Firebase Auth ID token. Keep it private; do not paste it into this repository, `.env.local`, a chat or logs. Web app registration does not register this browser credential automatically.
+3. In Firebase Console for the existing project, open **App Check > Apps**, choose the registered Web app matching the configured App ID, open its menu and **Manage debug tokens**, then **Add debug token**. Give it a local Chrome label and paste that browser credential. Save. Do not change enforcement, allowlists, Authentication or MFA configuration.
+4. Hard reload the same Chrome origin/profile. In DevTools Network, confirm that the **POST** `exchangeDebugToken` request succeeds with HTTP 200 (an OPTIONS/preflight 200 alone is insufficient). The SDK exchanges the registered debug credential for a genuine Firebase-issued App Check JWT. `getToken()` supplies that JWT; ApiClient forwards it as `X-Firebase-AppCheck`. Never send the debug credential itself as that header. See [Firebase custom backend transport](https://firebase.google.com/docs/app-check/web/custom-resource).
+5. Inspect the administrative status request locally: it should carry the App Check header and Firebase Authorization header, with a successful JSON status for an eligible account. A new MFA session normally has `configured=true, grantValid=false`; continue with the existing Google/TOTP flow. Do not share or export headers, response tokens or HAR files. Backend MONITOR does not waive the administrative requirement for a verified allowlisted Web App ID. Other Google, identity, factor or grant errors remain separate checks.
+6. If the exchange remains 403, check that the exact browser credential was saved for the correct Web app/project, then reload. Changing host/profile, clearing site data or using an incognito session can generate a different credential requiring registration. Remove obsolete credentials through **Manage debug tokens** when finished. To disable local debug, set the flag to `false`, restart Vite and reload; the SDK must initialize fresh. Production builds never enable it, even if the ignored local flag is true.
+
+Validation of this follow-up used adapter mocks plus actual SDK initialization in disposable Chromium on 127.0.0.1. The disposable credential was not registered, so the real exchange returned 403; genuine JWT issuance and backend acceptance remain the operator steps above. No token, console message, request headers or payloads were captured. The SDK profile was removed after testing. No Firebase Console or backend resource was changed.

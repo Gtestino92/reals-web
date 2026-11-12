@@ -1,3 +1,4 @@
+import { AdminAccess } from '../admin/access';
 import { parseAppeal, validStatement, validExpiry } from './suspension';
 import type { Appeal } from './suspension';
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
@@ -9,6 +10,7 @@ import type { LoginErrorOwner } from './LoginScreen';
 
 type Phase = 'checking' | 'login' | 'authenticating' | 'loading' | 'ready' | 'restricted' | 'recoverable' | 'signingOut' | 'deletionRecovery' | 'temporarySuspension' | 'permanentAppeal';
 export interface SessionSnapshot {
+  adminWarning?: string | null;
   phase: Phase;
   suspensionExpiry?: string | null;
   suspensionBusy?: boolean;
@@ -25,8 +27,23 @@ export interface SessionSnapshot {
   resetAt: number | null;
   verificationMessage: string | null;
 }
-const initial: SessionSnapshot = { recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, phase: 'checking', account: null, profile: null, error: null, operation: null, resetMessage: null, resetAt: null, verificationMessage: null };
+const initial: SessionSnapshot = { adminWarning: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, phase: 'checking', account: null, profile: null, error: null, operation: null, resetMessage: null, resetAt: null, verificationMessage: null };
 export class SessionController {
+  readonly admin = new AdminAccess(
+    (path, signal, method, body) => this.request(path, signal, method, body),
+    () => { if (!this.user || !this.auth.googleContext) return Promise.reject(new Error('Google no está disponible. Cerrá sesión e ingresá con Google.')); return this.auth.googleContext(this.user); },
+    () => { if (!this.available() || this.locked || !this.user || !this.auth.reauthenticateGoogle) return Promise.reject(new Error('Google no está disponible. Cerrá sesión e ingresá con Google.')); return this.auth.reauthenticateGoogle(this.user); },
+  );
+  // Capture the owned identity/grant before invalidation. Never block logout indefinitely.
+  leaveAdmin = () => {
+    const grant = this.admin.token(), user = this.user;
+    this.admin.clear();
+    if (!grant || !user || !this.available()) return Promise.resolve();
+    return this.api.request('/admin-auth/revoke', AbortSignal.timeout(5000), user, 'POST', undefined, 204, false, grant).then(() => {}, () => {
+      // Local retirement is unconditional; backend absolute expiry remains the safeguard.
+      if (this.user === user && this.available()) this.install({ adminWarning: 'No se pudo confirmar la revocación administrativa. El acceso local fue eliminado; contactá al operador si necesitás revocación inmediata.' });
+    });
+  };
   snapshot: SessionSnapshot = initial;
   private listeners = new Set<() => void>();
   private unsubscribe: (() => void) | undefined;
@@ -52,13 +69,19 @@ export class SessionController {
     const generation = this.generation;
     const user = this.user;
     if (!user || this.snapshot.phase !== 'ready') throw new DOMException('Sesión obsoleta', 'AbortError');
+    const administrative = path.startsWith('/admin/') || path.startsWith('/admin-auth/');
+    const grant = administrative ? this.admin.token() : undefined;
+    if (path.startsWith('/admin/') && (!grant || this.admin.getSnapshot().phase !== 'allowed')) throw new ApiError('authorization', 403, 'ADMIN_MFA_REQUIRED');
     try {
-      const result = await this.api.request(path, AbortSignal.any([signal, this.controller.signal]), user, method, body, path.startsWith('/admin/') ? 200 : undefined, !path.startsWith('/admin/'));
+      const result = await this.api.request(path, AbortSignal.any([signal, this.controller.signal]), user, method, body, administrative ? (path === '/admin-auth/revoke' ? 204 : 200) : undefined, !administrative, grant);
+      if (path.startsWith('/admin/') && (this.admin.token() !== grant || this.admin.getSnapshot().phase !== 'allowed')) throw new DOMException('Sesión obsoleta', 'AbortError');
       if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
       return result;
     } catch (error) {
+      if (administrative && grant !== this.admin.token()) throw new DOMException('Solicitud administrativa obsoleta', 'AbortError');
+      if (administrative && this.current(generation) && error instanceof ApiError && (error.status === 401 || error.status === 403)) this.admin.fail(error);
       // Admin writes must never replay or automatically reenter after token denial.
-      if (this.current(generation) && path.startsWith('/admin/') && errorCode(error) === 'INVALID_TOKEN') {
+      if (this.current(generation) && administrative && errorCode(error) === 'INVALID_TOKEN') {
         this.invalidate(); this.locked = false;
         this.install({ phase: 'restricted', account: null, profile: null, error: { message: safeMessage(error), owner: 'shared' } });
         throw error;
@@ -154,7 +177,7 @@ export class SessionController {
       }
     };
   };
-  private invalidate() { this.controller.abort(); this.controller = new AbortController(); return ++this.generation; }
+  private invalidate() { this.admin.clear(); this.controller.abort(); this.controller = new AbortController(); return ++this.generation; }
   private current(generation: number) { return this.available() && this.listeners.size > 0 && generation === this.generation; }
   private replace(user: Identity | null) {
     this.invalidate(); this.locked = false; this.user = user;
@@ -298,11 +321,12 @@ export class SessionController {
   };
   signOut = () => {
     if (!this.available() || this.snapshot.phase === 'signingOut') return;
+    const revoke = this.leaveAdmin();
     const generation = this.invalidate();
     this.locked = true;
     this.install({ phase: 'signingOut', operation: null, account: null, profile: null, error: null });
-    void this.auth.signOut().then(() => {
-      if (this.current(generation)) { this.user = null; this.pendingVerification = null; this.install({ ...initial, phase: 'login' }); }
+    void revoke.then(() => { if (!this.current(generation)) return; return this.auth.signOut(); }).then(() => {
+      if (this.current(generation)) { this.user = null; this.pendingVerification = null; this.install({ ...initial, phase: 'login', adminWarning: this.snapshot.adminWarning ?? null }); }
     }).catch(error => {
       if (this.current(generation)) this.install({ phase: 'recoverable', error: { message: safeMessage(error), owner: 'shared' } });
     }).finally(() => { if (this.current(generation)) this.locked = false; });

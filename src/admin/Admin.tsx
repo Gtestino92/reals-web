@@ -56,7 +56,7 @@ export default function Admin({ controller }: { controller: SessionController })
     return () => { store.dispose(); meta.remove(); window.removeEventListener('pagehide',hide); window.removeEventListener('pageshow',show); };
   },[store]);
   useLayoutEffect(() => { setPage(0); },[s.rows]);
-  return <main className="admin"><header><h1>Reals Admin</h1><a href="/">Volver a Reals</a><SignOutButton onConfirm={controller.signOut} /></header>
+  return <main className="admin"><header><h1>Reals Admin</h1><a href="/" onClick={event => { if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return; event.preventDefault(); void controller.leaveAdmin(); window.history.replaceState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); }}>Volver a Reals</a><SignOutButton onConfirm={controller.signOut} /></header>
     {s.access === 'denied' ? <p role="status">Acceso no disponible para esta sesión.</p> : s.access === 'checking' ? <p role="status">Verificando acceso…</p> : s.access === 'error' ? <><p role="alert">No se pudo verificar el acceso.</p><button onClick={store.authorize}>Reintentar verificación</button></> : <>
       <nav aria-label="Secciones de administración">{sections.map(key => <button key={key} aria-current={s.section === key ? 'page' : undefined} disabled={s.busy} onClick={() => store.navigate(key)}>{labels[key]}</button>)}</nav>
       <h2>{labels[s.section]}</h2><button disabled={s.busy} onClick={() => void store.load()}>Actualizar</button>

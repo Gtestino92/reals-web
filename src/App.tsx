@@ -15,7 +15,7 @@ import { SessionLoading } from './SessionLoading';
 import seal from './assets/reals-seal.png';
 import { Home } from './home/Home';
 
-const Admin = lazy(() => import('./admin/Admin'));
+const Admin = lazy(() => import('./admin/AdminGate'));
 
 type AppProps = { firebase?: FirebaseSetup; api?: ApiClient; ownership?: TabOwnershipManager };
 export function App(props: AppProps) {
@@ -27,7 +27,7 @@ export function OperationalApp({ firebase, api, ownership }: AppProps) {
     // SDK app/auth initialization is idempotent; the service wrapper belongs to
     // this operational mount and must never retain a previous gate's manager.
     const firebaseSetup = firebase ?? configureFirebase(import.meta.env, ownership);
-    const controller = 'service' in firebaseSetup ? new SessionController(firebaseSetup.service, (api ?? new ApiClient()).withOwnership(ownership), firebaseSetup.localVerification, ownership) : null;
+    const controller = 'service' in firebaseSetup ? new SessionController(firebaseSetup.service, (api ?? new ApiClient().withAppCheck(firebaseSetup.service.appCheckToken)).withOwnership(ownership), firebaseSetup.localVerification, ownership) : null;
     return { controller, firebaseSetup };
   });
   if (!controller) return <main className="login-page"><section className="login-panel"><h1>Reals</h1><p role="alert">{'error' in firebaseSetup ? firebaseSetup.error : 'Firebase no está configurado.'}</p></section></main>;
@@ -37,10 +37,14 @@ function SessionApp({ controller }: { controller: SessionController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [adminRoute, setAdminRoute] = useState(() => window.location.pathname === '/admin');
   useLayoutEffect(() => {
-    const pop = () => setAdminRoute(window.location.pathname === '/admin');
+    const pop = () => {
+      const next = window.location.pathname === '/admin';
+      if (adminRoute && !next) void controller.leaveAdmin();
+      setAdminRoute(next);
+    };
     window.addEventListener('popstate', pop);
     return () => window.removeEventListener('popstate', pop);
-  }, []);
+  }, [adminRoute, controller]);
   const [chatActive, setChatActive] = useState(false);
   const [managementActive, setManagementActive] = useState(false);
   const [setupAccountAvailable, setSetupAccountAvailable] = useState(false);
@@ -52,7 +56,7 @@ function SessionApp({ controller }: { controller: SessionController }) {
   if (state.phase === 'login' || state.phase === 'authenticating') return <LoginScreen
     loading={state.operation === 'signIn' || state.operation === 'signUp'}
     googleLoading={state.operation === 'google'} passwordResetLoading={state.operation === 'reset'}
-    error={state.error?.message ?? null} errorOwner={state.error?.owner ?? null}
+    error={state.error?.message ?? state.adminWarning ?? null} errorOwner={state.error?.owner ?? (state.adminWarning ? 'shared' : null)}
     passwordResetMessage={state.resetMessage} passwordResetAvailableAtMillis={state.resetAt}
     onSignIn={(email, password, keepSignedIn) => controller.authenticate('signIn', email, password, keepSignedIn)}
     onSignUp={(email, password, keepSignedIn) => controller.authenticate('signUp', email, password, keepSignedIn)}
@@ -69,6 +73,7 @@ function SessionApp({ controller }: { controller: SessionController }) {
     {state.phase === 'ready' && (homeReady ? <Home key={`${state.account?.id}-${state.profile?.id}`} controller={controller} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding key={state.account?.id} controller={controller} onAccountAvailableChange={setSetupAccountAvailable} />)}
     {(state.phase === 'temporarySuspension' || state.phase === 'permanentAppeal') && <AccountSuspension controller={controller} state={state} />}
     {state.phase === 'deletionRecovery' && <AccountDeletionRecovery controller={controller} state={state} />}
+    {state.adminWarning && <p role="alert">{state.adminWarning}</p>}
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && !['deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(state.phase) && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}

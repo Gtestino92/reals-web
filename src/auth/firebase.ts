@@ -1,10 +1,15 @@
+import { appCheckTokens } from './appCheck';
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { getApps, initializeApp } from 'firebase/app';
-import { browserLocalPersistence, browserSessionPersistence, setPersistence, browserPopupRedirectResolver, createUserWithEmailAndPassword, GoogleAuthProvider, initializeAuth, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
+import { browserLocalPersistence, browserSessionPersistence, setPersistence, browserPopupRedirectResolver, createUserWithEmailAndPassword, GoogleAuthProvider, initializeAuth, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut, EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup, getIdTokenResult, updatePassword } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 
 export type Identity = Pick<User, 'uid' | 'emailVerified' | 'getIdToken' | 'reload'> & Partial<Pick<User, 'providerData'>>;
+export interface GoogleContext { provider: string | null; authTime: number }
 export interface AuthService {
+  googleContext?: (identity: Identity) => Promise<GoogleContext>;
+  reauthenticateGoogle?: (identity: Identity) => Promise<void>;
+  appCheckToken?: () => Promise<string>;
   observe: (next: (user: Identity | null) => void, error: (error: unknown) => void) => () => void;
   signIn: (email: string, password: string, keepSignedIn: boolean) => Promise<Identity>;
   signUp: (email: string, password: string, keepSignedIn: boolean) => Promise<Identity>;
@@ -57,6 +62,28 @@ export function configureFirebase(env: ImportMetaEnv = import.meta.env, ownershi
     return {
       localVerification: localVerificationEnabled(env.DEV, env.VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION, window.location.hostname),
       service: {
+        appCheckToken: appCheckTokens(app, env),
+        googleContext: async identity => {
+          const check = checkpoint(), user = auth.currentUser;
+          if (!user || user.uid !== identity.uid) throw new DOMException('Sesión obsoleta', 'AbortError');
+          const result = await getIdTokenResult(user, true);
+          check();
+          if (auth.currentUser !== user) throw new DOMException('Sesión obsoleta', 'AbortError');
+          return { provider: result.signInProvider, authTime: Date.parse(result.authTime) };
+        },
+        reauthenticateGoogle: identity => {
+          const check = checkpoint(), user = auth.currentUser;
+          if (!user || user.uid !== identity.uid) return Promise.reject(new Error('Sesión obsoleta'));
+          // Invoked directly by the click handler; no asynchronous work before the popup.
+          return reauthenticateWithPopup(user, new GoogleAuthProvider()).then(async () => {
+            check();
+            if (auth.currentUser !== user) throw new DOMException('Sesión obsoleta', 'AbortError');
+            const token = await getIdTokenResult(user, true);
+            check();
+            const age = Date.now() - Date.parse(token.authTime);
+            if (auth.currentUser !== user || token.signInProvider !== 'google.com' || !Number.isFinite(age) || age < 0 || age >= 300000) throw Object.assign(new Error('Google context unsuitable'), { code: 'auth/admin-google-required' });
+          });
+        },
         changePassword: async (identity, current, next) => {
           const check = checkpoint();
           const user = auth.currentUser;
