@@ -12,7 +12,7 @@ import { photoFileError } from './photoFiles';
 import './onboarding.css';
 import { SessionLoading } from '../SessionLoading';
 import { parseQueue } from '../home/contracts';
-import { Home } from '../home/Home';
+import type { Home as HomeComponent } from '../home/Home';
 import { AccountSection } from '../home/AccountSection';
 import { useHomeNavigation } from '../home/useHomeNavigation';
 import type { HomeNavigation } from '../home/useHomeNavigation';
@@ -36,7 +36,7 @@ export function onboardingError(error: unknown) {
   return error instanceof ApiError ? messages[error.code] ?? (error.status === 400 && error.kind === 'invalid' ? 'El servidor rechazó los datos. Revisá los campos y usá texto simple, sin etiquetas HTML.' : error.kind === 'invalid' ? 'La respuesta del servidor no es válida. Consultá el estado antes de continuar.' : error.kind === 'network' ? 'No pudimos confirmar el resultado. Revisá tu conexión y actualizá el estado.' : `No se pudo completar la operación${error.code ? ` (${error.code})` : ''}. Revisá los datos y actualizá el estado.`) : 'No pudimos completar la operación. Consultá el estado y volvé a intentar.';
 }
 interface Model { profile: FullProfile | null; photos: Photo[]; legal: { satisfied: boolean; documents: LegalDocument[] }; interactions: boolean | null }
-export function Onboarding({ active = true, controller, management, navigation: providedNavigation, onBack, onNavigationBlockedChange, onAccountAvailableChange, onAdminNavigationBlockedChange }: { active?: boolean; onAdminNavigationBlockedChange?: ((blocked: boolean) => void) | undefined; controller: SessionController; management?: 'details' | 'filters'; navigation?: HomeNavigation; onAccountAvailableChange?: (available: boolean) => void; onBack?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
+export function Onboarding({ Home, active = true, controller, management, navigation: providedNavigation, onBack, onNavigationBlockedChange, onAccountAvailableChange, onAdminNavigationBlockedChange }: { Home: typeof HomeComponent; active?: boolean; onAdminNavigationBlockedChange?: ((blocked: boolean) => void) | undefined; controller: SessionController; management?: 'details' | 'filters'; navigation?: HomeNavigation; onAccountAvailableChange?: (available: boolean) => void; onBack?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
   const [model, setModel] = useState<Model | null>(null), [catalog, setCatalog] = useState<Country[]>([]), [countryError,setCountryError] = useState('');
   const [busy, setBusy] = useState(true), [blocked,setBlocked] = useState(true), [error,setError] = useState(''), [message,setMessage] = useState('');
   const [verified,setVerified] = useState(controller.emailVerified), [success,setSuccess] = useState(false);

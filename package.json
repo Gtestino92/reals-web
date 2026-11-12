@@ -10,6 +10,7 @@
     "dev": "vite",
     "android:tunnel": "node tools/android-tunnel.mjs",
     "typecheck": "tsc --noEmit",
+    "check:architecture": "node tools/check-cycles.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:focused": "node tools/test-focused.mjs",

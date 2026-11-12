@@ -50,8 +50,9 @@ The job runs these commands in order and stops if a step fails:
 
 ```sh
 npm ci
+npm run check:architecture
 npm run typecheck
-npm test
+npm test -- --maxWorkers=2
 npm run build
 ```
 
@@ -118,3 +119,7 @@ The bracket refinement uses one SVG mirrored for the maximum marker, with separa
 Bracket refinement validation: `npm run typecheck` PASS; `npm test` 330/330 PASS in 13 files; `npm run build` PASS; `git diff --check` PASS. Focused slider/ProfileForm run: 42/42 PASS in 2 files.
 
 An isolated headless Chrome check of the bracket implementation passed 26 assertions: 320/360/1000px layout without overflow, mirrored dimensions, vertically centered track, independent 44×44 targets including both equal boundaries, real mouse dragging, touch emulation, keyboard focus and numeric clamping. The dark-theme screenshot was inspected. The temporary harness was removed and its Chrome/Vite processes stopped; no credentials, API calls or account data were used. Still pending: full Create Profile and persisted match-filter screens in interactive Windows Chrome, physical Chrome Android gestures/virtual numeric keyboard, TalkBack, light/dark contrast and 200% text scaling. Emulation does not establish physical-device compatibility.
+
+## Architecture regression check
+
+Run `npm run check:architecture` to reject production runtime import cycles, including lazy imports, while excluding erased TypeScript imports. See [frontend architecture](frontend-architecture.md) for scope, composition invariants and resolver limitations. Focused guard tests: `npm run test:focused -- tools/check-cycles.test.mjs`. CI runs the check before typecheck and keeps the complete regression suite with `--maxWorkers=2`.
