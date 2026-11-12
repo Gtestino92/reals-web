@@ -24,7 +24,7 @@ export class AdminStore {
     if (error instanceof ApiError && [401,403].includes(error.status)) {
       this.abort.abort(); this.generation++;
       this.install({ ...initial, access: 'denied' });
-    } else this.install({ busy: false, error: 'No se pudo obtener el estado. Actualizá para volver a consultar.' });
+    } else this.install({ busy: false, error: 'No se pudo obtener el estado. Usá Consultar estado para volver a intentar.' });
   }
   authorize = async () => {
     const g = this.begin(); this.install({ ...initial, busy: true });

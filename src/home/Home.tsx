@@ -47,6 +47,11 @@ function ActivityCard({ item, onOpen }: { item: Activity; onOpen: (item: Activit
   </article>;
 }
 type ManagementSurface = 'profile' | 'preferences' | 'affinities' | 'account';
+export function AdminEntry({ onClick, pending, disabled }: { onClick: () => void; pending: boolean; disabled: boolean }) {
+  return <button className="login-button login-outlined home-admin-entry" aria-busy={pending} disabled={disabled || pending} onClick={onClick}>
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6Z" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="m8 12 3 3 5-6" fill="none" stroke="currentColor" strokeWidth="1.8"/></svg>Admin
+  </button>;
+}
 const managementEntries = [
   ['profile', 'Tu perfil', 'Datos personales, bio, fotos y preguntas públicas.'],
   ['preferences', 'Preferencias', 'Tus filtros para encontrar personas'],
@@ -54,7 +59,7 @@ const managementEntries = [
   ['account', 'Cuenta', 'Notificaciones, seguridad y sesi\u00f3n'],
 ] as const;
 
-export function Home({ controller, onCompleteProfile, onChatActiveChange, onManagementActiveChange, navigation: providedNavigation, onNavigationBlockedChange, onAdminNavigationBlockedChange, delegateProfileQuestions = false }: { delegateProfileQuestions?: boolean; onAdminNavigationBlockedChange?: ((blocked: boolean) => void) | undefined; onNavigationBlockedChange?: (blocked: boolean) => void; navigation?: HomeNavigation | undefined; onManagementActiveChange?: (active: boolean) => void; onChatActiveChange?: (active: boolean) => void; controller: SessionController; onCompleteProfile?: () => void }) {
+export function Home({ controller, onCompleteProfile, onChatActiveChange, onManagementActiveChange, navigation: providedNavigation, onNavigationBlockedChange, onAdminNavigationBlockedChange, delegateProfileQuestions = false, onAdmin, adminPending = false }: { adminPending?: boolean; onAdmin?: (() => void) | undefined; delegateProfileQuestions?: boolean; onAdminNavigationBlockedChange?: ((blocked: boolean) => void) | undefined; onNavigationBlockedChange?: (blocked: boolean) => void; navigation?: HomeNavigation | undefined; onManagementActiveChange?: (active: boolean) => void; onChatActiveChange?: (active: boolean) => void; controller: SessionController; onCompleteProfile?: () => void }) {
   const affinities = useAffinityQuestionnaire(controller);
   const [chat, setChat] = useState<Activity | null>(null), [notice, setNotice] = useState('');
   const retireNotice = useCallback(() => setNotice(''), []);
@@ -74,7 +79,9 @@ export function Home({ controller, onCompleteProfile, onChatActiveChange, onMana
     setChat(null); setNotice(message);
   };
   const locked = useRef(false), accountLocked = useRef(false), overviewLocked = useRef(false), root = useRef<HTMLDivElement>(null);
-  const reportNavigationLock = () => onNavigationBlockedChange?.(locked.current || accountLocked.current || overviewLocked.current || !!chat);
+  const currentChat = useRef(chat); currentChat.current = chat;
+  const reportNavigationLock = useCallback(() => onNavigationBlockedChange?.(locked.current || accountLocked.current || overviewLocked.current || !!currentChat.current), [onNavigationBlockedChange]);
+  const reportOverviewLock = useCallback((value: boolean) => { overviewLocked.current = value; reportNavigationLock(); }, [reportNavigationLock]);
   useLayoutEffect(() => { reportNavigationLock(); return () => onNavigationBlockedChange?.(false); }, [chat, onNavigationBlockedChange]);
   const localNavigation = useHomeNavigation(() => !locked.current && !accountLocked.current && !overviewLocked.current && !chat, !providedNavigation);
   const navigation = providedNavigation ?? localNavigation;
@@ -94,15 +101,15 @@ export function Home({ controller, onCompleteProfile, onChatActiveChange, onMana
     document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
   }, [focusSurface]);
-  return <><div hidden={!!surface || !!chat}><HomeOverview onNavigationBlockedChange={value => { overviewLocked.current = value; reportNavigationLock(); }} affinities={affinities} notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current} active={!surface && !chat} activityOpen={navigation.destination === 'activity'} onActivity={() => navigation.open('activity')} onReturnHome={returnHome}/> </div>{chat?.chatId && <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>}<div hidden={!surface} className="home home-management-page" ref={root}>
-    <div hidden={surface !== 'account' && surface !== 'notifications'}><AccountSection controller={controller} disabled={false} onBack={() => navigation.backTo(surface === 'notifications' ? 'account' : 'home')} notificationsOpen={surface === 'notifications'} onNotificationsOpen={() => navigation.open('notifications')} onAdministration={surface === 'account' ? () => navigation.open('admin') : undefined} onNavigationBlockedChange={value => { accountLocked.current = value; reportNavigationLock(); }} /></div>
+  return <><div hidden={!!surface || !!chat}><HomeOverview adminPending={adminPending} onAdmin={onAdmin} onNavigationBlockedChange={reportOverviewLock} affinities={affinities} notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current} active={!surface && !chat} activityOpen={navigation.destination === 'activity'} onActivity={() => navigation.open('activity')} onReturnHome={returnHome}/> </div>{chat?.chatId && <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>}<div hidden={!surface} className="home home-management-page" ref={root}>
+    <div hidden={surface !== 'account' && surface !== 'notifications'}><AccountSection controller={controller} disabled={false} onBack={() => navigation.backTo(surface === 'notifications' ? 'account' : 'home')} notificationsOpen={surface === 'notifications'} onNotificationsOpen={() => navigation.open('notifications')} onNavigationBlockedChange={value => { accountLocked.current = value; reportNavigationLock(); }} /></div>
     {profileActive || surface === 'preferences' ? <Onboarding onAdminNavigationBlockedChange={onAdminNavigationBlockedChange} controller={controller} management={profileActive ? 'details' : 'filters'} navigation={navigation} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; reportNavigationLock(); }} /> : null}
 
     <AffinityQuestionnaire model={affinities} navigation={navigation}/>
   </div></>;
 }
 
-function HomeOverview({ affinities, notice, retireNotice, controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed, active, activityOpen, onActivity, onReturnHome, onNavigationBlockedChange }: { onNavigationBlockedChange: (blocked: boolean) => void; affinities: AffinityModel; activityOpen: boolean; onActivity: () => void; onReturnHome: () => void; active: boolean; notice: string; retireNotice: () => void; controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
+function HomeOverview({ affinities, notice, retireNotice, controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed, active, activityOpen, onActivity, onReturnHome, onNavigationBlockedChange, onAdmin, adminPending }: { adminPending: boolean; onAdmin?: (() => void) | undefined; onNavigationBlockedChange: (blocked: boolean) => void; affinities: AffinityModel; activityOpen: boolean; onActivity: () => void; onReturnHome: () => void; active: boolean; notice: string; retireNotice: () => void; controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
   const { model, busy, blocked, error, refresh, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller, active);
   useLayoutEffect(() => { onNavigationBlockedChange(active && (busy || searchPhase !== 'idle')); return () => onNavigationBlockedChange(false); }, [active, busy, searchPhase, onNavigationBlockedChange]);
   const surface = activityOpen ? 'activity' : 'overview';
@@ -130,16 +137,16 @@ function HomeOverview({ affinities, notice, retireNotice, controller, onComplete
     <header className="home-heading"><h2>Actividad</h2><button className="login-button login-outlined" onClick={onReturnHome}>Volver a Inicio</button></header>
     <p>Descubrimientos, próximos pasos y conversaciones en un solo lugar.</p>
     {error && <p className="home-error" role="alert">{error}</p>}
-    <button className="login-button login-outlined" disabled={busy} onClick={refresh}>Actualizar</button>
+    {error && <button className="login-button login-outlined" disabled={busy} onClick={refresh}>Reintentar</button>}
     {presentation.groups.map(section => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3><div className="home-grid">{section.items.map((item, index) => <ActivityCard key={`${item.matchId}-${item.connectionId}-${item.type}-${index}`} item={item} onOpen={onOpenChat}/>)}</div></section>)}
     {presentation.groups.length === 0 && <p>{home.summary.hasPendingSchedulingConnection ? 'Estamos preparando una coordinación de horarios.' : presentation.hasActivity ? 'Hay actividad en curso. Los detalles aparecerán cuando el servidor los informe.' : 'No tenés pendientes por ahora.'}</p>}
     {home.passiveNotices.map((notice, index) => <aside className="home-notice" key={`${notice}-${index}`}>{notice === 'SCHEDULING_PREPARING' ? 'Estamos preparando tus próximos pasos para coordinar horarios.' : 'Hay novedades sobre tus interacciones. Consultalas desde Android.'}</aside>)}
   </div>;
   return <div ref={root} className={`home ${busy && model ? 'home-reconciling' : ''}`} aria-busy={busy}>
-    <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><button className="login-button login-outlined" disabled={busy} onClick={refresh}>Actualizar</button></header>
+    <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><div className="home-header-actions">{onAdmin && <AdminEntry pending={adminPending} disabled={busy || searchPhase !== 'idle'} onClick={onAdmin} />}</div></header>
     {notice && <p className="home-notice home-terminal-notice" role="status"><span>{notice}</span><button type="button" onClick={retireNotice} aria-label="Ocultar aviso del chat"><ChatIcon name="close"/></button></p>}
     {busy && !model && <p role="status">Actualizando Inicio…</p>}
-    {error && <p className="home-error" role="alert">{error}</p>}
+    {error && <p className="home-error" role="alert">{error}</p>}{error && <button className="login-button login-outlined" disabled={busy} onClick={refresh}>Reintentar</button>}
     {!model && !busy && error && <SignOutButton onConfirm={controller.signOut} />}
     {home && <>
       {home.profileStatus !== 'ACTIVE' && <aside className="home-card"><h3>{home.profileStatus === 'DRAFT' ? 'Tu perfil está en borrador' : 'Tu perfil no está activo'}</h3><p>Tus interacciones se conservan. Para buscar nuevas personas, revisá y activá tu perfil.</p>{onCompleteProfile && <button className="login-button login-outlined" onClick={onCompleteProfile} disabled={busy}>Completar perfil</button>}</aside>}

@@ -25,6 +25,30 @@ function credentials() {
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: ' test@example.com ' } });
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password' } });
 }
+it.each(['password', 'google'])('keeps the login DOM through %s authentication and a slow backend bootstrap', async provider => {
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementation(path => path === '/api/me' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(json({ code: 'PROFILE_NOT_FOUND' }, 404)));
+  mount(true); login(); credentials();
+  const panel = document.querySelector('.login-panel'), email = screen.getByLabelText('Email');
+  fireEvent.click(screen.getByRole('button', { name: provider === 'google' ? 'Continuar con Google' : 'Ingresar' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(document.querySelector('.login-panel')).toBe(panel); expect(screen.getByLabelText('Email')).toBe(email);
+  expect(email).toBeDisabled(); expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  expect(screen.queryByText('Preparando Reals…')).toBeNull(); expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
+  await act(async () => finish(json({ id: 'u', status: 'ACTIVE' })));
+  await screen.findByText('Sin perfil: falta completar el registro.');
+});
+
+it('keeps the restored-session shell until bootstrap resolves and shows an actionable failure', async () => {
+  let fail!: (reason: Error) => void;
+  fetcher.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
+  mount(true); const panel = document.querySelector('.login-panel'), email = screen.getByLabelText('Email');
+  act(() => observer(user)); await waitFor(() => expect(fail).toBeDefined());
+  expect(document.querySelector('.login-panel')).toBe(panel); expect(screen.getByLabelText('Email')).toBe(email);
+  expect(email).toBeDisabled(); expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
+  await act(async () => fail(new TypeError('offline')));
+  expect(screen.getByRole('alert')).toBeVisible(); expect(screen.getByRole('button', { name: 'Reintentar' })).toBeEnabled();
+});
 beforeEach(() => {
   user = { uid: 'f', emailVerified: false, getIdToken: vi.fn().mockResolvedValue('test-token'), reload: vi.fn().mockResolvedValue(undefined) };
   auth = { observe: vi.fn(next => { observer = next; return vi.fn(); }), signIn: vi.fn().mockResolvedValue(user), signUp: vi.fn().mockResolvedValue(user), google: vi.fn().mockResolvedValue(user), verify: vi.fn().mockResolvedValue(undefined), signOut: vi.fn().mockResolvedValue(undefined) };

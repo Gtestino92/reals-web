@@ -33,7 +33,6 @@ async function setup(owner?: TabOwnershipManager) {
   const view = render(<StrictMode><AdminGate key="first" controller={session} /></StrictMode>);
   cleanups.push(view.unmount);
   fireEvent.change(await screen.findByLabelText('Código de seis dígitos'), { target: { value: '012345' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Verificar código' }));
   await screen.findByText('Lucía');
   return { session, view, fetcher, auth, user, stop, replace: (next: Identity | null) => observer(next) };
 }
@@ -53,6 +52,17 @@ it('an ordinary same-UID Firebase observer update preserves the owner and grant'
   act(() => h.replace({ ...h.user }));
   expect(h.session.admin.token()).toBe(token); expect(screen.getByText('Lucía')).toBe(row);
   expect(h.auth.observe).toHaveBeenCalledOnce();
+});
+it('a remounted modal entry waits for backend revalidation of an already-allowed grant before committing', async () => {
+  const h = await setup(), verified = vi.fn();
+  let finish!: (response: Response) => void;
+  h.fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  h.view.rerender(<StrictMode><AdminGate key="modal-remount" controller={h.session} modalOnly onVerified={verified} /></StrictMode>);
+  await waitFor(() => expect(finish).toBeDefined()); expect(verified).not.toHaveBeenCalled();
+  expect(screen.queryByText('Lucía')).toBeNull(); expect(h.session.admin.token()).toBe(token);
+  await act(async () => finish(new Response('{"configured":true,"grantValid":true}')));
+  await waitFor(() => expect(verified).toHaveBeenCalledOnce());
+  expect(h.session.admin.token()).toBe(token);
 });
 it('a new operational session cannot recover a previous session grant even with the same Firebase identity', async () => {
   const h = await setup(); act(() => { h.view.unmount(); h.stop(); });

@@ -51,11 +51,11 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const value: Entry = { owner: initial.owner, trail: replace ? [...current.current.trail.slice(0, -1), next] : [...current.current.trail, next], ...(question ? { question } : {}) };
     if (replace) window.history.replaceState(value, '', path(value)); else window.history.pushState(value, '', path(value)); current.current = value; setState(value);
   };
-  const backTo = (target: HomeDestination) => {
+  const backTo = (target: HomeDestination, replace = false) => {
     if (moving.current || !guard.current(target)) return;
     const value = current.current, index = value.trail.lastIndexOf(target);
     const installed = entry(window.history.state);
-    if (index >= 0 && index < value.trail.length - 1 && installed?.owner === value.owner) {
+    if (!replace && index >= 0 && index < value.trail.length - 1 && installed?.owner === value.owner) {
       moving.current = true; window.history.go(index - value.trail.length + 1);
     } else if (value.trail.at(-1) !== target) {
       const next: Entry = { owner: value.owner, trail: target === 'home' ? ['home'] : ['home', target] };

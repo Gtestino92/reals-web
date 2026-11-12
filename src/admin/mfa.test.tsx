@@ -31,13 +31,14 @@ function setup(provider = 'google.com') {
   const view = render(<OperationalApp firebase={{ service: auth, localVerification: false }} api={new ApiClient(fetcher).withAppCheck(async () => 'synthetic-app-check')} />);
   return { fetcher, events, auth, view };
 }
-async function submit() { fireEvent.change(await screen.findByLabelText('Código de seis dígitos'), { target: { value: '012345' } }); fireEvent.click(screen.getByRole('button', { name: 'Verificar código' })); }
+async function submit() { fireEvent.change(await screen.findByLabelText('Código de seis dígitos'), { target: { value: '012345' } }); }
 afterEach(() => { history.replaceState(null, '', '/'); vi.restoreAllMocks(); vi.useRealTimers(); });
 it('does not issue privileged requests before MFA; preserves numeric input/zeros and forwards verified headers', async () => {
   const h = setup(); const input = await screen.findByLabelText('Código de seis dígitos'); expect(input).toHaveAttribute('inputmode', 'numeric'); expect(input).toHaveAttribute('type', 'text');
   expect(h.events.some(path => path.startsWith('/api/admin/'))).toBe(false);
   await submit(); await screen.findByText('Lucía');
-  expect(h.events.slice(2, 6)).toEqual(['/api/admin-auth/status','/api/admin-auth/verify','/api/admin-auth/status','/api/admin/diagnostics/matchmaking']);
+  const administrative = h.events.filter(path => path.startsWith('/api/admin'));
+  expect(administrative.slice(-4)).toEqual(['/api/admin-auth/verify','/api/admin-auth/status','/api/admin/diagnostics/matchmaking','/api/admin/profile-photos/review']);
 });
 it.each([false, true])('attempts revocation before Firebase logout, discarding access even when revoke fails: %s', async failure => {
   const h = setup(); await submit(); await screen.findByText('Lucía');
@@ -52,24 +53,24 @@ it.each([false, true])('attempts revocation before Firebase logout, discarding a
 });
 it.each(['ADMIN_GRANT_REVOKED','ADMIN_GRANT_EXPIRED','ADMIN_MFA_REQUIRED'])('clears all privileged data and returns to TOTP after %s', async code => {
   const h = setup(); await submit(); await screen.findByText('Lucía');
-  h.fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ code }), { status: 403 })); fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+  h.fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ code }), { status: 403 })); act(() => document.dispatchEvent(new Event('visibilitychange')));
   await screen.findByLabelText('Código de seis dígitos'); expect(screen.queryByText('Lucía')).toBeNull(); expect(screen.queryByRole('heading', { name: 'Reals Admin' })).toBeNull();
 });
 it('keeps the same backoffice mounted across a minute in an unrelated tab and revalidates without new MFA', async () => {
-  const h = setup(); await submit(); const row = await screen.findByText('Luc\u00eda');
+  const h = setup(); await submit(); await screen.findByText('Luc\u00eda'); const panel = screen.getByRole('main');
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
   vi.useFakeTimers();
   act(() => { window.dispatchEvent(new Event('blur')); document.dispatchEvent(new Event('visibilitychange')); vi.advanceTimersByTime(60000); });
-  expect(row).toBeInTheDocument(); expect(h.events).not.toContain('/api/admin-auth/revoke');
+  expect(panel).toBeInTheDocument(); expect(h.events).not.toContain('/api/admin-auth/revoke');
   vi.useRealTimers();
   visibility.mockReturnValue('visible');
   let finish!: (r: Response) => void;
   h.fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   act(() => { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange')); });
   await waitFor(() => expect(finish).toBeDefined());
-  expect(screen.getByText('Luc\u00eda')).toBe(row);
-  await act(async () => finish(new Response('{"configured":true,"grantValid":true}')));
-  expect(screen.getByText('Luc\u00eda')).toBe(row);
+  expect(screen.getByRole('main')).toBe(panel);
+  await act(async () => finish(new Response(JSON.stringify([photo]))));
+  expect(screen.getByRole('main')).toBe(panel);
   expect(h.events.filter(p => p === '/api/admin-auth/verify')).toHaveLength(1);
   expect(h.events.filter(p => p === '/api/me')).toHaveLength(1);
   expect(h.auth.reauthenticateGoogle).not.toHaveBeenCalled(); expect(h.auth.signOut).not.toHaveBeenCalled();
@@ -92,7 +93,7 @@ it('browser Back switches to Reals without revoking retained authorization', asy
 it('late verification cannot reopen administration after cancel/return', async () => {
   const h = setup(); await screen.findByLabelText('Código de seis dígitos'); let finish!: (r: Response) => void;
   h.fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })); await submit();
-  await waitFor(() => expect(finish).toBeDefined()); fireEvent.click(screen.getByRole('button', { name: 'Volver a Reals' }));
+  await waitFor(() => expect(finish).toBeDefined()); fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
   await act(async () => finish(new Response(JSON.stringify({ grant, expiresAt: new Date(Date.now()+900000).toISOString() }))));
   expect(location.pathname).toBe('/'); expect(screen.queryByRole('heading', { name: 'Reals Admin' })).toBeNull(); expect(h.events.some(path => path.startsWith('/api/admin/'))).toBe(false);
 });
@@ -100,5 +101,5 @@ it('password session offers safe switch guidance and return to ordinary Reals', 
   const h = setup('password'); await screen.findByText(/Esta sesión no usa Google/);
   expect(h.events.some(path => path.includes('/admin'))).toBe(false);
   expect(screen.queryByLabelText('Código de seis dígitos')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Volver a Reals' })); expect(location.pathname).toBe('/'); expect(h.auth.signOut).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' })); await waitFor(() => expect(location.pathname).toBe('/')); expect(h.auth.signOut).not.toHaveBeenCalled();
 });

@@ -10,6 +10,7 @@ import type { LoginErrorOwner } from './LoginScreen';
 
 type Phase = 'checking' | 'login' | 'authenticating' | 'loading' | 'ready' | 'restricted' | 'recoverable' | 'signingOut' | 'deletionRecovery' | 'temporarySuspension' | 'permanentAppeal';
 export interface SessionSnapshot {
+  adminEligible?: boolean;
   authContextVersion?: number;
   adminWarning?: string | null;
   phase: Phase;
@@ -28,14 +29,44 @@ export interface SessionSnapshot {
   resetAt: number | null;
   verificationMessage: string | null;
 }
-const initial: SessionSnapshot = { authContextVersion: 0, adminWarning: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, phase: 'checking', account: null, profile: null, error: null, operation: null, resetMessage: null, resetAt: null, verificationMessage: null };
+const initial: SessionSnapshot = { adminEligible: false, authContextVersion: 0, adminWarning: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, phase: 'checking', account: null, profile: null, error: null, operation: null, resetMessage: null, resetAt: null, verificationMessage: null };
 export class SessionController {
+  private eligibilityAbort: AbortController | undefined;
+  private eligibilitySettled = false;
+  private eligibilityRetryAt = 0;
+  private eligibilityVersion = 0;
+  private eligibilityContext: { provider: string | null; authTime: number; eligible: boolean } | undefined;
+  private resetEligibility(preserveContext = false) {
+    this.eligibilityAbort?.abort(); this.eligibilityAbort = undefined;
+    this.eligibilitySettled = false; this.eligibilityRetryAt = 0; this.eligibilityVersion++;
+    if (!preserveContext) this.eligibilityContext = undefined;
+  }
+  private resumeEligibility = () => {
+    if (document.visibilityState === 'visible') void this.refreshAdminEligibility();
+  };
+  refreshAdminEligibility = async () => {
+    if (!this.available() || this.snapshot.phase !== 'ready' || this.snapshot.account?.status !== 'ACTIVE' || this.eligibilitySettled || this.eligibilityAbort || Date.now() < this.eligibilityRetryAt) return;
+    const owner = new AbortController(); this.eligibilityAbort = owner;
+    const version = this.eligibilityVersion;
+    try {
+      const eligible = await this.checkAdminEligibility(owner.signal);
+      if (owner.signal.aborted || version !== this.eligibilityVersion) return;
+      this.eligibilitySettled = true; this.install({ adminEligible: eligible });
+    } catch (error) {
+      if (owner.signal.aborted || version !== this.eligibilityVersion) return;
+      const denied = (error instanceof ApiError && [401, 403].includes(error.status)) || (errorCode(error).startsWith('auth/') && errorCode(error) !== 'auth/network-request-failed');
+      this.eligibilitySettled = denied;
+      this.eligibilityRetryAt = Date.now() + (error instanceof ApiError && error.retryAfterSeconds !== undefined ? error.retryAfterSeconds * 1000 : 5000);
+      if (denied) { this.eligibilityContext = undefined; this.install({ adminEligible: false }); }
+      // Initial failure stays hidden; a transient recheck never flashes a confirmed control.
+    } finally { if (this.eligibilityAbort === owner) this.eligibilityAbort = undefined; }
+  };
   private adminView = false;
   private adminViewEpoch = 0;
-  setAdminView = (active: boolean) => {
+  setAdminView = (active: boolean, retainChallenge = false) => {
     if (this.adminView === active) return;
     this.adminView = active; this.adminViewEpoch++;
-    if (!active) this.admin.suspendView();
+    if (!active && !retainChallenge) this.admin.suspendView();
   };
   checkAdminEligibility = async (signal: AbortSignal) => {
     const generation = this.generation, user = this.user;
@@ -46,12 +77,17 @@ export class SessionController {
     });
     signal.throwIfAborted();
     if (!this.current(generation)) return false;
-    if (context.provider !== 'google.com') { this.admin.clear(); return false; }
+    if (context.provider !== 'google.com') { this.install({ adminEligible: false }); if (this.admin.token()) this.admin.clear(); return false; }
+    const previous = this.eligibilityContext;
+    if (previous?.provider === context.provider && previous.authTime === context.authTime) return previous.eligible;
+    if (this.snapshot.adminEligible) this.install({ adminEligible: false });
+    const grant = this.admin.token();
     const raw = await this.request('/admin-auth/status', signal);
     signal.throwIfAborted();
     if (!this.current(generation)) return false;
     if (!object(raw) || typeof raw.configured !== 'boolean' || typeof raw.grantValid !== 'boolean') throw new ApiError('invalid');
-    if ((!raw.configured || !raw.grantValid) && this.admin.token()) this.admin.fail(new ApiError('authorization', 403, raw.configured ? 'ADMIN_MFA_REQUIRED' : 'ADMIN_MFA_NOT_CONFIGURED'));
+    if (grant && grant === this.admin.token() && (!raw.configured || !raw.grantValid)) this.admin.fail(new ApiError('authorization', 403, raw.configured ? 'ADMIN_MFA_REQUIRED' : 'ADMIN_MFA_NOT_CONFIGURED'));
+    this.eligibilityContext = { ...context, eligible: raw.configured };
     return raw.configured;
   };
   private pageHide = () => { void this.leaveAdmin(); };
@@ -110,6 +146,9 @@ export class SessionController {
       if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
       return result;
     } catch (error) {
+      if (this.current(generation) && grant === this.admin.token() && administrative && error instanceof ApiError && (error.status === 401 || (error.status === 403 && !['ADMIN_MFA_REQUIRED', 'ADMIN_GRANT_EXPIRED', 'ADMIN_GRANT_REVOKED'].includes(error.code)))) {
+        this.eligibilityContext = undefined; this.eligibilitySettled = true; this.install({ adminEligible: false });
+      }
       if (administrative && grant !== this.admin.token()) throw new DOMException('Solicitud administrativa obsoleta', 'AbortError');
       if (administrative && this.current(generation) && error instanceof ApiError && (error.status === 401 || error.status === 403)) this.admin.fail(error);
       // Admin writes must never replay or automatically reenter after token denial.
@@ -187,6 +226,8 @@ export class SessionController {
     lease?.addEventListener('abort', this.suspend, { once: true });
     if (this.listeners.size === 1) {
       window.addEventListener('pagehide', this.pageHide);
+      document.addEventListener('visibilitychange', this.resumeEligibility);
+      window.addEventListener('online', this.resumeEligibility);
       const epoch = ++this.observerEpoch;
       this.unsubscribe = this.auth.observe(user => {
         if (epoch !== this.observerEpoch || !this.listeners.size) return;
@@ -195,7 +236,9 @@ export class SessionController {
         if (this.user?.uid === user?.uid && ['loading', 'ready', 'restricted', 'recoverable', 'deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(this.snapshot.phase)) {
           if (user && this.snapshot.phase === 'ready') {
             this.user = user;
+            this.resetEligibility(true);
             this.install({ authContextVersion: (this.snapshot.authContextVersion ?? 0) + 1 });
+            void this.refreshAdminEligibility();
             if (this.adminView) void this.admin.check();
           }
           return;
@@ -212,13 +255,15 @@ export class SessionController {
       this.listeners.delete(listener);
       if (!this.listeners.size) {
         window.removeEventListener('pagehide', this.pageHide);
+        document.removeEventListener('visibilitychange', this.resumeEligibility);
+        window.removeEventListener('online', this.resumeEligibility);
         this.observerEpoch++;
         this.unsubscribe?.(); this.unsubscribe = undefined;
         this.invalidate(); this.locked = false; this.user = null;
       }
     };
   };
-  private invalidate() { this.adminView = false; this.adminViewEpoch++; this.admin.clear(); this.controller.abort(); this.controller = new AbortController(); return ++this.generation; }
+  private invalidate() { this.snapshot = { ...this.snapshot, adminEligible: false }; this.resetEligibility(); this.adminView = false; this.adminViewEpoch++; this.admin.clear(); this.controller.abort(); this.controller = new AbortController(); return ++this.generation; }
   private current(generation: number) { return this.available() && this.listeners.size > 0 && generation === this.generation; }
   private replace(user: Identity | null) {
     this.invalidate(); this.locked = false; this.user = user;
@@ -293,7 +338,10 @@ export class SessionController {
         this.install({ verificationMessage: 'Te enviamos un email para verificar tu cuenta.' });
       }
       const session = await bootstrap(this.api, user, signal, this.localVerification);
-      if (this.current(generation)) this.install({ phase: 'ready', ...session, appeal: null, appealUncertain: false, suspensionBusy: false, suspensionExpiry: null });
+      if (this.current(generation)) {
+        this.install({ phase: 'ready', ...session, appeal: null, appealUncertain: false, suspensionBusy: false, suspensionExpiry: null });
+        void this.refreshAdminEligibility();
+      }
     } catch (error) {
       if (!this.current(generation)) return;
       if (this.restrict(error)) return;

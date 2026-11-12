@@ -570,3 +570,21 @@ Android audit: `HomeAccountSection.kt` Account/notifications/password/deletion/s
 | Layout, keyboard/touch, errors | PLATFORM-LIMITED Android comparison | Reused normal Account outlined-button tokens and Admin header controls. Native Chromium mobile/desktop layout/entry checks; eligibility errors hide the entry, existing MFA feedback remains. No Android equivalent screenshots, real device or screen-reader claim. |
 
 Source mapping, invariant/response matrix, exact validation commands, initial timeout and remaining live checks are maintained in [admin security](admin-security.md#confirmed-reals--admin-mode-policy). This confirmed mode-retention policy supersedes the earlier explicit-internal-route-exit revocation notes, without weakening actual document exit, identity, ownership, expiry or backend denial.
+
+
+### Header entry, MFA modal, recovery controls and login continuity
+
+Follow-up to reviewed Web baseline `74d93d1`. Android source audited: `ui/auth/LoginScreen.kt` busy/form behavior; `ui/root/SessionCoordinator.kt` authentication/backend phases; `ui/matchmaking/MatchmakingHomeScreen.kt` Home/Account/navigation and PullToRefreshBox; `HomeAccountSection.kt` preferences/status recovery. Existing Web hooks/tests retain domain behavior. No Android administrative MFA/entry equivalent exists; the user explicitly requested these Web presentation changes. Android and backend remain read-only.
+
+| Behavior audited | Status for this change | Web mapping / remaining difference |
+| --- | --- | --- |
+| Header layout, mobile/desktop, touch/pointer | PLATFORM-LIMITED admin comparison; implemented Web adaptation | `Home.AdminEntry`, `home.css`, session header for incomplete profiles; backend-confirmed session eligibility replaces Account effect. No Android admin screenshots exist. |
+| Google/OTP, loading/errors, keyboard/focus/scroll | PLATFORM-LIMITED admin comparison | Native `AdminGate` modal over Reals; six slots/one input, paste/autofill/numeric input, guarded auto-submit, explicit popup, Escape/focus restoration and viewport scrolling. Real device/assistive-technology validation remains. |
+| Navigation/Back, guarded forms/chat, lifecycle | Existing Android navigation principles preserved | `ReadySession` and shared `useHomeNavigation`: verification before normal entry route change, secure direct URL/history, ordinary UI/store isolation, retained memory grant and fixed server expiry. Android has no corresponding grant flow. |
+| Healthy refresh vs recovery/foreground | Intentional user-requested Web difference | Healthy buttons removed; existing lifecycle reads and contextual failed/uncertain/status/permission recovery retained. Android pull-to-refresh gestures are not added or claimed as equivalent here. No new polling or mutation retry. |
+| Login visual shell/bootstrap/security | Implemented Web lifecycle adaptation | Same `LoginScreen` nodes across checking/authentication/loading; disabled form plus status, ready-only protected content. Android busy/invalid/restricted behavior remains reference; no artificial delay/animation. |
+
+Exact invariants, response paths, validation and remaining integration/device work: [admin-security.md](admin-security.md#frontend-ux-and-lifecycle-follow-up-baseline-74d93d1). This supersedes earlier references to `useAdminEligibility`, Account entry and a standalone six-digit MFA screen, preserving historical validation records above.
+
+
+Validation for this follow-up: final full Vitest PASS 1137/48 files with `--maxWorkers=2`; final focused modal/mode/remount PASS 44; typecheck/build/diff checks PASS; native Chromium synthetic desktop/mobile smoke PASS 76 assertions plus awaited scenarios, with visual inspection of login/bootstrap, Home header, modal and backoffice. This verifies the listed Web adaptations only; physical device keyboards/autofill, screen readers, real Firebase/backend and other engines remain unverified for this change. Existing >500 kB main-bundle warning persists.

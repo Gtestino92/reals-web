@@ -26,7 +26,7 @@ export function PhotoSlot({ position, photo, disabled, managementDisabled = disa
           <img src={photo.url} alt={`Foto ${position} del perfil`} draggable={false} referrerPolicy="no-referrer" onError={event => { event.currentTarget.alt = 'No se pudo cargar la foto. Actualizá el estado o revisá el acceso al almacenamiento.'; }}/>
         </button>
         {onDelete && <button className="photo-delete" type="button" disabled={managementDisabled} aria-label={`Eliminar foto ${position}`} onClick={onDelete}><span aria-hidden="true">×</span></button>}
-        {(rejected || review) && <span className={`photo-moderation ${rejected ? 'photo-rejected' : ''}`} role="note" aria-label={rejected ? `Foto ${position} rechazada. Debe ser reemplazada.` : `Foto ${position} pendiente de revisión`} title={rejected ? 'Reemplazá esta foto.' : 'Esperá la revisión; podés actualizar el estado.'}>{rejected ? 'Rechazada' : 'En revisión'}</span>}
+        {(rejected || review) && <span className={`photo-moderation ${rejected ? 'photo-rejected' : ''}`} role="note" aria-label={rejected ? `Foto ${position} rechazada. Debe ser reemplazada.` : `Foto ${position} pendiente de revisión`} title={rejected ? 'Reemplazá esta foto.' : 'Esperá la revisión; el estado se consulta al volver a Reals.'}>{rejected ? 'Rechazada' : 'En revisión'}</span>}
       </> : <button className="photo-add" type="button" disabled={disabled} aria-label={`Agregar en posición ${position}`} aria-describedby="photo-upload-guidance" onClick={() => input.current?.click()}>
         <span className="photo-plus" aria-hidden="true">+</span><span>Agregar</span>
       </button>}

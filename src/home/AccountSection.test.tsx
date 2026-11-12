@@ -79,7 +79,7 @@ it('describes initial loading and read failure, then retries without a write and
   expect(screen.getByRole('button', { name: 'Volver a Cuenta' })).toBeDisabled();
   await act(async () => resolve({ activityEnabled: null }));
   expect(screen.getByRole('alert')).toHaveTextContent('No pudimos cargar las preferencias.');
-  fireEvent.click(screen.getByRole('button', { name: 'Actualizar notificaciones' })); await screen.findByRole('switch', { name: 'Actividad' });
+  fireEvent.click(screen.getByRole('button', { name: 'Consultar estado' })); await screen.findByRole('switch', { name: 'Actividad' });
   expect(vi.mocked(controller.request).mock.calls.every(call => call[2] === undefined)).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Volver a Cuenta' })); expect(screen.getByRole('button', { name: 'Notificaciones' })).toHaveFocus();
 });
@@ -90,7 +90,7 @@ it('blocks uncertain notification writes until an explicit authoritative read', 
   fireEvent.click(activity); await screen.findByRole('alert'); expect(activity).toBeDisabled();
   expect(screen.getByRole('alert')).toHaveTextContent('No pudimos confirmar el cambio.');
   screen.getAllByRole('switch').forEach(input => expect(input).toBeDisabled());
-  fireEvent.click(screen.getByRole('button', { name: 'Actualizar notificaciones' })); await waitFor(() => expect(activity).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Consultar estado' })); await waitFor(() => expect(activity).toBeEnabled());
   expect(controller.request).toHaveBeenCalledTimes(3);
 });
 it('deletes recoverably once and signs out only after success', async () => {

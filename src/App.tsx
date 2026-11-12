@@ -14,9 +14,10 @@ import { SessionController } from './auth/session';
 import { Onboarding } from './onboarding/Onboarding';
 import { SessionLoading } from './SessionLoading';
 import seal from './assets/reals-seal.png';
-import { Home } from './home/Home';
+import { Home, AdminEntry } from './home/Home';
 
-const Admin = lazy(() => import('./admin/AdminGate'));
+const AdminGate = lazy(() => import('./admin/AdminGate'));
+const Admin = lazy(() => import('./admin/Admin'));
 
 type AppProps = { firebase?: FirebaseSetup; api?: ApiClient; ownership?: TabOwnershipManager };
 export function App(props: AppProps) {
@@ -41,7 +42,8 @@ function SessionApp({ controller }: { controller: SessionController }) {
     if (state.phase === 'login' || state.phase === 'authenticating') window.history.replaceState(null, '', '/');
   }, [state.phase]);
   if (state.phase === 'ready') return <ReadySession key={state.account?.id} controller={controller} />;
-  if (state.phase === 'login' || state.phase === 'authenticating') return <LoginScreen
+  if (['checking', 'loading', 'login', 'authenticating'].includes(state.phase)) return <LoginScreen
+    sessionLoading={state.phase === 'checking' || state.phase === 'loading'} onCancelSession={state.phase === 'loading' ? controller.signOut : undefined}
     loading={state.operation === 'signIn' || state.operation === 'signUp'}
     googleLoading={state.operation === 'google'} passwordResetLoading={state.operation === 'reset'}
     error={state.error?.message ?? state.adminWarning ?? null} errorOwner={state.error?.owner ?? (state.adminWarning ? 'shared' : null)}
@@ -55,7 +57,6 @@ function SessionApp({ controller }: { controller: SessionController }) {
       <h1 id="session-heading">Reals</h1>
       <div className="brand-divider" aria-hidden="true"><span /></div>
     </div></header>
-    {(state.phase === 'checking' || state.phase === 'loading') && <SessionLoading />}
     {state.phase === 'signingOut' && <p role="status">Cerrando sesión…</p>}
     {(state.phase === 'temporarySuspension' || state.phase === 'permanentAppeal') && <AccountSuspension controller={controller} state={state} />}
     {state.phase === 'deletionRecovery' && <AccountDeletionRecovery controller={controller} state={state} />}
@@ -69,27 +70,71 @@ function SessionApp({ controller }: { controller: SessionController }) {
 
 function ReadySession({ controller }: { controller: SessionController }) {
   const state = controller.getSnapshot();
-  const blocked = useRef(false);
-  const reportBlocked = useCallback((value: boolean) => { blocked.current = value; }, []);
-  const adminBlocked = useRef(false);
+  const access = useSyncExternalStore(controller.admin.subscribe, controller.admin.getSnapshot);
+  const blocked = useRef(false), adminBlocked = useRef(false), entryEpoch = useRef(0);
+  const challengeActive = useRef(false), adminTrigger = useRef<HTMLElement | null>(null);
+  const [guarded, setGuarded] = useState(false);
+  const reportBlocked = useCallback((value: boolean) => { blocked.current = value; setGuarded(value); }, []);
   const reportAdminBlocked = useCallback((value: boolean) => { adminBlocked.current = value; }, []);
-  const navigation = useHomeNavigation(target => !blocked.current && (target !== 'admin' || !adminBlocked.current));
+  // Cancelling a direct /admin challenge reveals the already-visible Home context;
+  // it does not navigate away from its forms, chats or pending reads.
+  const navigation = useHomeNavigation(target => (target === 'home' && challengeActive.current) || (!blocked.current && (target !== 'admin' || !adminBlocked.current)));
   const administrative = navigation.destination === 'admin';
+  const [intent, setIntent] = useState(false), [entryBusy, setEntryBusy] = useState(false), [viewReady, setViewReady] = useState(false);
   const [chatActive, setChatActive] = useState(false);
   const [managementActive, setManagementActive] = useState(false);
   const [setupAccountAvailable, setSetupAccountAvailable] = useState(false);
   const homeReady = state.profile?.status === 'ACTIVE' || managementActive;
   const chatShell = chatActive && homeReady;
+  const displayingAdmin = administrative && viewReady && access.phase === 'allowed';
+  challengeActive.current = intent || (administrative && !displayingAdmin);
   useLayoutEffect(() => {
-    controller.setAdminView(administrative);
-  }, [controller, administrative]);
-  if (administrative) return <Suspense fallback={<SessionLoading />}><Admin controller={controller} onReturn={() => navigation.backTo('account')} onNavigationBlockedChange={reportBlocked} /></Suspense>;
-  return <main className={chatShell ? 'chat-page' : 'login-page'}><section className={chatShell ? 'chat-shell' : 'login-panel'} aria-label={chatShell ? 'Conversaci\u00f3n activa' : undefined} aria-labelledby={chatShell ? undefined : 'session-heading'}>
-    {!chatShell && <header className="login-header"><div className="login-brand"><img className="login-seal" src={seal} alt="" width="54" height="54" /><h1 id="session-heading">Reals</h1><div className="brand-divider" aria-hidden="true"><span /></div></div></header>}
-    {homeReady ? <Home onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={navigation} onNavigationBlockedChange={reportBlocked} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={navigation} onNavigationBlockedChange={reportBlocked} onAccountAvailableChange={setSetupAccountAvailable} />}
+    if (!displayingAdmin) { controller.setAdminView(false, intent || administrative); if (viewReady) setViewReady(false); }
+  }, [controller, displayingAdmin, viewReady, intent, administrative]);
+  useLayoutEffect(() => () => { entryEpoch.current++; }, []);
+  const enter = () => {
+    if (blocked.current || adminBlocked.current) return;
+    adminTrigger.current = null;
+    setIntent(false);
+    controller.setAdminView(true); setViewReady(true);
+    if (!administrative) navigation.open('admin');
+  };
+  useLayoutEffect(() => {
+    const current = controller.admin.getSnapshot();
+    if ((intent || administrative) && current.phase === 'allowed' && !current.busy && !guarded && !viewReady) enter();
+  }, [intent, administrative, access.phase, access.busy, guarded, viewReady]);
+  const cancel = () => {
+    entryEpoch.current++; setEntryBusy(false); setIntent(false); setViewReady(false);
+    controller.admin.suspendView(); controller.setAdminView(false);
+    if (administrative) navigation.backTo('home', true);
+  };
+  useLayoutEffect(() => {
+    if (navigation.destination !== 'home' && !administrative && (intent || entryBusy)) cancel();
+  }, [navigation.destination]);
+  const requestAdmin = () => {
+    if (blocked.current || adminBlocked.current || entryBusy || !state.adminEligible) return;
+    const epoch = ++entryEpoch.current, context = state.authContextVersion;
+    adminTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setEntryBusy(true); setViewReady(false);
+    void controller.admin.check().then(() => {
+      if (epoch !== entryEpoch.current || controller.getSnapshot().phase !== 'ready') return;
+      setEntryBusy(false);
+      if (context !== controller.getSnapshot().authContextVersion) return;
+      if (blocked.current || adminBlocked.current) { controller.admin.suspendView(); return; }
+      if (controller.admin.getSnapshot().phase === 'allowed') enter(); else setIntent(true);
+    });
+  };
+  if (displayingAdmin) return <Suspense fallback={<SessionLoading />}><Admin controller={controller} onReturn={() => navigation.backTo('home')} onNavigationBlockedChange={reportBlocked} /></Suspense>;
+  const regularNavigation = administrative ? { ...navigation, destination: 'home' as const } : navigation;
+  return <><main className={chatShell ? 'chat-page' : 'login-page'}><section className={chatShell ? 'chat-shell' : 'login-panel'} aria-label={chatShell ? 'Conversación activa' : undefined} aria-labelledby={chatShell ? undefined : 'session-heading'}>
+    {!chatShell && <header className="login-header session-header"><div className="login-brand"><img className="login-seal" src={seal} alt="" width="54" height="54" /><h1 id="session-heading">Reals</h1><div className="brand-divider" aria-hidden="true"><span /></div></div>{!homeReady && state.adminEligible && <div className="session-admin-entry"><AdminEntry onClick={requestAdmin} pending={entryBusy || intent} disabled={guarded} /></div>}</header>}
+    {homeReady ? <Home onAdmin={state.adminEligible ? requestAdmin : undefined} adminPending={entryBusy || intent} onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={regularNavigation} onNavigationBlockedChange={reportBlocked} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={regularNavigation} onNavigationBlockedChange={reportBlocked} onAccountAvailableChange={setSetupAccountAvailable} />}
+    {entryBusy && <p role="status">Consultando acceso administrativo…</p>}
     {state.adminWarning && <p role="alert">{state.adminWarning}</p>}
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     {!chatShell && !homeReady && !setupAccountAvailable && <div className="session-actions"><SignOutButton onConfirm={controller.signOut} /></div>}
-  </section></main>;
+  </section></main>
+    {(intent || administrative) && <Suspense fallback={<p role="status">Consultando acceso administrativo…</p>}><AdminGate controller={controller} modalOnly prepared={intent} onReturn={cancel} onVerified={enter} returnFocus={adminTrigger.current} /></Suspense>}
+  </>;
 }

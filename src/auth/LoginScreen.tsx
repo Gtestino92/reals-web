@@ -2,12 +2,15 @@ import { useEffect, useReducer, useState } from 'react';
 import seal from '../assets/reals-seal.png';
 import googleIcon from '../assets/google-g.png';
 import './login.css';
+import { SignOutButton } from './SignOutButton';
 
 type AuthMode = 'signIn' | 'signUp';
 export type LoginErrorOwner = AuthMode | 'shared';
 
 export interface LoginScreenProps {
   loading?: boolean;
+  sessionLoading?: boolean;
+  onCancelSession?: (() => void) | undefined;
   googleLoading?: boolean;
   passwordResetLoading?: boolean;
   error?: string | null;
@@ -53,6 +56,8 @@ function useResetCooldown(deadline: number | null) {
 
 export function LoginScreen({
   loading = false,
+  sessionLoading = false,
+  onCancelSession,
   googleLoading = false,
   passwordResetLoading = false,
   error = null,
@@ -69,7 +74,7 @@ export function LoginScreen({
   const [password, setPassword] = useState('');
   const [keepSignedIn, setKeepSignedIn] = useState(false);
   const cooldown = useResetCooldown(passwordResetAvailableAtMillis);
-  const busy = loading || googleLoading || passwordResetLoading;
+  const busy = loading || googleLoading || passwordResetLoading || sessionLoading;
   const signIn = mode === 'signIn';
   const visibleError = error !== null && (
     errorOwner === 'shared' || errorOwner === mode || (errorOwner === null && signIn)
@@ -95,6 +100,7 @@ export function LoginScreen({
             ? 'Ingresá con tu email y contraseña para continuar.'
             : 'Registrate con tu email y contraseña para empezar.'}</p>
         </header>
+        {sessionLoading && <p className="login-feedback" role="status">Preparando tu sesión de forma segura…</p>}
         <form
           className="login-form"
           aria-labelledby="login-heading"
@@ -162,6 +168,7 @@ export function LoginScreen({
             {googleLoading ? 'Conectando con Google...' : 'Continuar con Google'}
           </button>
         </form>
+        {sessionLoading && onCancelSession && <SignOutButton onConfirm={onCancelSession} />}
       </section>
     </main>
   );

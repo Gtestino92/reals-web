@@ -23,6 +23,6 @@ export function AccountSuspension({ controller, state }: { controller: SessionCo
     </form>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     <p className="suspension-status" role="status">{busy ? 'Actualizando estado…' : ''}</p>
-    <div className="suspension-actions"><button className="login-button login-primary" disabled={busy} onClick={controller.retry}>{status === 'APPROVED' ? 'Reintentar' : 'Actualizar estado'}</button><SignOutButton onConfirm={controller.signOut} /></div>
+    <div className="suspension-actions"><button className="login-button login-primary" disabled={busy} onClick={controller.retry}>{status === 'APPROVED' ? 'Reintentar' : 'Consultar estado'}</button><SignOutButton onConfirm={controller.signOut} /></div>
   </section>;
 }

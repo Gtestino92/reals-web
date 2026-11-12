@@ -71,7 +71,7 @@ export function ProfileQuestions({ model, navigation, onReturn }: { model: Profi
     {busy && <p role="status">{catalog ? 'Actualizando preguntas…' : 'Cargando preguntas…'}</p>}
     {error && <p role="alert" className="home-error">{error}</p>}
     {feedback?.route === route && <p role="status">{feedback.message}</p>}
-    <button className="login-button login-outlined" disabled={busy} onClick={() => void model.refresh()}>{error || uncertain ? 'Reintentar consulta' : 'Actualizar preguntas'}</button>
+    {(error || uncertain) && <button className="login-button login-outlined" disabled={busy} onClick={() => void model.refresh()}>Reintentar consulta</button>}
     {catalog && <>
       {destination === 'profile-questions' && <div className="home-card question-actions">
         <p>{rows.filter(r => r.answer).length} de {rows.length} respondidas</p><p>{confirmedSelection.length} de 3 elegidas para mostrar</p>

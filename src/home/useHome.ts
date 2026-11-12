@@ -55,7 +55,7 @@ export function useHome(controller: SessionController, active = true) {
       r.reconcile = true;
       await load(r, serial, signal, !poll && r.cancelRequested);
     } catch {
-      if (valid(r, serial) && !signal.aborted) { r.reconcile = true; setState(s => ({ ...s, blocked: true, locationFailure: null, error: 'No pudimos actualizar Inicio. Revisá tu conexión y presioná Actualizar.' })); }
+      if (valid(r, serial) && !signal.aborted) { r.reconcile = true; setState(s => ({ ...s, blocked: true, locationFailure: null, error: 'No pudimos actualizar Inicio. Revisá tu conexión y usá Reintentar.' })); }
     } finally {
       if (valid(r, serial)) {
         r.read = null;
@@ -119,7 +119,7 @@ export function useHome(controller: SessionController, active = true) {
     const reconcile = async () => {
       setState(s => ({ ...s, searchPhase: r.cancelRequested ? 'canceling' : 'reconciling' }));
       try { await load(r, serial, signal, true); }
-      catch { if (valid(r, serial)) { r.uncertain = true; failure = 'No pudimos confirmar el estado de la búsqueda. Presioná Actualizar antes de volver a intentar.'; } }
+      catch { if (valid(r, serial)) { r.uncertain = true; failure = 'No pudimos confirmar el estado de la búsqueda. Consultá el estado antes de volver a intentar.'; } }
     };
     try {
       if (attempted || r.cancelRequested) await reconcile();
