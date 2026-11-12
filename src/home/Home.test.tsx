@@ -1,3 +1,4 @@
+import { visualProfile } from '../visual/fixtures';
 import { confirmSignOut } from '../test/signOut';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -583,4 +584,18 @@ it('renders a noninteractive structure while the first Home projection is pendin
   expect(document.querySelector('.home-placeholder')).toHaveAttribute('aria-hidden', 'true');
   expect(document.querySelectorAll('.home-placeholder-card')).toHaveLength(4);
   expect(screen.queryByRole('button', { name: 'Cuenta' })).toBeNull();
+});
+
+it('opens visual review only from its card, retains Home and restores Activity with Back/Forward', async () => {
+ home.pendingActions = [{type:'VISUAL_REVIEW',matchId:'visual'}];
+ const base = fetcher.getMockImplementation()!;
+ fetcher.mockImplementation((path,options)=> path === '/api/matches/visual' ? Promise.resolve(json({id:'visual',userAId:'u',userBId:'them',state:'VISUAL_PHASE'})) : path === '/api/matches/visual/visual-profile' ? Promise.resolve(json(visualProfile())) : base(path,options));
+ mount();await ready();expect(screen.queryByRole('heading',{name:'Perfil por descubrir'})).toBeNull();
+ const retained = document.querySelector('.home');
+ fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));fireEvent.click(screen.getByRole('button',{name:'Descubrir ahora'}));
+ await screen.findByRole('heading',{name:'María'});expect(history.state.matchId).toBe('visual');
+ fireEvent.click(screen.getByRole('button',{name:'Volver a Actividad'}));await screen.findByRole('heading',{name:'Actividad'});expect(document.querySelector('.home')).toBe(retained);
+ act(()=>history.forward());await screen.findByRole('heading',{name:'María'});
+ act(()=>history.back());await screen.findByRole('heading',{name:'Actividad'});
+ expect(fetcher.mock.calls.some(([path])=>String(path).includes('personal-message'))).toBe(false);
 });

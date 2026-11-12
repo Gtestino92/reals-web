@@ -1,3 +1,4 @@
+import { VisualReview } from '../visual/VisualReview';
 import { useAffinityQuestionnaire, type AffinityModel } from '../profile/affinities/useAffinityQuestionnaire';
 import { AffinityQuestionnaire } from '../profile/affinities/AffinityQuestionnaire';
 import { presentation as affinityPresentation } from '../profile/affinities/presentation';
@@ -41,6 +42,7 @@ function ActivityCard({ item, onOpen }: { item: Activity; onOpen: (item: Activit
   };
   return <article className="home-card"><h4>{labels[item.type] ?? 'Actividad pendiente'}</h4>
     {item.partnerName && <p>Con {item.partnerName}</p>}
+    {item.type === 'VISUAL_REVIEW' && <button className="login-button login-primary" onClick={() => onOpen(item)}>Descubrir ahora</button>}
     {item.type === 'FIRST_CHAT' && item.chatId && <button className="login-button login-primary" onClick={() => onOpen(item)}>Abrir primer chat</button>}
     <p>{body[item.type] ?? 'Consultá esta actividad desde Android.'}</p>
     {typeof when === 'string' && <p>{item.type === 'SCHEDULING' || item.type === 'VISUAL_REVIEW' ? 'Hasta: ' : 'Fecha: '}<time dateTime={when}>{new Date(when).toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' })}</time></p>}
@@ -105,7 +107,8 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
     document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
   }, [focusSurface, active]);
-  return <><div hidden={!!surface || !!chat}><HomeOverview returnScroll={homePosition} adminPending={adminPending} onAdmin={onAdmin} onNavigationBlockedChange={reportOverviewLock} affinities={affinities} notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current} active={active && !surface && !chat} activityOpen={navigation.destination === 'activity'} onActivity={() => { homePosition.current = window.scrollY; navigation.open('activity'); }} onReturnHome={returnHome}/> </div>{chat?.chatId && <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>}<div hidden={!surface} className="home home-management-page" ref={root}>
+  return <><div hidden={!!surface || !!chat}><HomeOverview returnScroll={homePosition} adminPending={adminPending} onAdmin={onAdmin} onNavigationBlockedChange={reportOverviewLock} affinities={affinities} notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={(item, automatic) => { if (item.type === 'VISUAL_REVIEW') { if (!automatic) { homePosition.current = window.scrollY; navigation.openVisualReview(item.matchId); } } else openChat(item, automatic); }} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current} active={active && !surface && !chat} activityOpen={navigation.destination === 'activity'} onActivity={() => { homePosition.current = window.scrollY; navigation.open('activity'); }} onReturnHome={returnHome}/> </div>{chat?.chatId && <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>}<div hidden={!surface} className="home home-management-page" ref={root}>
+    {surface === 'visual-review' && navigation.matchId && active && <VisualReview key={navigation.matchId} controller={controller} matchId={navigation.matchId} onBack={() => navigation.backTo(navigation.trailIncludesActivity ? 'activity' : 'home')} />}
     <div hidden={surface !== 'account' && surface !== 'notifications'}><AccountSection controller={controller} disabled={false} onBack={() => navigation.backTo(surface === 'notifications' ? 'account' : 'home')} notificationsOpen={surface === 'notifications'} onNotificationsOpen={() => navigation.open('notifications')} onNavigationBlockedChange={value => { accountLocked.current = value; reportNavigationLock(); }} /></div>
     {retainedManagement.current && <div hidden={!managementActive}><Onboarding Home={Home} active={active && managementActive} onAdminNavigationBlockedChange={onAdminNavigationBlockedChange} controller={controller} management={retainedManagement.current} navigation={navigation} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; reportNavigationLock(); }} /></div>}
 
@@ -135,7 +138,7 @@ function HomeOverview({ returnScroll, affinities, notice, retireNotice, controll
     const restoring = active && !previouslyVisible.current;
     previouslyVisible.current = active;
     const heading = root.current?.querySelector('h2');
-    if (active && heading) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; heading.tabIndex = -1; heading.focus({ preventScroll: true }); if (restoring && screen === 'overview' && returnScroll.current) window.scrollTo(0, returnScroll.current); }
+    if (active && heading) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; heading.tabIndex = -1; heading.focus({ preventScroll: true }); if (restoring && returnScroll.current) window.scrollTo(0, returnScroll.current); }
   }, [active, screen, returnScroll]);
   const affinity = affinities.catalog ? affinityPresentation(affinities.catalog, affinities.answers) : null;
   const presentation = home ? activityPresentation(home) : null;
