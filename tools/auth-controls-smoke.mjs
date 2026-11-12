@@ -14,6 +14,8 @@ try {
   let serial=0;const pending=new Map();ws.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result);}});
   const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++serial;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});
   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
+  const unsafeCharMap={'<':'\\u003C','>':'\\u003E','/':'\\u002F','\\':'\\\\','\b':'\\b','\f':'\\f','\n':'\\n','\r':'\\r','\t':'\\t','\0':'\\0','\u2028':'\\u2028','\u2029':'\\u2029'};
+  const escapeUnsafeChars=str=>str.replace(/[<>\/\\\b\f\n\r\t\0\u2028\u2029]/g,ch=>unsafeCharMap[ch]??ch);
   const delay=ms=>new Promise(r=>setTimeout(r,ms));
   const wait=async(expression,label)=>{for(let i=0;i<120;i++){if(await evaluate(expression))return;await delay(40);}throw Error(label);};
   const check=(ok,label)=>{if(!ok)throw Error(label);console.log('PASS',label);};
@@ -29,7 +31,7 @@ try {
   })()`);
   await mkdir('artifacts/auth-controls',{recursive:true});
   const screenshot=async name=>writeFile(`artifacts/auth-controls/${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
-  const click=async selector=>{await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'})`);const point=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point});await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point});};
+  const click=async selector=>{await evaluate(`document.querySelector(${escapeUnsafeChars(JSON.stringify(selector))}).scrollIntoView({block:'center'})`);const point=await evaluate(`(()=>{const r=document.querySelector(${escapeUnsafeChars(JSON.stringify(selector))}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point});await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point});};
   const key=async(value,code,virtual)=>{await call('Input.dispatchKeyEvent',{type:'keyDown',key:value,code,windowsVirtualKeyCode:virtual});await call('Input.dispatchKeyEvent',{type:'keyUp',key:value,code,windowsVirtualKeyCode:virtual});};
   const results=[];
   for(const width of [320,390,1440])for(const theme of ['light','dark']) {
