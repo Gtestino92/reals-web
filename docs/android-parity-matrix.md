@@ -607,3 +607,19 @@ Android audited: `LoginScreen.kt`, `SessionCoordinator.kt`, `MatchmakingHomeScre
 | Stable login authentication/bootstrap shell | COMPLETE in synthetic Chromium; PLATFORM-LIMITED IME parity | Reserved description/cancel space; same inputs through checking/auth/loading. Browser focus no longer substitutes for actual Android IME insets; scrolling is retained. Physical keyboard/device validation remains. |
 | Six-digit OTP focus, pending, errors, confirmed success | PLATFORM-LIMITED Android comparison (no admin equivalent) | One accessible input, active slot/caret, request exclusion, Retry-After, backend-confirmed 400ms success and reduced-motion static feedback. Device autofill and assistive technology remain manual checks. |
 | Lifecycle / expiry / identity / Back / ownership | Existing boundaries preserved | Commit/memory owner remains session-scoped; success timer has no authority. Cancel/unmount/context invalidation interrupts navigation; shared lease abort listener survives individual subscriber cleanup. |
+
+
+## Navigation flicker audit (2026-11-12)
+
+Android references inspected: `ui/root/HomeCoordinator.kt`, `ProfileEntryCoordinator.kt`, `HomeProfileRoutingRules.kt`, `NotificationPreferencesCoordinator.kt`, `AffinityQuestionnaireOperationHandler.kt`, `ProfileQuestionOperationHandler.kt`; `MatchmakingHomeScreen.kt`, `CreateProfileScreen.kt`, `AffinityQuestionnaireScreen.kt`, and existing Home/notification routing tests. Android retains identity-owned reads and saveable drafts, distinguishes initial loading from refresh, and owns system navigation through its coordinators. Backend contracts remain in `../reals-backend/docs/commons/`. This row records transition presentation only; existing feature entries remain authoritative.
+
+| Area | Status | Web implementation / evidence / outstanding differences |
+| --- | --- | --- |
+| Retained normal read models / revalidation | COMPLETE for tested synthetic paths | Home/Onboarding owners retain confirmed profile/preferences/questions; Account/affinities retain existing models. Writes block during failed or pending reconciliation. Account/profile ID owns lifetime; no storage. |
+| Initial-loading visual structure | PARTIAL | Static noninteractive first-load placeholders in Onboarding, Notifications, Affinities and Questions. Stable shell/header; approximate variable content geometry is a browser adaptation, not pixel-verified Android parity. |
+| Activity / Search / Chat lifecycle | COMPLETE for tested paths | Existing authoritative queue/cancel/chat guards preserved. Actual-App Chromium terminal Chat return retains Home. Exhaustive gestures/audio/real-device flow not revalidated by this task. |
+| Navigation / focus / scrolling | PARTIAL | Shared history and unsaved/in-flight guards retained; Notifications focus restoration; Home origin scroll retention. Heading focus remains the ordinary destination convention. Physical Back, virtual keyboard and assistive technology remain unverified. |
+| Admin privacy and mode switching | PLATFORM-LIMITED | No Android equivalent. Ordinary tree stays hidden/suspended; privileged views/evidence dispose on exit; only existing valid in-memory grant survives. Chromium/RTL cover expiry/revocation/identity/pagehide and guarded Back/Forward. |
+| Responsive rendering / errors / motion | PARTIAL | Desktop/mobile synthetic frame samples and inspected screenshots. Failed reads preserve content with explicit recovery; errors can add layout height. Static placeholders have no animation. Physical-device and Android screenshot equivalence remain unverified. |
+
+See [causes, invariants, measurements, exact validation and limitations](navigation-flicker.md); no claim that compilation establishes full Android parity.

@@ -39,7 +39,7 @@ function SessionApp({ controller }: { controller: SessionController }) {
     // An explicit login always starts in ordinary Reals, even after a direct /admin URL.
     if (state.phase === 'login' || state.phase === 'authenticating') window.history.replaceState(null, '', '/');
   }, [state.phase]);
-  if (state.phase === 'ready') return <ReadySession key={state.account?.id} controller={controller} />;
+  if (state.phase === 'ready') return <ReadySession key={`${state.account?.id}/${state.profile?.id}`} controller={controller} />;
   if (['checking', 'loading', 'login', 'authenticating'].includes(state.phase)) return <LoginScreen
     sessionLoading={state.phase === 'checking' || state.phase === 'loading'}
     loading={state.operation === 'signIn' || state.operation === 'signUp'}
@@ -69,6 +69,8 @@ function SessionApp({ controller }: { controller: SessionController }) {
 function ReadySession({ controller }: { controller: SessionController }) {
   const state = controller.getSnapshot();
   const access = useSyncExternalStore(controller.admin.subscribe, controller.admin.getSnapshot);
+  const regularVisible = useRef(true);
+  const reportRegularBlocked = useCallback((value: boolean) => { if (regularVisible.current) reportBlocked(value); }, []);
   const blocked = useRef(false), adminBlocked = useRef(false), entryEpoch = useRef(0);
   const challengeActive = useRef(false), adminTrigger = useRef<HTMLElement | null>(null);
   const [guarded, setGuarded] = useState(false);
@@ -96,6 +98,7 @@ function ReadySession({ controller }: { controller: SessionController }) {
   const homeReady = state.profile?.status === 'ACTIVE' || managementActive;
   const chatShell = chatActive && homeReady;
   const displayingAdmin = administrative && viewReady && access.phase === 'allowed';
+  regularVisible.current = !displayingAdmin;
   challengeActive.current = intent || (administrative && !displayingAdmin);
   useLayoutEffect(() => {
     if (!displayingAdmin) { controller.setAdminView(false, intent || administrative); if (viewReady) setViewReady(false); }
@@ -131,18 +134,19 @@ function ReadySession({ controller }: { controller: SessionController }) {
       if (controller.admin.getSnapshot().phase !== 'allowed' || !enter()) setIntent(true);
     });
   };
-  if (displayingAdmin && AdminScreen) return <AdminScreen controller={controller} onReturn={() => navigation.backTo('home')} onRevoked={cancel} onNavigationBlockedChange={reportBlocked} />;
+
   const regularNavigation = administrative ? { ...navigation, destination: 'home' as const } : navigation;
-  return <><main className={chatShell ? 'chat-page' : 'login-page'}><section className={chatShell ? 'chat-shell' : 'login-panel'} aria-label={chatShell ? 'Conversación activa' : undefined} aria-labelledby={chatShell ? undefined : 'session-heading'}>
+  return <><div hidden={displayingAdmin}><main className={chatShell ? 'chat-page' : 'login-page'}><section className={chatShell ? 'chat-shell' : 'login-panel'} aria-label={chatShell ? 'Conversación activa' : undefined} aria-labelledby={chatShell ? undefined : 'session-heading'}>
     {!chatShell && <header className="login-header session-header"><div className="login-brand"><img className="login-seal" src={seal} alt="" width="54" height="54" /><h1 id="session-heading">Reals</h1><div className="brand-divider" aria-hidden="true"><span /></div></div>{!homeReady && state.adminEligible && <div className="session-admin-entry"><AdminEntry onClick={requestAdmin} pending={entryBusy || intent} disabled={guarded} /></div>}</header>}
-    {homeReady ? <Home onAdmin={state.adminEligible ? requestAdmin : undefined} adminPending={entryBusy || intent} onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={regularNavigation} onNavigationBlockedChange={reportBlocked} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={regularNavigation} onNavigationBlockedChange={reportBlocked} onAccountAvailableChange={setSetupAccountAvailable} />}
+    {homeReady ? <Home active={!displayingAdmin} onAdmin={state.adminEligible ? requestAdmin : undefined} adminPending={entryBusy || intent} onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={regularNavigation} onNavigationBlockedChange={reportRegularBlocked} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding active={!displayingAdmin} onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={regularNavigation} onNavigationBlockedChange={reportRegularBlocked} onAccountAvailableChange={setSetupAccountAvailable} />}
     {entryBusy && <p role="status">Consultando acceso administrativo…</p>}
     {adminLoadError && <p role="alert">{adminLoadError}</p>}
     {state.adminWarning && <p role="alert">{state.adminWarning}</p>}
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}
     {!chatShell && !homeReady && !setupAccountAvailable && <div className="session-actions"><SignOutButton onConfirm={controller.signOut} /></div>}
-  </section></main>
-    {(intent || administrative) && <Suspense fallback={<p role="status">Consultando acceso administrativo…</p>}><AdminGate controller={controller} modalOnly prepared={intent} onReturn={cancel} onVerified={enter} returnFocus={adminTrigger.current} /></Suspense>}
+  </section></main></div>
+    {displayingAdmin && AdminScreen && <AdminScreen controller={controller} onReturn={() => navigation.backTo('home')} onRevoked={cancel} onNavigationBlockedChange={reportBlocked} />}
+    {!displayingAdmin && (intent || administrative) && <Suspense fallback={<p role="status">Consultando acceso administrativo…</p>}><AdminGate controller={controller} modalOnly prepared={intent} onReturn={cancel} onVerified={enter} returnFocus={adminTrigger.current} /></Suspense>}
   </>;
 }

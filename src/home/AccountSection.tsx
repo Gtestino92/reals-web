@@ -64,7 +64,7 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
       <div className="brand-divider" aria-hidden="true"><span/></div>
     </header>
     <p className="notification-platform">Estos ajustes se aplican actualmente a las notificaciones push de Android. Las notificaciones del navegador se configurarán por separado cuando estén disponibles.</p>
-    <div className="notification-rows">{preferences && groups.map(([key, label]) => <label className="notification-row" key={key}>
+    <div className="notification-rows">{!preferences && busy && groups.map(([key]) => <div className="notification-row home-placeholder" aria-hidden="true" key={key}><span/><span/></div>)}{preferences && groups.map(([key, label]) => <label className="notification-row" key={key}>
       <span className="notification-copy"><span className="notification-title" id={`${notificationId}-${key}-title`}>{label}</span><span className="notification-description" id={`${notificationId}-${key}-description`}>{descriptions[key]}</span></span>
       <span className="notification-switch-target"><input type="checkbox" role="switch" className="notification-switch" aria-labelledby={`${notificationId}-${key}-title`} aria-describedby={`${notificationId}-${key}-description`} checked={preferences[key]} disabled={blocked || uncertain} onChange={e => { const requested = { ...preferences, [key]: e.target.checked }; void run(async signal => { notificationAction.current = 'write'; setUncertain(true); const value = parse(await controller.request('/me/notification-preferences', signal, 'PUT', requested)); signal.throwIfAborted(); setPreferences(value); setUncertain(false); }); }}/></span>
     </label>)}</div>

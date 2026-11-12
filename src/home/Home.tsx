@@ -59,8 +59,8 @@ const managementEntries = [
   ['account', 'Cuenta', 'Notificaciones, seguridad y sesi\u00f3n'],
 ] as const;
 
-export function Home({ controller, onCompleteProfile, onChatActiveChange, onManagementActiveChange, navigation: providedNavigation, onNavigationBlockedChange, onAdminNavigationBlockedChange, delegateProfileQuestions = false, onAdmin, adminPending = false }: { adminPending?: boolean; onAdmin?: (() => void) | undefined; delegateProfileQuestions?: boolean; onAdminNavigationBlockedChange?: ((blocked: boolean) => void) | undefined; onNavigationBlockedChange?: (blocked: boolean) => void; navigation?: HomeNavigation | undefined; onManagementActiveChange?: (active: boolean) => void; onChatActiveChange?: (active: boolean) => void; controller: SessionController; onCompleteProfile?: () => void }) {
-  const affinities = useAffinityQuestionnaire(controller);
+export function Home({ active = true, controller, onCompleteProfile, onChatActiveChange, onManagementActiveChange, navigation: providedNavigation, onNavigationBlockedChange, onAdminNavigationBlockedChange, delegateProfileQuestions = false, onAdmin, adminPending = false }: { active?: boolean; adminPending?: boolean; onAdmin?: (() => void) | undefined; delegateProfileQuestions?: boolean; onAdminNavigationBlockedChange?: ((blocked: boolean) => void) | undefined; onNavigationBlockedChange?: (blocked: boolean) => void; navigation?: HomeNavigation | undefined; onManagementActiveChange?: (active: boolean) => void; onChatActiveChange?: (active: boolean) => void; controller: SessionController; onCompleteProfile?: () => void }) {
+  const affinities = useAffinityQuestionnaire(controller, active);
   const [chat, setChat] = useState<Activity | null>(null), [notice, setNotice] = useState('');
   const retireNotice = useCallback(() => setNotice(''), []);
   useLayoutEffect(() => { onChatActiveChange?.(!!chat); return () => onChatActiveChange?.(false); }, [chat, onChatActiveChange]);
@@ -88,28 +88,32 @@ export function Home({ controller, onCompleteProfile, onChatActiveChange, onMana
   // Draft setup owns its shared history and renders questions outside this nested Home.
   const surface = navigation.destination === 'home' || navigation.destination === 'activity' || (delegateProfileQuestions && isProfileQuestions(navigation.destination)) ? null : navigation.destination;
   const profileActive = surface === 'profile' || isProfileQuestions(surface ?? '');
+  const managementActive = profileActive || surface === 'preferences';
+  const retainedManagement = useRef<'details' | 'filters' | null>(null);
+  if (managementActive) retainedManagement.current = profileActive ? 'details' : 'filters';
   useLayoutEffect(() => { onManagementActiveChange?.(!!surface); return () => onManagementActiveChange?.(false); }, [surface, onManagementActiveChange]);
-  const open = (next: ManagementSurface) => { retireNotice(); navigation.open(next); if (next === 'affinities') void affinities.refresh(); };
+  const homePosition = useRef(0);
+  const open = (next: ManagementSurface) => { homePosition.current = window.scrollY; retireNotice(); navigation.open(next); if (next === 'affinities') void affinities.refresh(); };
   const returnHome = () => navigation.backTo('home');
   const focusSurface = profileActive ? 'profile' : surface;
   const previousFocusSurface = useRef(focusSurface);
   useLayoutEffect(() => {
     const returningToAccount = previousFocusSurface.current === 'notifications' && focusSurface === 'account';
     previousFocusSurface.current = focusSurface;
-    if (returningToAccount) return; // AccountSection restores the Notifications entry's focus.
+    if (!active || !focusSurface || returningToAccount) return; // AccountSection restores the Notifications entry's focus.
     const heading = Array.from(root.current?.querySelectorAll('h2') ?? []).find(node => !node.closest('[hidden]'));
     document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
-  }, [focusSurface]);
-  return <><div hidden={!!surface || !!chat}><HomeOverview adminPending={adminPending} onAdmin={onAdmin} onNavigationBlockedChange={reportOverviewLock} affinities={affinities} notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current} active={!surface && !chat} activityOpen={navigation.destination === 'activity'} onActivity={() => navigation.open('activity')} onReturnHome={returnHome}/> </div>{chat?.chatId && <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>}<div hidden={!surface} className="home home-management-page" ref={root}>
+  }, [focusSurface, active]);
+  return <><div hidden={!!surface || !!chat}><HomeOverview returnScroll={homePosition} adminPending={adminPending} onAdmin={onAdmin} onNavigationBlockedChange={reportOverviewLock} affinities={affinities} notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={openChat} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current} active={active && !surface && !chat} activityOpen={navigation.destination === 'activity'} onActivity={() => { homePosition.current = window.scrollY; navigation.open('activity'); }} onReturnHome={returnHome}/> </div>{chat?.chatId && <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>}<div hidden={!surface} className="home home-management-page" ref={root}>
     <div hidden={surface !== 'account' && surface !== 'notifications'}><AccountSection controller={controller} disabled={false} onBack={() => navigation.backTo(surface === 'notifications' ? 'account' : 'home')} notificationsOpen={surface === 'notifications'} onNotificationsOpen={() => navigation.open('notifications')} onNavigationBlockedChange={value => { accountLocked.current = value; reportNavigationLock(); }} /></div>
-    {profileActive || surface === 'preferences' ? <Onboarding onAdminNavigationBlockedChange={onAdminNavigationBlockedChange} controller={controller} management={profileActive ? 'details' : 'filters'} navigation={navigation} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; reportNavigationLock(); }} /> : null}
+    {retainedManagement.current && <div hidden={!managementActive}><Onboarding active={active && managementActive} onAdminNavigationBlockedChange={onAdminNavigationBlockedChange} controller={controller} management={retainedManagement.current} navigation={navigation} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; reportNavigationLock(); }} /></div>}
 
     <AffinityQuestionnaire model={affinities} navigation={navigation}/>
   </div></>;
 }
 
-function HomeOverview({ affinities, notice, retireNotice, controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed, active, activityOpen, onActivity, onReturnHome, onNavigationBlockedChange, onAdmin, adminPending }: { adminPending: boolean; onAdmin?: (() => void) | undefined; onNavigationBlockedChange: (blocked: boolean) => void; affinities: AffinityModel; activityOpen: boolean; onActivity: () => void; onReturnHome: () => void; active: boolean; notice: string; retireNotice: () => void; controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
+function HomeOverview({ returnScroll, affinities, notice, retireNotice, controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed, active, activityOpen, onActivity, onReturnHome, onNavigationBlockedChange, onAdmin, adminPending }: { returnScroll: { current: number }; adminPending: boolean; onAdmin?: (() => void) | undefined; onNavigationBlockedChange: (blocked: boolean) => void; affinities: AffinityModel; activityOpen: boolean; onActivity: () => void; onReturnHome: () => void; active: boolean; notice: string; retireNotice: () => void; controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
   const { model, busy, blocked, error, refresh, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller, active);
   useLayoutEffect(() => { onNavigationBlockedChange(active && (busy || searchPhase !== 'idle')); return () => onNavigationBlockedChange(false); }, [active, busy, searchPhase, onNavigationBlockedChange]);
   const surface = activityOpen ? 'activity' : 'overview';
@@ -126,10 +130,13 @@ function HomeOverview({ affinities, notice, retireNotice, controller, onComplete
   const waiting = !!m?.inQueue || searchPhase !== 'idle';
   const screen = waiting ? 'search' : surface;
   useEffect(() => { if (screen !== 'overview') retireNotice(); }, [screen, retireNotice]);
+  const previouslyVisible = useRef(false);
   useLayoutEffect(() => {
+    const restoring = active && !previouslyVisible.current;
+    previouslyVisible.current = active;
     const heading = root.current?.querySelector('h2');
-    if (active && heading) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
-  }, [active, screen]);
+    if (active && heading) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; heading.tabIndex = -1; heading.focus({ preventScroll: true }); if (restoring && screen === 'overview' && returnScroll.current) window.scrollTo(0, returnScroll.current); }
+  }, [active, screen, returnScroll]);
   const affinity = affinities.catalog ? affinityPresentation(affinities.catalog, affinities.answers) : null;
   const presentation = home ? activityPresentation(home) : null;
   if (waiting) return <div ref={root}><SearchingScreen phase={searchPhase === 'idle' ? 'queued' : searchPhase} error={error} busy={busy} blocked={blocked} inQueue={!!m?.inQueue} onCancel={cancel} onRefresh={refresh} onBack={backFromSearch} canRetryLocation={canRetryLocation} onRetryLocation={retryLocation}/></div>;

@@ -18,7 +18,7 @@ try {
   const wait=async(expression,label)=>{for(let i=0;i<120;i++){if(await evaluate(expression))return;await delay(40);}throw Error(label);};
   const check=(ok,label)=>{if(!ok)throw Error(label);console.log('PASS',label);};
   const button=async text=>{const expression=`Array.from(document.querySelectorAll('button')).find(n=>n.getClientRects().length&&(n.textContent===${JSON.stringify(text)}||n.getAttribute('aria-label')===${JSON.stringify(text)})&&!n.disabled)`;await wait(`!!(${expression})`,text);await evaluate(`(${expression}).click()`);};
-  await call('Page.enable');await call('Page.navigate',{url:'http://127.0.0.1:5175/admin'});await delay(1200);
+  await call('Page.enable');await call('Page.navigate',{url:(process.env.REALS_SMOKE_URL??'http://127.0.0.1:5175')+'/admin'});await delay(1200);
   await evaluate(`(async()=>{
     const {default:React}=await import('/node_modules/.vite/deps/react.js'),{default:ReactDOM}=await import('/node_modules/.vite/deps/react-dom_client.js'),{OperationalApp}=await import('/src/App.tsx'),{ApiClient}=await import('/src/auth/api.ts'),fixtures=await import('/src/admin/fixtures.ts'),{defaults}=await import('/src/onboarding/contracts.ts'),{emptyHome,homeStatus}=await import('/src/home/fixtures.ts');
     document.getElementById('root').remove();const el=document.createElement('div');document.body.append(el);let root;
@@ -116,9 +116,11 @@ try {
     await writeFile(`artifacts/admin/admin-${width}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
     check(await evaluate('document.documentElement.scrollWidth<=innerWidth'),'responsive width');
     const modeTimeOrigin=await evaluate('performance.timeOrigin');
+    await evaluate("window.retainedHome=document.querySelector('.home-search');void 0");
     const issuedVerifies=await evaluate("calls.filter(p=>p==='/api/admin-auth/verify').length");
     await button('Volver a Reals');await wait("location.pathname==='/'&&document.body.textContent.includes('Cuenta')",'ordinary Account mode');
     check(await evaluate("!document.body.textContent.includes('<script>untrusted</script>')&&!document.querySelector('.admin')"),'normal mode removes all private backoffice DOM');
+    check(await evaluate("!!retainedHome&&retainedHome===document.querySelector('.home-search')&&!document.querySelector('.home-placeholder')"),'Admin return retains confirmed Home without skeleton');
     check(await evaluate("calls.every(p=>p!=='/api/admin-auth/revoke')"),'mode switch retains authorization');
     await wait("Array.from(document.querySelectorAll('button')).some(n=>n.textContent==='Admin'&&!n.disabled)",'eligible Home header entry');
     await writeFile(`artifacts/admin/account-mode-${width}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));

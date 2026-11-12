@@ -822,3 +822,25 @@ function refreshView() {
   if (recovery) fireEvent.click(recovery);
   else act(() => window.document.dispatchEvent(new Event('visibilitychange')));
 }
+
+it.each(['Tu perfil', 'Preferencias'])('retains the confirmed %s form across delayed and failed revisits', async destination => {
+  await openManagement(destination);
+  const title = destination === 'Tu perfil' ? 'Datos del perfil' : 'Preferencias de búsqueda';
+  const form = await screen.findByRole('form', { name: title });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
+  await screen.findByRole('heading', { name: 'Inicio' });
+  await waitFor(() => expect(screen.getByRole('button', { name: destination })).toBeEnabled());
+  const base = fetcher.getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementation((url, options) => url === '/api/me/profile' ? new Promise(resolve => { finish = resolve; }) : base(url, options));
+  fireEvent.click(screen.getByRole('button', { name: destination }));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(screen.getByRole('form', { name: title })).toBe(form);
+  expect(form.querySelector('input')).toBeDisabled();
+  expect(window.document.querySelector('.session-loading')).toBeNull();
+  await act(async () => finish(json({ code: 'SERVICE_UNAVAILABLE' }, 503)));
+  await screen.findByRole('alert');
+  expect(form).toBeVisible(); expect(form.querySelector('input')).toBeDisabled();
+  expect(writes(destination === 'Tu perfil' ? 'PATCH' : 'PUT')).toHaveLength(0);
+});

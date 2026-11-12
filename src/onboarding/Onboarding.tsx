@@ -36,7 +36,7 @@ export function onboardingError(error: unknown) {
   return error instanceof ApiError ? messages[error.code] ?? (error.status === 400 && error.kind === 'invalid' ? 'El servidor rechazó los datos. Revisá los campos y usá texto simple, sin etiquetas HTML.' : error.kind === 'invalid' ? 'La respuesta del servidor no es válida. Consultá el estado antes de continuar.' : error.kind === 'network' ? 'No pudimos confirmar el resultado. Revisá tu conexión y actualizá el estado.' : `No se pudo completar la operación${error.code ? ` (${error.code})` : ''}. Revisá los datos y actualizá el estado.`) : 'No pudimos completar la operación. Consultá el estado y volvé a intentar.';
 }
 interface Model { profile: FullProfile | null; photos: Photo[]; legal: { satisfied: boolean; documents: LegalDocument[] }; interactions: boolean | null }
-export function Onboarding({ controller, management, navigation: providedNavigation, onBack, onNavigationBlockedChange, onAccountAvailableChange, onAdminNavigationBlockedChange }: { onAdminNavigationBlockedChange?: ((blocked: boolean) => void) | undefined; controller: SessionController; management?: 'details' | 'filters'; navigation?: HomeNavigation; onAccountAvailableChange?: (available: boolean) => void; onBack?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
+export function Onboarding({ active = true, controller, management, navigation: providedNavigation, onBack, onNavigationBlockedChange, onAccountAvailableChange, onAdminNavigationBlockedChange }: { active?: boolean; onAdminNavigationBlockedChange?: ((blocked: boolean) => void) | undefined; controller: SessionController; management?: 'details' | 'filters'; navigation?: HomeNavigation; onAccountAvailableChange?: (available: boolean) => void; onBack?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
   const [model, setModel] = useState<Model | null>(null), [catalog, setCatalog] = useState<Country[]>([]), [countryError,setCountryError] = useState('');
   const [busy, setBusy] = useState(true), [blocked,setBlocked] = useState(true), [error,setError] = useState(''), [message,setMessage] = useState('');
   const [verified,setVerified] = useState(controller.emailVerified), [success,setSuccess] = useState(false);
@@ -62,7 +62,7 @@ export function Onboarding({ controller, management, navigation: providedNavigat
   const setupNavigation = useHomeNavigation(() => !owner.current?.locked && !cropOwned.current && !accountLocked.current && !nestedHomeLock.current, setupNavigationEnabled && !providedNavigation);
   const navigation = providedNavigation ?? setupNavigation;
   const questionsActive = isProfileQuestions(navigation.destination);
-  const questions = useProfileQuestions(controller, questionsActive);
+  const questions = useProfileQuestions(controller, active && questionsActive);
   useLayoutEffect(() => {
     if (questionsActive && !questions.identity) navigation.backTo(management ? 'profile' : 'home');
   }, [questionsActive, questions.identity, management, navigation]);
@@ -138,10 +138,16 @@ export function Onboarding({ controller, management, navigation: providedNavigat
     finally { if (owner.current === resource && !signal.aborted) { resource.locked = false; setBusy(false); } }
     return true;
   };
+  const foreground = useRef(active); foreground.current = active;
+  const wasActive = useRef(active);
+  useLayoutEffect(() => {
+    if (active && !wasActive.current) { setBlocked(true); void run(); }
+    wasActive.current = active;
+  }, [active]);
   useEffect(() => {
     const resource = { abort: new AbortController(), locked: false }; owner.current = resource;
     queueMicrotask(() => { if (!resource.abort.signal.aborted) { void loadCountries(resource.abort.signal); void run(); } });
-    const resume = () => { if (document.visibilityState === 'visible') void run(); };
+    const resume = () => { if (foreground.current && document.visibilityState === 'visible') void run(); };
     document.addEventListener('visibilitychange',resume);
     return () => { resource.abort.abort(); document.removeEventListener('visibilitychange',resume); if (owner.current === resource) owner.current = null; };
     // Controller identity owns this component for its entire mounted lifetime.
@@ -181,15 +187,15 @@ export function Onboarding({ controller, management, navigation: providedNavigat
     : !verified ? 'Verificá tu email antes de subir fotos. Usá «Reenviar correo» y «Ya verifiqué» en la sección anterior.'
     : crop ? 'Terminá o cancelá el recorte actual antes de elegir otra foto.'
     : 'Elegí o arrastrá una sola foto JPEG o PNG de hasta 15 MB. Podés recortarla antes de subirla.';
-  useEffect(() => { onNavigationBlockedChange?.(busy || !!crop || accountBusy || nestedHomeBlocked); }, [busy, crop, accountBusy, nestedHomeBlocked, onNavigationBlockedChange]);
+  useEffect(() => { onNavigationBlockedChange?.(active && (busy || !!crop || accountBusy || nestedHomeBlocked)); }, [active, busy, crop, accountBusy, nestedHomeBlocked, onNavigationBlockedChange]);
   const accountAvailable = !management && !!model && model.profile?.status !== 'ACTIVE';
   useLayoutEffect(() => { onAccountAvailableChange?.(accountAvailable); return () => onAccountAvailableChange?.(false); }, [accountAvailable, onAccountAvailableChange]);
   if (!model && busy && !management) return <SessionLoading />;
   return <><div className="onboarding" hidden={questionsActive} aria-busy={busy}>
     {management && <header className="home-heading"><h2>{management === 'details' ? 'Tu perfil' : 'Preferencias'}</h2><button type="button" className="login-button login-outlined" disabled={busy || !!crop} onClick={onBack}>Volver a Inicio</button></header>}
-    {management && !model && busy && <SessionLoading /> }
+    {management && !model && busy && <><p className="home-loading-status" role="status">Cargando {management === 'details' ? 'perfil' : 'preferencias'}…</p><div className="home-placeholder management-placeholder" aria-hidden="true"><div className="home-card">{Array.from({ length: 4 }, (_, i) => <div className="placeholder-field" key={i}><span/><span/></div>)}</div>{management === 'details' && <div className="home-card home-placeholder-search"><span/><span/><span/></div>}</div></> }
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
-    {busy && (!management || !!model) && <p role="status">Actualizando estado…</p>}
+    {busy && (!management || !!model) && <p className={management ? "home-loading-status" : undefined} role="status">Actualizando estado…</p>}
     {(error || blocked) && !busy && <button type="button" disabled={!!crop} onClick={() => void run()}>Consultar estado</button>}
     {model && !model.legal.satisfied ? <><h2>Antes de continuar</h2><p>Revisá los documentos vigentes. Algunas acciones de participación requieren que completes la acción indicada.</p>
       {model.legal.documents.map(doc => <article key={doc.type}><h3>{({ TERMS_OF_USE: 'Términos de uso', PRIVACY_NOTICE: 'Aviso de privacidad', COMMUNITY_GUIDELINES: 'Normas de la comunidad' } as Record<string,string>)[doc.type] ?? doc.type}</h3><p>Versión {doc.version} · {doc.requiredAction} · {doc.satisfied ? 'Completado' : 'Pendiente'}</p><a href={doc.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Ver documento</a>{!doc.satisfied && <button disabled={disabled} onClick={() => void run(async signal => { await controller.request('/me/legal-document-actions',signal,'POST',{ documentType: doc.type, documentVersion: doc.version, action: doc.requiredAction }); })}>{doc.requiredAction === 'ACCEPTED' ? 'Aceptar' : 'Confirmar lectura'}</button>}</article>)}

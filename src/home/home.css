@@ -67,3 +67,6 @@ html:has(.home) { scrollbar-gutter: stable; }
 .home-admin-entry { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; width: auto; padding: 8px 12px; }
 .session-header { position: relative; }
 .session-admin-entry { position: absolute; right: 0; top: 0; }
+
+.management-placeholder .placeholder-field { margin-block: 24px; }
+.management-placeholder .placeholder-field span:last-child { height: 44px; max-width: 100%; }

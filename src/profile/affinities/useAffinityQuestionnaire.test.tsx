@@ -39,12 +39,14 @@ it('handles definite rejection without fabricating success', async () => {
   const { controller, request } = setup(); const { result } = renderHook(() => useAffinityQuestionnaire(controller)); await waitFor(() => expect(result.current.catalog).not.toBeNull());
   request.mockRejectedValueOnce(new ApiError('backend', 400, 'INVALID_AFFINITY_ANSWER')); await act(async () => { await result.current.mutate('a', 'A'); }); expect(result.current.error).toBeTruthy(); expect(result.current.uncertain).toBe(false); expect(result.current.answers).toEqual([]);
 });
-it('synchronous gate excludes duplicate writes and stale reads', async () => {
+it('blocks writes during revalidation and excludes duplicate writes', async () => {
   const { controller, request } = setup(); const { result } = renderHook(() => useAffinityQuestionnaire(controller)); await waitFor(() => expect(result.current.catalog).not.toBeNull());
   const stale = deferred<unknown>(); request.mockReturnValueOnce(stale.promise); let read!: Promise<void>; act(() => { read = result.current.refresh(); });
+  const before = request.mock.calls.length; await act(async () => { expect(await result.current.mutate('a', 'A')).toBeNull(); }); expect(request).toHaveBeenCalledTimes(before);
+  await act(async () => { stale.resolve(fixture()); await read; });
   const write = deferred<unknown>(); request.mockReturnValueOnce(write.promise); let first!: Promise<unknown>; act(() => { first = result.current.mutate('a', 'A'); });
   await act(async () => { expect(await result.current.mutate('b', 'B')).toBeNull(); write.resolve({ answers: [answer()] }); await first; });
-  await act(async () => { stale.resolve(fixture()); await read; }); expect(result.current.answers).toEqual([answer()]);
+  expect(result.current.answers).toEqual([answer()]);
 });
 it.each(['ready', 'login'] as const)('rejects late mutations after identity transition %s', async phase => {
   const { controller, request, replace } = setup(); const { result } = renderHook(() => useAffinityQuestionnaire(controller)); await waitFor(() => expect(result.current.catalog).not.toBeNull());

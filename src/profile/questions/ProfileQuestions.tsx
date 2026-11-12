@@ -68,7 +68,8 @@ export function ProfileQuestions({ model, navigation, onReturn }: { model: Profi
   const openSelection = () => { setSelection(confirmedSelection); navigation.open('profile-question-selection'); };
   return <section className="profile-questions" aria-busy={busy}>
     <header className="home-heading"><h2 ref={heading} tabIndex={-1}>{title}</h2><button className="login-button login-outlined" onClick={back}>Volver</button></header>
-    {busy && <p role="status">{catalog ? 'Actualizando preguntas…' : 'Cargando preguntas…'}</p>}
+    {busy && <p className={catalog ? "home-loading-status" : undefined} role="status">{catalog ? 'Actualizando preguntas…' : 'Cargando preguntas…'}</p>}
+    {busy && !catalog && <div className="home-placeholder" aria-hidden="true"><div className="home-card home-placeholder-search"><span/><span/><span/></div></div>}
     {error && <p role="alert" className="home-error">{error}</p>}
     {feedback?.route === route && <p role="status">{feedback.message}</p>}
     {(error || uncertain) && <button className="login-button login-outlined" disabled={busy} onClick={() => void model.refresh()}>Reintentar consulta</button>}

@@ -51,13 +51,15 @@ it('distinguishes definite rejection from malformed mutation success', async () 
   request.mockRejectedValueOnce(new ApiError('backend', 400, 'INVALID_PROFILE_QUESTION_ANSWER')); await act(async () => { await result.current.mutate({ kind: 'delete', questionId: 'A' }); }); expect(result.current.uncertain).toBe(false); expect(result.current.error).toBeTruthy();
   request.mockResolvedValueOnce({ answers: [{}] }); await act(async () => { await result.current.mutate({ kind: 'delete', questionId: 'A' }); }); expect(result.current.uncertain).toBe(true); expect(result.current.answers).toEqual([savedAnswer()]);
 });
-it('invalidates stale reads before mutation and synchronously excludes duplicate mutations', async () => {
+it('blocks writes during revalidation and synchronously excludes duplicate mutations', async () => {
   const { hook, request } = setup(); const { result } = renderHook(hook); await waitFor(() => expect(result.current.catalog).not.toBeNull());
   const read = deferred<unknown>(); request.mockReturnValueOnce(read.promise); let reading!: Promise<void>; act(() => { reading = result.current.refresh(); });
+  const before = request.mock.calls.length; await act(async () => { expect(await result.current.mutate({ kind: 'delete', questionId: 'A' })).toBeNull(); }); expect(request).toHaveBeenCalledTimes(before);
+  await act(async () => { read.resolve(questionCatalog()); await reading; });
   const write = deferred<unknown>(); request.mockReturnValueOnce(write.promise); let writing!: Promise<unknown>; act(() => { writing = result.current.mutate({ kind: 'upsert', questionId: 'B', answer: 'Nueva' }); });
   const count = request.mock.calls.length; await act(async () => { await result.current.mutate({ kind: 'selection', questionIds: ['A'] }); }); expect(request).toHaveBeenCalledTimes(count);
-  await act(async () => { write.resolve({ answers: [savedAnswer('B')] }); await writing; read.resolve(questionCatalog()); await reading; }); expect(result.current.answers).toEqual([savedAnswer('B')]);
-  request.mockRejectedValueOnce(new ApiError('network')); await act(async () => { await result.current.refresh(); }); expect(result.current.answers).toEqual([savedAnswer('B')]);
+  await act(async () => { write.resolve({ answers: [savedAnswer('B')] }); await writing; }); expect(result.current.answers).toEqual([savedAnswer('B')]);
+  request.mockRejectedValueOnce(new ApiError('network')); await act(async () => { await result.current.refresh(); }); expect(result.current.answers).toEqual([savedAnswer('B')]); expect(result.current.uncertain).toBe(true);
 });
 it.each(['ready', 'login'] as const)('rejects late writes and clears identity state on %s replacement', async phase => {
   const { hook, request, replace } = setup(); const { result } = renderHook(hook); await waitFor(() => expect(result.current.catalog).not.toBeNull());
