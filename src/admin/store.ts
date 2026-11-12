@@ -2,8 +2,8 @@ import { ApiError } from '../auth/api';
 import type { SessionController } from '../auth/session';
 import { decisionResult, detail, diagnostics, list, record, report, str } from './model';
 import type { Action, Row, Section } from './model';
-export interface AdminState { access: 'checking' | 'allowed' | 'denied' | 'error'; section: Section; sourceReportId: string | null; rows: Row[]; selected: Row | null; diagnostics: Row | null; busy: boolean; blocked: boolean; error: string; notice: string }
-const initial: AdminState = { access: 'checking', section: 'photos', sourceReportId: null, rows: [], selected: null, diagnostics: null, busy: false, blocked: false, error: '', notice: '' };
+export interface AdminState { access: 'checking' | 'allowed' | 'denied' | 'error'; section: Section; sourceReportId: string | null; rows: Row[]; selected: Row | null; diagnostics: Row | null; busy: boolean; refreshing: boolean; blocked: boolean; error: string; notice: string }
+const initial: AdminState = { access: 'checking', section: 'photos', sourceReportId: null, rows: [], selected: null, diagnostics: null, busy: false, refreshing: false, blocked: false, error: '', notice: '' };
 export class AdminStore {
   private state = initial;
   private listeners = new Set<() => void>();
@@ -20,11 +20,11 @@ export class AdminStore {
   private begin() { this.abort.abort(); this.abort = new AbortController(); return ++this.generation; }
   start = () => { this.alive = true; void this.authorize(); };
   dispose = () => { this.alive = false; this.abort.abort(); this.generation++; this.install(initial); this.mutation = false; };
-  private failure(error: unknown) {
+  private failure(error: unknown, block = false) {
     if (error instanceof ApiError && [401,403].includes(error.status)) {
       this.abort.abort(); this.generation++;
       this.install({ ...initial, access: 'denied' });
-    } else this.install({ busy: false, error: 'No se pudo obtener el estado. Usá Consultar estado para volver a intentar.' });
+    } else this.install({ busy: false, refreshing: false, blocked: this.state.blocked || block, error: 'No se pudo obtener el estado. Usá Consultar estado para volver a intentar.' });
   }
   authorize = async () => {
     const g = this.begin(); this.install({ ...initial, busy: true });
@@ -35,25 +35,27 @@ export class AdminStore {
     } catch (error) { if (this.current(g)) { this.failure(error); if (this.state.access !== 'denied') this.install({ access: 'error' }); } }
   };
   private path() { return this.state.sourceReportId !== null ? `/admin/safety-reports/${encodeURIComponent(this.state.sourceReportId)}` : this.state.section === 'photos' ? '/admin/profile-photos/review' : this.state.section === 'appeals' ? '/admin/penalty-appeals/pending' : this.state.section === 'diagnostics' ? '/admin/diagnostics/matchmaking' : this.filters ? `/admin/safety-reports?${this.filters}` : '/admin/safety-reports/pending'; }
-  load = async () => {
+  load = async (background = false) => {
     if (this.state.access !== 'allowed' || this.mutation) return;
+    if (background && (this.state.busy || this.state.refreshing || this.state.blocked || this.state.selected)) return;
     const g = this.begin(), { section, sourceReportId } = this.state;
-    this.install({ busy: true, rows: [], selected: null, error: '' });
+    this.install(background ? { refreshing: true } : { busy: true, refreshing: false, rows: [], selected: null, error: '' });
     try {
       const raw = await this.session.request(this.path(), this.abort.signal);
       if (!this.current(g)) return;
       if (sourceReportId !== null) {
         const selected = detail(raw);
         if (str(record(selected.report),'id') !== sourceReportId) throw new ApiError('invalid');
-        this.install({ selected, busy: false, blocked: false });
-      } else this.install({ ...(section === 'diagnostics' ? { diagnostics: diagnostics(raw) } : { rows: list(raw, section) }), busy: false, blocked: false });
-    } catch (error) { if (this.current(g)) this.failure(error); }
+        this.install({ selected, busy: false, refreshing: false, blocked: false, error: '' });
+      } else this.install({ ...(section === 'diagnostics' ? { diagnostics: diagnostics(raw) } : { rows: list(raw, section) }), busy: false, refreshing: false, blocked: false, error: '' });
+    } catch (error) { if (this.current(g)) this.failure(error, background); }
   };
   navigate = (section: Section, filters = '') => { if (this.mutation || this.state.access !== 'allowed') return; this.filters = filters; this.install({ section, sourceReportId: null, rows: [], selected: null, notice: '' }); void this.load(); };
   select = async (row: Row) => {
     if (this.state.busy || this.mutation || this.state.blocked || this.state.access !== 'allowed') return;
-    if (this.state.section !== 'reports') { this.install({ selected: row, error: '', notice: '' }); return; }
-    const g = this.begin(); this.install({ selected: null, busy: true, error: '', notice: '' });
+    // A selection supersedes its background list read, including synchronous photo selection.
+    if (this.state.section !== 'reports') { if (this.state.refreshing) this.begin(); this.install({ selected: row, refreshing: false, error: '', notice: '' }); return; }
+    const g = this.begin(); this.install({ selected: null, busy: true, refreshing: false, error: '', notice: '' });
     try { const value = detail(await this.session.request(`/admin/safety-reports/${encodeURIComponent(str(row,'id'))}`, this.abort.signal)); if (this.current(g)) this.install({ selected: value, busy: false }); }
     catch (error) { if (this.current(g)) this.failure(error); }
   };

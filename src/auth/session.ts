@@ -223,8 +223,8 @@ export class SessionController {
     if (!this.available()) return () => {};
     this.listeners.add(listener);
     const lease = this.ownership?.signal;
-    lease?.addEventListener('abort', this.suspend, { once: true });
     if (this.listeners.size === 1) {
+      lease?.addEventListener('abort', this.suspend, { once: true });
       window.addEventListener('pagehide', this.pageHide);
       document.addEventListener('visibilitychange', this.resumeEligibility);
       window.addEventListener('online', this.resumeEligibility);
@@ -251,9 +251,9 @@ export class SessionController {
       });
     }
     return () => {
-      lease?.removeEventListener('abort', this.suspend);
       this.listeners.delete(listener);
       if (!this.listeners.size) {
+        lease?.removeEventListener('abort', this.suspend);
         window.removeEventListener('pagehide', this.pageHide);
         document.removeEventListener('visibilitychange', this.resumeEligibility);
         window.removeEventListener('online', this.resumeEligibility);

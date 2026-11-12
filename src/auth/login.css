@@ -134,13 +134,13 @@
 .login-or span { flex: 1; border-top: 1px solid var(--color-outline-variant); }
 .login-google { display: flex; align-items: center; justify-content: center; gap: 10px; }
 .login-google img { flex: none; }
+.login-description { min-height: 3em; }
+.login-session-feedback { display: flex; justify-content: flex-end; align-items: center; min-height: 48px; margin-top: 14px; }
+.login-session-feedback > .login-button { padding-inline: 12px; }
 
-/* Coarse-pointer text-input focus is a layout hint, not a keyboard detector.
-   Keep the form heading available and let the document scroll naturally. */
-@media (pointer: coarse) {
-  .login-page:has(.login-field input:focus) .login-brand { display: none; }
-  .login-page:has(.login-field input:focus) .login-panel { margin-top: 0; }
-}
+/* Keep the brand mounted when authentication disables a focused mobile input.
+   Natural document scrolling accommodates the virtual keyboard without a
+   focus-only layout that snaps back during backend bootstrap. */
 @media (max-height: 600px) {
   .login-panel { margin-top: 0; }
 }

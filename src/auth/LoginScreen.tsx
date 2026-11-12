@@ -96,11 +96,10 @@ export function LoginScreen({
             <div className="brand-divider" aria-hidden="true"><span /></div>
           </div>
           <h2 id="login-heading">{signIn ? 'Iniciar sesión' : 'Creá tu cuenta'}</h2>
-          <p id="login-description">{signIn
-            ? 'Ingresá con tu email y contraseña para continuar.'
-            : 'Registrate con tu email y contraseña para empezar.'}</p>
+          <p id="login-description" className="login-description">{sessionLoading
+            ? <span role="status">Preparando tu sesión de forma segura…</span>
+            : signIn ? 'Ingresá con tu email y contraseña para continuar.' : 'Registrate con tu email y contraseña para empezar.'}</p>
         </header>
-        {sessionLoading && <p className="login-feedback" role="status">Preparando tu sesión de forma segura…</p>}
         <form
           className="login-form"
           aria-labelledby="login-heading"
@@ -168,7 +167,9 @@ export function LoginScreen({
             {googleLoading ? 'Conectando con Google...' : 'Continuar con Google'}
           </button>
         </form>
-        {sessionLoading && onCancelSession && <SignOutButton onConfirm={onCancelSession} />}
+        <div className="login-session-feedback">
+          {sessionLoading && onCancelSession && <SignOutButton onConfirm={onCancelSession} />}
+        </div>
       </section>
     </main>
   );

@@ -588,3 +588,14 @@ Exact invariants, response paths, validation and remaining integration/device wo
 
 
 Validation for this follow-up: final full Vitest PASS 1137/48 files with `--maxWorkers=2`; final focused modal/mode/remount PASS 44; typecheck/build/diff checks PASS; native Chromium synthetic desktop/mobile smoke PASS 76 assertions plus awaited scenarios, with visual inspection of login/bootstrap, Home header, modal and backoffice. This verifies the listed Web adaptations only; physical device keyboards/autofill, screen readers, real Firebase/backend and other engines remain unverified for this change. Existing >500 kB main-bundle warning persists.
+
+### Foreground continuity, login bounds and OTP feedback (base `25950ae`)
+
+Android audited: `LoginScreen.kt`, `SessionCoordinator.kt`, `MatchmakingHomeScreen.kt` busy/IME/refresh behavior. Backend administrative grant contract remains unchanged. The [lifecycle review](lifecycle-ux-review.md) owns the invariant matrix, reproducible browser probe, evidence and limitations.
+
+| Behavior | Status | Web adaptation / limitation |
+| --- | --- | --- |
+| Loaded model during foreground reads | COMPLETE for covered Web flows | `AdminStore` foreground read retains list/diagnostics and local page; Home's existing model retention remains. No new polling or automatic mutation retries. |
+| Stable login authentication/bootstrap shell | COMPLETE in synthetic Chromium; PLATFORM-LIMITED IME parity | Reserved description/cancel space; same inputs through checking/auth/loading. Browser focus no longer substitutes for actual Android IME insets; scrolling is retained. Physical keyboard/device validation remains. |
+| Six-digit OTP focus, pending, errors, confirmed success | PLATFORM-LIMITED Android comparison (no admin equivalent) | One accessible input, active slot/caret, request exclusion, Retry-After, backend-confirmed 400ms success and reduced-motion static feedback. Device autofill and assistive technology remain manual checks. |
+| Lifecycle / expiry / identity / Back / ownership | Existing boundaries preserved | Commit/memory owner remains session-scoped; success timer has no authority. Cancel/unmount/context invalidation interrupts navigation; shared lease abort listener survives individual subscriber cleanup. |

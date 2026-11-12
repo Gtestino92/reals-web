@@ -12,12 +12,10 @@ import type { FirebaseSetup } from './auth/firebase';
 import { ApiClient } from './auth/api';
 import { SessionController } from './auth/session';
 import { Onboarding } from './onboarding/Onboarding';
-import { SessionLoading } from './SessionLoading';
 import seal from './assets/reals-seal.png';
 import { Home, AdminEntry } from './home/Home';
 
 const AdminGate = lazy(() => import('./admin/AdminGate'));
-const Admin = lazy(() => import('./admin/Admin'));
 
 type AppProps = { firebase?: FirebaseSetup; api?: ApiClient; ownership?: TabOwnershipManager };
 export function App(props: AppProps) {
@@ -81,6 +79,17 @@ function ReadySession({ controller }: { controller: SessionController }) {
   const navigation = useHomeNavigation(target => (target === 'home' && challengeActive.current) || (!blocked.current && (target !== 'admin' || !adminBlocked.current)));
   const administrative = navigation.destination === 'admin';
   const [intent, setIntent] = useState(false), [entryBusy, setEntryBusy] = useState(false), [viewReady, setViewReady] = useState(false);
+  const [AdminScreen, setAdminScreen] = useState<typeof import('./admin/Admin').default | null>(null);
+  const [adminLoadError, setAdminLoadError] = useState('');
+  useLayoutEffect(() => {
+    if ((!intent && !administrative && !entryBusy) || AdminScreen) return;
+    let current = true;
+    // Load presentation code while checking access; importing it performs no private reads.
+    void import('./admin/Admin').then(module => { if (current) setAdminScreen(() => module.default); }).catch(() => {
+      if (current) { cancel(); setAdminLoadError('No se pudo cargar Administración. Revisá tu conexión y volvé a intentar.'); }
+    });
+    return () => { current = false; };
+  }, [intent, administrative, entryBusy, AdminScreen]);
   const [chatActive, setChatActive] = useState(false);
   const [managementActive, setManagementActive] = useState(false);
   const [setupAccountAvailable, setSetupAccountAvailable] = useState(false);
@@ -93,16 +102,13 @@ function ReadySession({ controller }: { controller: SessionController }) {
   }, [controller, displayingAdmin, viewReady, intent, administrative]);
   useLayoutEffect(() => () => { entryEpoch.current++; }, []);
   const enter = () => {
-    if (blocked.current || adminBlocked.current) return;
+    if (!AdminScreen || blocked.current || adminBlocked.current || controller.admin.getSnapshot().phase !== 'allowed' || controller.admin.getSnapshot().busy) return false;
     adminTrigger.current = null;
     setIntent(false);
     controller.setAdminView(true); setViewReady(true);
     if (!administrative) navigation.open('admin');
+    return true;
   };
-  useLayoutEffect(() => {
-    const current = controller.admin.getSnapshot();
-    if ((intent || administrative) && current.phase === 'allowed' && !current.busy && !guarded && !viewReady) enter();
-  }, [intent, administrative, access.phase, access.busy, guarded, viewReady]);
   const cancel = () => {
     entryEpoch.current++; setEntryBusy(false); setIntent(false); setViewReady(false);
     controller.admin.suspendView(); controller.setAdminView(false);
@@ -114,6 +120,7 @@ function ReadySession({ controller }: { controller: SessionController }) {
   const requestAdmin = () => {
     if (blocked.current || adminBlocked.current || entryBusy || !state.adminEligible) return;
     const epoch = ++entryEpoch.current, context = state.authContextVersion;
+    setAdminLoadError('');
     adminTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setEntryBusy(true); setViewReady(false);
     void controller.admin.check().then(() => {
@@ -121,15 +128,16 @@ function ReadySession({ controller }: { controller: SessionController }) {
       setEntryBusy(false);
       if (context !== controller.getSnapshot().authContextVersion) return;
       if (blocked.current || adminBlocked.current) { controller.admin.suspendView(); return; }
-      if (controller.admin.getSnapshot().phase === 'allowed') enter(); else setIntent(true);
+      if (controller.admin.getSnapshot().phase !== 'allowed' || !enter()) setIntent(true);
     });
   };
-  if (displayingAdmin) return <Suspense fallback={<SessionLoading />}><Admin controller={controller} onReturn={() => navigation.backTo('home')} onNavigationBlockedChange={reportBlocked} /></Suspense>;
+  if (displayingAdmin && AdminScreen) return <AdminScreen controller={controller} onReturn={() => navigation.backTo('home')} onNavigationBlockedChange={reportBlocked} />;
   const regularNavigation = administrative ? { ...navigation, destination: 'home' as const } : navigation;
   return <><main className={chatShell ? 'chat-page' : 'login-page'}><section className={chatShell ? 'chat-shell' : 'login-panel'} aria-label={chatShell ? 'Conversación activa' : undefined} aria-labelledby={chatShell ? undefined : 'session-heading'}>
     {!chatShell && <header className="login-header session-header"><div className="login-brand"><img className="login-seal" src={seal} alt="" width="54" height="54" /><h1 id="session-heading">Reals</h1><div className="brand-divider" aria-hidden="true"><span /></div></div>{!homeReady && state.adminEligible && <div className="session-admin-entry"><AdminEntry onClick={requestAdmin} pending={entryBusy || intent} disabled={guarded} /></div>}</header>}
     {homeReady ? <Home onAdmin={state.adminEligible ? requestAdmin : undefined} adminPending={entryBusy || intent} onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={regularNavigation} onNavigationBlockedChange={reportBlocked} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={regularNavigation} onNavigationBlockedChange={reportBlocked} onAccountAvailableChange={setSetupAccountAvailable} />}
     {entryBusy && <p role="status">Consultando acceso administrativo…</p>}
+    {adminLoadError && <p role="alert">{adminLoadError}</p>}
     {state.adminWarning && <p role="alert">{state.adminWarning}</p>}
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && <p className="login-error" role="alert">{state.error.message}</p>}

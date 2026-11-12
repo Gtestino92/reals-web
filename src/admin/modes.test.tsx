@@ -102,6 +102,7 @@ it('expiry runs while normal Reals is visible; returning requires new authentica
   const h = setup(); await screen.findByRole('heading', { name: 'Inicio' }); await enter(); const input = await screen.findByLabelText('Código de seis dígitos');
   vi.useFakeTimers();
   await act(async () => { fireEvent.change(input, { target: { value: '012345' } }); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); });
   expect(screen.getByText('Dato privado admin')).toBeVisible();
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Volver a Reals' })); await vi.advanceTimersByTimeAsync(10); });
   expect(screen.queryByText('Dato privado admin')).toBeNull();
@@ -223,12 +224,65 @@ it('pastes leading-zero OTP once even with duplicate change/paste events and pen
   fireEvent.paste(input, { clipboardData: { getData: () => '012345' } });
   fireEvent.change(input, { target: { value: '012345' } });
   fireEvent.paste(input, { clipboardData: { getData: () => '012345' } });
-  await waitFor(() => expect(finish).toBeDefined()); expect(input).toBeDisabled(); expect(input).toHaveValue('');
+  await waitFor(() => expect(finish).toBeDefined()); expect(input).toBeDisabled(); expect(input).toHaveValue('012345');
   const writes = h.fetcher.mock.calls.filter(([path]) => path === '/api/admin-auth/verify');
   expect(writes).toHaveLength(1); expect(JSON.parse(String(writes[0]?.[1]?.body))).toEqual({ code: '012345' });
   h.state.issued = true;
   await act(async () => finish(json({ grant, expiresAt: new Date(Date.now() + 900000).toISOString() })));
   await screen.findByText('Dato privado admin'); expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('shows the active empty slot and preserves pending digits until backend-confirmed success feedback', async () => {
+  const h = setup(); await enter(); const input = await screen.findByLabelText('Código de seis dígitos');
+  fireEvent.change(input, { target: { value: '012' } });
+  expect(document.querySelectorAll('.admin-otp-slot-active')).toHaveLength(1);
+  expect(document.querySelector('.admin-otp-slot-active')).toHaveAttribute('data-slot', '3');
+  let finish!: (response: Response) => void;
+  h.status.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  vi.useFakeTimers();
+  await act(async () => fireEvent.change(input, { target: { value: '012345' } }));
+  expect(finish).toBeDefined(); expect(input).toBeDisabled(); expect(input).toHaveValue('012345');
+  expect(document.querySelector('.admin-otp-field')).toHaveAttribute('data-feedback', 'pending');
+  expect(document.querySelector('.admin-otp-caret')).toBeNull();
+  expect(screen.queryByText('Acceso verificado')).toBeNull(); expect(screen.queryByText('Dato privado admin')).toBeNull();
+  await act(async () => finish(json({ configured: true, grantValid: true })));
+  expect(screen.getByText('Acceso verificado')).toBeVisible(); expect(input).toHaveValue('');
+  expect(document.querySelector('.admin-otp-field')).toHaveAttribute('data-feedback', 'success');
+  expect(h.events.some(path => path.startsWith('/api/admin/'))).toBe(false);
+  await act(async () => { await vi.advanceTimersByTimeAsync(399); }); expect(screen.queryByText('Dato privado admin')).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); }); expect(screen.getByText('Dato privado admin')).toBeVisible();
+  expect(h.events.filter(path => path.endsWith('/verify'))).toHaveLength(1);
+});
+
+it.each(['cancel', 'identity', 'pagehide', 'unmount'])('interrupts confirmed success feedback on %s without stale privileged navigation', async action => {
+  const h = setup(); await enter(); const input = await screen.findByLabelText('Código de seis dígitos');
+  vi.useFakeTimers(); await act(async () => fireEvent.change(input, { target: { value: '012345' } }));
+  expect(screen.getByText('Acceso verificado')).toBeVisible();
+  await act(async () => {
+    if (action === 'cancel') fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    if (action === 'identity') h.replace('new-identity');
+    if (action === 'pagehide') window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+    if (action === 'unmount') h.view.unmount();
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(screen.queryByText('Dato privado admin')).toBeNull();
+  expect(h.events.some(path => path.startsWith('/api/admin/'))).toBe(false);
+});
+
+it('expiry during success feedback cancels navigation and never extends the issued deadline', async () => {
+  const h = setup(); await enter(); const input = await screen.findByLabelText('Código de seis dígitos');
+  const base = h.fetcher.getMockImplementation()!;
+  h.fetcher.mockImplementation((path, options) => {
+    if (path !== '/api/admin-auth/verify') return base(path, options);
+    h.state.issued = true;
+    return Promise.resolve(json({ grant, expiresAt: new Date(Date.now() + 200).toISOString() }));
+  });
+  vi.useFakeTimers(); await act(async () => fireEvent.change(input, { target: { value: '012345' } }));
+  expect(screen.getByText('Acceso verificado')).toBeVisible();
+  await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+  expect(screen.queryByText('Acceso verificado')).toBeNull(); expect(screen.queryByText('Dato privado admin')).toBeNull();
+  expect(screen.getByLabelText('Código de seis dígitos')).toHaveValue('');
+  expect(h.events.some(path => path.startsWith('/api/admin/'))).toBe(false);
 });
 
 it.each(['ADMIN_MFA_INVALID_CODE', 'ADMIN_MFA_RATE_LIMITED'])('clears a failed OTP, respects cooldown and never retries %s', async code => {

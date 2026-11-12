@@ -53,11 +53,11 @@ export default function Admin({ controller, onReturn, onNavigationBlockedChange 
     // Also covers full-document navigation and bfcache; restore must reauthorize.
     const meta = document.createElement('meta'); meta.name = 'referrer'; meta.content = 'no-referrer'; document.head.append(meta);
     const hide = () => store.dispose(), show = (event: PageTransitionEvent) => { if (event.persisted) store.start(); };
-    const resume = () => { const state = store.getSnapshot(); if (document.visibilityState === 'visible' && !state.busy && !state.blocked && !state.selected && state.access === 'allowed') void store.load(); };
+    const resume = () => { if (document.visibilityState === 'visible') void store.load(true); };
     document.addEventListener('visibilitychange', resume); window.addEventListener('pagehide',hide); window.addEventListener('pageshow',show); store.start();
     return () => { store.dispose(); meta.remove(); document.removeEventListener('visibilitychange', resume); window.removeEventListener('pagehide',hide); window.removeEventListener('pageshow',show); };
   },[store]);
-  useLayoutEffect(() => { setPage(0); },[s.rows]);
+  useLayoutEffect(() => { setPage(p => Math.min(p, Math.max(0, Math.ceil(s.rows.length / 20) - 1))); },[s.rows]);
   useLayoutEffect(() => { onNavigationBlockedChange?.(s.busy && s.blocked); return () => onNavigationBlockedChange?.(false); }, [s.busy, s.blocked, onNavigationBlockedChange]);
   const revoke = () => { void controller.revokeAdminAccess(); };
   return <main className="admin"><header><h1>Reals Admin</h1><button disabled={s.busy && s.blocked} onClick={onReturn}>Volver a Reals</button><button disabled={s.busy} onClick={revoke}>Cerrar acceso administrativo</button><SignOutButton onConfirm={controller.signOut} /></header>
