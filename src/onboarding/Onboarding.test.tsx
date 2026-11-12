@@ -529,7 +529,7 @@ it('enables activation after Firebase reload confirms email verification', async
 });
 const technicalStatus = /Firebase autenticado|Comprobando sesión de Firebase|Cargando sesión del backend|Sesión del backend lista|La sesión del backend no está lista/i;
 function expectPreparing() {
-  expect(screen.getByRole('status').textContent).toMatch(/Preparando (Reals|tu sesión de forma segura)…/);
+  expect(screen.getByRole('status').textContent).toMatch(/Preparando (Reals|tu sesión(?: de forma segura)?)…/);
   expect(screen.getByRole('heading',{ name:'Reals',level:1 })).toBeVisible();
   const login = screen.queryByRole('button',{ name:'Ingresar' });
   if (login) expect(login).toBeDisabled();

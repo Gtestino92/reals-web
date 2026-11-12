@@ -40,8 +40,18 @@ function SessionApp({ controller }: { controller: SessionController }) {
     if (state.phase === 'login' || state.phase === 'authenticating') window.history.replaceState(null, '', '/');
   }, [state.phase]);
   if (state.phase === 'ready') return <ReadySession key={`${state.account?.id}/${state.profile?.id}`} controller={controller} />;
-  if (['checking', 'loading', 'login', 'authenticating'].includes(state.phase)) return <LoginScreen
-    sessionLoading={state.phase === 'checking' || state.phase === 'loading'}
+  // Manual authentication keeps its operation through backend bootstrap.
+  // Restoration has no operation and must not expose an intermediate login form.
+  if (state.phase === 'checking' || (state.phase === 'loading' && state.operation === null)) return <main className="login-page"><section className="login-panel" aria-labelledby="restoring-heading">
+    <header className="login-header"><div className="login-brand">
+      <img className="login-seal" src={seal} alt="" width="54" height="54" />
+      <h1 id="restoring-heading">Reals</h1>
+      <div className="brand-divider" aria-hidden="true"><span /></div>
+    </div></header>
+    <p className="session-loading" role="status" aria-atomic="true">Preparando tu sesión…</p>
+  </section></main>;
+  if (['loading', 'login', 'authenticating'].includes(state.phase)) return <LoginScreen
+    sessionLoading={state.phase === 'loading'}
     loading={state.operation === 'signIn' || state.operation === 'signUp'}
     googleLoading={state.operation === 'google'} passwordResetLoading={state.operation === 'reset'}
     error={state.error?.message ?? state.adminWarning ?? null} errorOwner={state.error?.owner ?? (state.adminWarning ? 'shared' : null)}
@@ -62,7 +72,7 @@ function SessionApp({ controller }: { controller: SessionController }) {
     {state.verificationMessage && <p role="status">{state.verificationMessage}</p>}
     {state.error && !['deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(state.phase) && <p className="login-error" role="alert">{state.error.message}</p>}
     {(state.phase === 'recoverable' || state.phase === 'restricted') && <button className="login-button login-primary" onClick={controller.retry}>Reintentar</button>}
-    {!['deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(state.phase) && state.phase !== 'checking' && <div className="session-actions"><SignOutButton disabled={state.phase === 'signingOut'} onConfirm={controller.signOut} /></div>}
+    {!['deletionRecovery', 'temporarySuspension', 'permanentAppeal'].includes(state.phase) && <div className="session-actions"><SignOutButton disabled={state.phase === 'signingOut'} onConfirm={controller.signOut} /></div>}
   </section></main>;
 }
 

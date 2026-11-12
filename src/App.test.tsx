@@ -41,13 +41,39 @@ it.each(['password', 'google'])('keeps the login DOM through %s authentication a
   await screen.findByText('Sin perfil: falta completar el registro.');
 });
 
+it('restores an existing session without rendering an intermediate login form', async () => {
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementation(path => path === '/api/me' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(json({ code: 'PROFILE_NOT_FOUND' }, 404)));
+  mount(true);
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión…');
+  expect(screen.queryByRole('form')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Reals' })).toBeVisible();
+  act(() => observer(user)); await waitFor(() => expect(finish).toBeDefined());
+  expect(screen.queryByLabelText('Email')).toBeNull(); expect(screen.queryByRole('form')).toBeNull();
+  await act(async () => finish(json({ id: 'u', status: 'ACTIVE' })));
+  await screen.findByText('Sin perfil: falta completar el registro.');
+  expect(screen.queryByLabelText('Email')).toBeNull();
+});
+
+it('shows interactive login immediately when Firebase confirms no existing session', () => {
+  mount(true); expect(screen.queryByRole('form')).toBeNull();
+  login();
+  expect(screen.getByLabelText('Email')).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Ingresar' })).toBeEnabled();
+  expect(screen.queryByText('Preparando tu sesión…')).toBeNull();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
 it('keeps the restored-session shell until bootstrap resolves and shows an actionable failure', async () => {
   let fail!: (reason: Error) => void;
   fetcher.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
-  mount(true); const panel = document.querySelector('.login-panel'), email = screen.getByLabelText('Email');
+  mount(true);
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión…');
+  expect(screen.queryByRole('form')).toBeNull();
   act(() => observer(user)); await waitFor(() => expect(fail).toBeDefined());
-  expect(document.querySelector('.login-panel')).toBe(panel); expect(screen.getByLabelText('Email')).toBe(email);
-  expect(email).toBeDisabled(); expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
+  expect(screen.queryByRole('form')).toBeNull();
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión…');
+  expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
   await act(async () => fail(new TypeError('offline')));
   expect(screen.getByRole('alert')).toBeVisible(); expect(screen.getByRole('button', { name: 'Reintentar' })).toBeEnabled();
 });
