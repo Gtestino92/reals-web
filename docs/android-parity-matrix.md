@@ -1,5 +1,22 @@
 # Android-first migration and First Chat parity
 
+## Preventive modularity refactor — 2026-11-12
+
+Scope: composition only, based on Web `7ccf106`; no Android/backend changes.
+Android references inspected: `ui/matchmaking/MatchmakingHomeScreen.kt`,
+`ui/profile/CreateProfileScreen.kt`, `ui/root/HomeProfileRoutingRules.kt`,
+`ProfileEntryCoordinator.kt`, `RealsRootUiState.kt`, and profile-routing/system-Back
+tests. This was a bounded preservation comparison, not a new full-product audit.
+
+| Behavior | Parity / refactor result | Evidence / remaining differences |
+| --- | --- | --- |
+| Home, profile/preferences structure, loading/error states, scrolling/focus, mobile/desktop | **COMPLETE** for preservation of existing Web behavior; DOM/CSS unchanged. `App.tsx` and `Home.tsx` supply the stable Home component to `Onboarding.tsx`. | Existing Home/Onboarding tests; Chromium `navigation-flicker-smoke.mjs` and `home-navigation-polish.mjs` passed at 390×844 and 1440×900, including retained form DOM, error/revisit states and notification focus. No claim of new pixel parity. |
+| Navigation/Back, retained lifecycle and active-chat return | **COMPLETE** for preservation of existing Web behavior; no new component boundary, state owner, key or effect. | Browser Back/Forward, nested notification return, automatic First Chat entry and terminal return to the same Home passed; existing tests cover guards, stale responses, profile writes and resume. |
+| DRAFT interactions and profile completion | **PARTIAL**, unchanged: Android `ProfileEntryCoordinator` can route DRAFT operational interactions directly to Home; Web retains its existing setup checkpoint and nested Home. | Onboarding tests include shared history ownership, auxiliary Home failure, authoritative retry and stale sign-out responses. This architectural change does not close existing product parity gaps. |
+| Gestures, animations, keyboard/assistive technology, backend/session behavior | Existing statuses below remain unchanged. No handlers, requests, timers, polling or auth initialization changed. | Full Vitest: **1162/1162**, 49 files (`npm test -- --maxWorkers=2`). Typecheck, build, dependency check (60 modules / zero cycles), and diff whitespace checks passed. Browser fixtures simulate API/auth; real OAuth, backend and physical-device validation were not run. |
+
+Focused validation: `npm run test:focused -- src/home/Home.test.tsx src/onboarding/Onboarding.test.tsx src/App.test.tsx` (**234/234**) and `npm run test:focused -- tools/check-cycles.test.mjs` (**4/4**). Browser commands: `node tools/navigation-flicker-smoke.mjs` and `node tools/home-navigation-polish.mjs`, with Vite on port 5174. Standalone `npm run typecheck`, `npm run build`, `npm run check:architecture`, and `git diff --check` passed. Main JS before/after: **564.70 / 564.74 kB**, gzip **170.44 / 170.13 kB**; effectively unchanged. The existing 500 kB warning remains visible. See [composition invariants and guard policy](frontend-architecture.md).
+
 Audit date: 2026-11-08 UTC (2026-11-07 Argentina). Android reference HEAD: `565e7d9`; Web task base: `b293e86` on `fix/first-chat-lifecycle`, initially clean. Android and backend were read only. The reference screenshot [4.jpeg](../../reals-app/docs/assets/4.jpeg) was inspected directly. Source, not a screenshot alone, specifies invisible states and interactions. Android tests were inspected, not executed.
 
 ## Permanent migration methodology
