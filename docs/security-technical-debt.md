@@ -1,16 +1,16 @@
 # Web Security Technical Debt
 
-Deferred tasks only. This change implements Firebase session-persistence control;
-it does not implement the hardening proposals below. Evidence is limited to the
-Web source at main `6600428` plus this working change. Backend, Android, live
-Firebase settings and production infrastructure were not audited. Potential
+This register tracks partial controls and deferred tasks. The original review
+covered Web source at main `6600428`; section 4 now records URL hardening based
+on main `531f277`. Firebase session-persistence control is also implemented.
+Live Firebase settings and production infrastructure were not audited. Potential
 risks are investigation targets, not confirmed vulnerabilities.
 
 P0 denotes a release gate where applicable, P1 the next hardening work, and P2
 conditional/follow-up work; these are planning priorities, not severity ratings.
 NOT STARTED means the proposed task has no verified implementation in this
 review. PARTIAL means concrete controls/tests exist but acceptance remains
-incomplete. No deferred task is claimed IMPLEMENTED.
+incomplete. Completed source controls do not establish deployed protection.
 
 ## 1. Content Security Policy (CSP)
 
@@ -45,12 +45,15 @@ incomplete. No deferred task is claimed IMPLEMENTED.
 ## 4. External URL and media origin validation
 
 - Priority: P1.
-- Status: NOT STARTED.
-- Current evidence: Photo URLs come from backend responses and are consumed directly. A complete URL-sink and origin-policy audit was not performed.
+- Status: PARTIAL (shared scheme/credential validation implemented; deployment origin policy pending).
+- Implemented: `src/shared/browserUrl.ts` validates backend profile-photo and legal-document URLs through onboarding contracts, chat audio through chat contracts, and admin photo/audio through `mediaUrl`. Production requires absolute HTTPS. Only Vite development (`DEV && !PROD`) permits HTTP on exactly `localhost` or `127.0.0.1`, with optional ports for the [local MinIO / ADB workflow](local-development.md#existing-backend). LAN hosts, emulator addresses and loopback aliases are not exceptions.
+- Rejected: Unsupported schemes, relative/protocol-relative URLs, missing authority, invalid hosts/ports/percent escapes, whitespace/control characters, backslashes and embedded credentials (including empty userinfo). Valid strings are returned unchanged; the parsed URL is never serialized, preserving signed paths and query bytes/order/duplicates.
+- Compatibility: Existing onboarding/chat invalid-response errors and admin null/hidden-media behavior remain intact. Existing `no-referrer` media protections and legal-link `noopener noreferrer` remain unchanged. `.env.local`, Firebase, hosting and sibling repositories are untouched. This is targeted defensive hardening, not a complete URL-sink or redirect audit.
+- Validation: `src/shared/browserUrl.test.ts` covers all four consumer boundaries in production/development, HTTPS, local MinIO signed URLs, forbidden HTTP, dangerous/malformed URLs and credentials, with exact complex-query preservation. These are simulated contract tests, not deployed storage/browser verification.
 - Risk: Potential navigation or resource loading from unintended schemes/origins; no unsafe exploit path confirmed.
-- Recommended mitigation: Inventory links, redirects and image/media sinks; define allowed schemes/origins from contracts without rewriting signed URLs.
-- Deployment dependency: Known development and production storage origins.
-- Acceptance criteria: Tests reject forbidden schemes/origins and accept approved signed URLs unchanged; external links use appropriate opener controls.
+- Pending mitigation: Establish actual storage/CDN/legal-document origins before defining a production origin allowlist; inventory remaining sinks and redirect behavior. No fixed production-domain allowlist is introduced.
+- Deployment dependency: Actual production origins, TLS, redirects, storage CORS and HTTP response headers (CSP, Referrer-Policy, cache policy and other controls in sections 1–3 and 7) still require deployment verification.
+- Remaining acceptance criteria: Deployed origin/redirect/header checks and real signed-media/legal navigation succeed with approved origins and unchanged signatures. Unit tests do not establish these controls.
 
 ## 5. XSS and untrusted-content audit
 
