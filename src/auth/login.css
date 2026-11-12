@@ -93,13 +93,43 @@
 .login-remember {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  padding: 0 8px;
+  border-radius: var(--radius-button);
   min-height: var(--control-min-height);
   font-size: 0.875rem;
   line-height: 1.25rem;
   cursor: pointer;
 }
-.login-remember input { width: 18px; height: 18px; margin: 0 11px; accent-color: var(--color-primary); }
+.login-remember input {
+  appearance: none;
+  display: grid;
+  place-content: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  border: 2px solid var(--color-on-surface-variant);
+  border-radius: 4px;
+  background: transparent;
+  cursor: inherit;
+}
+.login-remember input::before {
+  content: '';
+  width: 6px;
+  height: 11px;
+  border: solid var(--color-on-primary);
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+  visibility: hidden;
+}
+.login-remember input:checked { border-color: var(--color-primary); background: var(--color-primary); }
+.login-remember input:checked::before { visibility: visible; }
+.login-remember:has(input:enabled):hover { background: color-mix(in srgb, var(--color-secondary) 8%, transparent); }
+@media (forced-colors: active) {
+  .login-remember input { appearance: auto; }
+  .login-remember input::before { display: none; }
+}
 .login-button {
   min-height: var(--control-min-height);
   border: 1px solid transparent;

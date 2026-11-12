@@ -5,6 +5,7 @@ import type { SessionController } from '../auth/session';
 import { ApiError, object } from '../auth/api';
 import { errorCode } from '../auth/errors';
 import './notification-settings.css';
+import './password-dialog.css';
 
 type Preferences = { activityEnabled: boolean; remindersEnabled: boolean; availabilityEnabled: boolean };
 const descriptions = {
@@ -94,13 +95,18 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
 }
 function PasswordForm({ busy, operationError, onCancel, onSubmit }: { busy: boolean; operationError: string; onCancel: () => void; onSubmit: (current: string, next: string) => void }) {
   const [current, setCurrent] = useState(''), [next, setNext] = useState(''), [confirm, setConfirm] = useState(''), [error, setError] = useState('');
+  const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { const node = dialog.current; node?.showModal(); return () => node?.close(); }, []);
   useEffect(() => { if (operationError === 'La contraseña actual no es correcta.') setCurrent(''); }, [operationError]);
-  return <dialog ref={dialog} aria-label="Cambiar contraseña de Reals" onCancel={e => { e.preventDefault(); if (!busy) onCancel(); }}><form aria-label="Cambiar contraseña de Reals" onSubmit={e => { e.preventDefault(); if (busy) return; const invalid = !current.trim() ? 'Ingresá tu contraseña actual.' : !next.trim() ? 'Ingresá una nueva contraseña.' : next !== confirm ? 'Las contraseñas nuevas no coinciden.' : next.length < 6 ? 'La nueva contraseña debe tener al menos 6 caracteres.' : current === next ? 'La nueva contraseña debe ser distinta de la actual.' : ''; setError(invalid); if (!invalid) onSubmit(current, next); }}><h4>Cambiar contraseña de Reals</h4><p>Actualizá la contraseña que usás para iniciar sesión en Reals con tu email. Tu contraseña de Google no cambia.</p>
-    <label>Contraseña actual<input type="password" autoComplete="current-password" value={current} disabled={busy} onChange={e => setCurrent(e.target.value)}/></label>
-    <label>Nueva contraseña<input type="password" autoComplete="new-password" value={next} disabled={busy} onChange={e => setNext(e.target.value)}/></label>
-    <label>Repetir nueva contraseña<input type="password" autoComplete="new-password" value={confirm} disabled={busy} onChange={e => setConfirm(e.target.value)}/></label>
-    {(error || operationError) && <p role="alert">{error || operationError}</p>}<button disabled={busy}>{busy ? 'Guardando…' : 'Guardar contraseña'}</button><button type="button" disabled={busy} onClick={onCancel}>Cancelar</button>
+  return <dialog ref={dialog} className="password-dialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} onCancel={e => { e.preventDefault(); if (!busy) onCancel(); }}><form aria-label="Cambiar contraseña de Reals" aria-busy={busy} onSubmit={e => { e.preventDefault(); if (busy) return; const invalid = !current.trim() ? 'Ingresá tu contraseña actual.' : !next.trim() ? 'Ingresá una nueva contraseña.' : next !== confirm ? 'Las contraseñas nuevas no coinciden.' : next.length < 6 ? 'La nueva contraseña debe tener al menos 6 caracteres.' : current === next ? 'La nueva contraseña debe ser distinta de la actual.' : ''; setError(invalid); if (!invalid) onSubmit(current, next); }}>
+    <header><h2 id={`${id}-title`}>Cambiar contraseña de Reals</h2><p id={`${id}-description`}>Actualizá la contraseña que usás para iniciar sesión en Reals con tu email. Tu contraseña de Google no cambia.</p><div className="brand-divider" aria-hidden="true"><span/></div></header>
+    <div className="password-fields">
+      <div className="login-field"><input id={`${id}-current`} type="password" autoComplete="current-password" placeholder=" " value={current} disabled={busy} onChange={e => setCurrent(e.target.value)}/><label htmlFor={`${id}-current`}>Contraseña actual</label></div>
+      <div className="login-field"><input id={`${id}-new`} type="password" autoComplete="new-password" placeholder=" " value={next} disabled={busy} onChange={e => setNext(e.target.value)}/><label htmlFor={`${id}-new`}>Nueva contraseña</label></div>
+      <div className="login-field"><input id={`${id}-confirm`} type="password" autoComplete="new-password" placeholder=" " value={confirm} disabled={busy} onChange={e => setConfirm(e.target.value)}/><label htmlFor={`${id}-confirm`}>Repetir nueva contraseña</label></div>
+    </div>
+    {(error || operationError) && <p role="alert" className="login-error password-error">{error || operationError}</p>}
+    <div className="password-actions"><button type="button" className="login-button login-outlined" disabled={busy} onClick={onCancel}>Cancelar</button><button type="submit" className="login-button login-primary" disabled={busy}>{busy ? 'Guardando…' : 'Guardar contraseña'}</button></div>
   </form></dialog>;
 }
