@@ -591,6 +591,8 @@ Validation for this follow-up: final full Vitest PASS 1137/48 files with `--maxW
 
 ### Foreground continuity, login bounds and OTP feedback (base `25950ae`)
 
+Focused follow-up at `fadc3fb`: explicit administrative closure now retires authority and returns Home without a new MFA challenge; ordinary return still retains the grant. Google confirmation appears only for stale authentication. These are authorized Web admin adaptations (PLATFORM-LIMITED Android comparison: no corresponding admin feature); see the action/response matrix in [admin security](admin-security.md#explicit-administrative-closure-fadc3fb-follow-up).
+
 Android audited: `LoginScreen.kt`, `SessionCoordinator.kt`, `MatchmakingHomeScreen.kt` busy/IME/refresh behavior. Backend administrative grant contract remains unchanged. The [lifecycle review](lifecycle-ux-review.md) owns the invariant matrix, reproducible browser probe, evidence and limitations.
 
 | Behavior | Status | Web adaptation / limitation |

@@ -153,6 +153,14 @@ try {
         check(await evaluate("!document.querySelector('.admin-panels')&&!document.querySelector('.admin-item')"), 'ordinary mode removes private content');
         await button('Admin'); await wait("!!document.querySelector('.admin-panels')", 'retained grant status revalidation');
         check(await evaluate("calls.filter(c=>c.path==='/api/admin-auth/verify').length") === verified && await evaluate("probe.otp.filter(e=>e.state==='success').length") === successCount, 'retained grant has no new TOTP or success replay');
+        const statusChecks = await evaluate("calls.filter(c=>c.path==='/api/admin-auth/status').length");
+        await button('Cerrar acceso administrativo');
+        await wait("location.pathname==='/'&&!!document.querySelector('.home[aria-busy=false] .home-admin-entry')", 'explicit revoke returns Home');
+        check(await evaluate("!document.querySelector('dialog')&&!document.querySelector('.admin-panels')&&calls.filter(c=>c.path==='/api/admin-auth/revoke').length===1"), 'explicit revoke retires private UI without reopening MFA');
+        check(await evaluate("calls.filter(c=>c.path==='/api/admin-auth/status').length") === statusChecks, 'explicit revoke never checks status automatically');
+        await button('Admin'); await wait("!!document.getElementById('admin-totp')", 'deliberate entry requires new authorization');
+        check(await evaluate("!Array.from(document.querySelectorAll('button')).some(n=>n.textContent==='Verificar nuevamente con Google')"), 'recent Google TOTP has no redundant Google action');
+        await button('Cancelar');
       }
       if (!baseline) for (const method of ['password', 'restored']) {
         await evaluate('renderSession()'); await wait('!!window.releaseObserve', 'new checking observer');

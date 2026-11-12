@@ -112,9 +112,30 @@ it('expiry runs while normal Reals is visible; returning requires new authentica
   expect(h.events.filter(p => p.endsWith('/verify'))).toHaveLength(1);
   expect(screen.getByText('Confirmá recientemente tu identidad con Google para continuar.')).toBeVisible();
 });
-it('explicit revocation is separate from returning to Reals and leaves Firebase signed in', async () => {
-  const h = setup(); await screen.findByRole('heading', { name: 'Inicio' }); await enter(); await verify(); fireEvent.click(screen.getByRole('button', { name: 'Cerrar acceso administrativo' }));
-  await screen.findByLabelText('Código de seis dígitos'); expect(h.events.filter(p => p.endsWith('/revoke'))).toHaveLength(1); expect(h.auth.signOut).not.toHaveBeenCalled();
+it.each([false, true])('explicit revocation returns Home immediately without rechecking, even on backend failure=%s', async failure => {
+  const h = setup(); await enter(); await verify();
+  const checks = h.status.mock.calls.length, base = h.fetcher.getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  h.fetcher.mockImplementation((path, options) => path === '/api/admin-auth/revoke' ? new Promise(resolve => {
+    expect(new Headers(options?.headers).get('X-Reals-Admin-Grant')).toBe(grant);
+    finish = resolve;
+  }) : base(path, options));
+  const origin = performance.timeOrigin;
+  fireEvent.click(screen.getByRole('button', { name: 'Cerrar acceso administrativo' }));
+  expect(location.pathname).toBe('/'); expect(screen.queryByText('Dato privado admin')).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  await waitFor(() => expect(finish).toBeDefined());
+  await act(async () => finish(new Response(failure ? JSON.stringify({ code: 'ADMIN_AUTHENTICATION_UNAVAILABLE' }) : null, { status: failure ? 503 : 204 })));
+  await screen.findByRole('button', { name: 'Admin' });
+  expect(h.status).toHaveBeenCalledTimes(checks); expect(screen.queryByRole('dialog')).toBeNull();
+  expect(h.fetcher.mock.calls.filter(([path]) => path === '/api/admin-auth/revoke')).toHaveLength(1);
+  expect(h.auth.signOut).not.toHaveBeenCalled(); expect(h.auth.reauthenticateGoogle).not.toHaveBeenCalled();
+  expect(performance.timeOrigin).toBe(origin);
+  if (failure) expect(screen.getByRole('alert')).toHaveTextContent('No se pudo confirmar la revocación');
+  await enter(); await screen.findByLabelText('Código de seis dígitos');
+  const options = h.status.mock.calls.at(-1)?.[0];
+  expect(new Headers(options?.headers).has('X-Reals-Admin-Grant')).toBe(false);
+  expect(h.events.filter(path => path.endsWith('/verify'))).toHaveLength(1);
 });
 it('logout from ordinary mode revokes the retained grant before Firebase logout', async () => {
   const h = setup(); await screen.findByRole('heading', { name: 'Inicio' }); await enter(); await verify(); await back(); await account(); confirmSignOut();
@@ -299,10 +320,20 @@ it.each(['ADMIN_MFA_INVALID_CODE', 'ADMIN_MFA_RATE_LIMITED'])('clears a failed O
 it('Google confirmation remains a synchronous explicit action in the modal', async () => {
   const h = setup(); h.state.authTime = Date.now() - 300001;
   await enter(); await screen.findByRole('dialog'); expect(h.auth.reauthenticateGoogle).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Confirmar identidad con Google' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Verificar nuevamente con Google' }));
   expect(h.auth.reauthenticateGoogle).toHaveBeenCalledOnce();
   await screen.findByLabelText('Código de seis dígitos');
   expect(h.events.filter(path => path.endsWith('/verify'))).toHaveLength(0);
+});
+
+it('normal TOTP has no redundant Google action, including invalid-code cooldown', async () => {
+  const h = setup(); await enter(); const input = await screen.findByLabelText('Código de seis dígitos');
+  expect(screen.queryByRole('button', { name: 'Verificar nuevamente con Google' })).toBeNull();
+  const base = h.fetcher.getMockImplementation()!;
+  h.fetcher.mockImplementation((path, options) => path === '/api/admin-auth/verify' ? Promise.resolve(new Response(JSON.stringify({ code: 'ADMIN_MFA_INVALID_CODE' }), { status: 400, headers: { 'Retry-After': '2' } })) : base(path, options));
+  fireEvent.change(input, { target: { value: '012345' } }); await screen.findByRole('alert');
+  expect(screen.queryByRole('button', { name: 'Verificar nuevamente con Google' })).toBeNull();
+  expect(h.auth.reauthenticateGoogle).not.toHaveBeenCalled();
 });
 
 it('cancelling a failed revalidation retains the original grant for a later confirmed return', async () => {

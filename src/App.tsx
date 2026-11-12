@@ -131,7 +131,7 @@ function ReadySession({ controller }: { controller: SessionController }) {
       if (controller.admin.getSnapshot().phase !== 'allowed' || !enter()) setIntent(true);
     });
   };
-  if (displayingAdmin && AdminScreen) return <AdminScreen controller={controller} onReturn={() => navigation.backTo('home')} onNavigationBlockedChange={reportBlocked} />;
+  if (displayingAdmin && AdminScreen) return <AdminScreen controller={controller} onReturn={() => navigation.backTo('home')} onRevoked={cancel} onNavigationBlockedChange={reportBlocked} />;
   const regularNavigation = administrative ? { ...navigation, destination: 'home' as const } : navigation;
   return <><main className={chatShell ? 'chat-page' : 'login-page'}><section className={chatShell ? 'chat-shell' : 'login-panel'} aria-label={chatShell ? 'Conversación activa' : undefined} aria-labelledby={chatShell ? undefined : 'session-heading'}>
     {!chatShell && <header className="login-header session-header"><div className="login-brand"><img className="login-seal" src={seal} alt="" width="54" height="54" /><h1 id="session-heading">Reals</h1><div className="brand-divider" aria-hidden="true"><span /></div></div>{!homeReady && state.adminEligible && <div className="session-admin-entry"><AdminEntry onClick={requestAdmin} pending={entryBusy || intent} disabled={guarded} /></div>}</header>}

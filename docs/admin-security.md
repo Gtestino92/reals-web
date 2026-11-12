@@ -223,3 +223,17 @@ Remaining checks: repeat the changed UI flow against real Firebase/App Check/bac
 See the [lifecycle UX review](lifecycle-ux-review.md) for measured document/React/ownership behavior, login geometry, response-ownership matrix and validation. Healthy administrative foreground reads retain the rendered list and page while backend authorization remains mandatory on every private request. Failed/denied reads retain safe recovery or clear private data as appropriate.
 
 OTP success feedback starts only after grant issuance **and** backend status confirmation, lasts 400ms, and is cancelled on expiry, context replacement, page exit, cancellation or unmount. The timer never renews a grant or grants authority. Revalidated retained grants bypass feedback. OTP stays only in component memory during the outstanding attempt and is cleared on response/exit. Shared ownership abort protection belongs to the entire session subscription lifetime, not an individual component. Existing logout, identity, lease, page-exit, revocation and absolute-expiry rules remain unchanged.
+
+## Explicit administrative closure (`fadc3fb` follow-up)
+
+| Action / response path | Invariant |
+| --- | --- |
+| Volver a Reals | Dispose private views; retain the original unexpired memory grant. |
+| Cerrar acceso administrativo | Synchronously disable private requests and clear the grant, attempt one bounded revoke with captured identity/grant, replace the internal route with Home. No automatic status check, MFA gate or Google popup. Eligibility remains a UI hint. |
+| Revoke failure / late response | Existing safe warning reports unconfirmed backend revocation; local retirement is unconditional. Identity replacement cannot install the old warning into a new session. |
+| Cerrar sesión | Existing explicit revoke followed by Firebase sign-out. |
+| Google / TOTP / error | Only `google` phase offers “Verificar nuevamente con Google”, invoked directly by a click. TOTP pending, success and cooldown never offer redundant reauthentication. Errors retain explicit status recovery; no automatic mutation retry. |
+
+This browser-only flow has no Android administrative counterpart. The Android LoginScreen explicit Google callback remains the interaction reference; backend status/freshness/revoke contracts are unchanged. Regression coverage in `modes.test.tsx` and `lifecycle.test.tsx` distinguishes all three exit actions and immediate local retirement, including failed revoke and deliberate subsequent entry.
+
+Validation: focused `modes`, `lifecycle`, `mfa` and `Admin` Vitest tests **76/76 PASS**; full `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/lifecycle/revoke-full.json` **1152/1152 PASS in 48 files**; `npm run typecheck`, `npm run build` and `git diff --check` PASS. The existing >500 kB bundle warning remains. `node tools/lifecycle-smoke.mjs --quick` PASS on desktop/mobile, ownership on/off: explicit revoke returns Home with one attempt and no automatic status/MFA reopening; deliberate entry challenges again; retained mode-return grants still bypass TOTP and success replay. TOTP caret, pending, invalid/Retry-After, confirmed success and reduced motion pass; the simplified mobile modal was visually inspected. Browser tests use synthetic Firebase/HTTP, not real Firebase/backend verification. No Firebase settings, environment files, Android or backend changes were made.

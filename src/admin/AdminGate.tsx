@@ -110,7 +110,7 @@ export default function AdminGate({ controller, onReturn, onNavigationBlockedCha
     </div>}
     <div className="admin-otp-feedback" role="status">{feedback === 'success' ? <span className="admin-otp-verified"><span aria-hidden="true">✓ </span><span>Acceso verificado</span></span> : (presenting || state.busy) && state.phase !== 'checking' ? 'Verificando…' : null}</div>
     {remaining > 0 && <p>Podés reintentar en {remaining} segundos.</p>}
-    {state.phase !== 'switch' && <button disabled={state.busy || presenting} onClick={() => { reset(); access.reauthenticate(); }}>Confirmar identidad con Google</button>}
+    {state.phase === 'google' && <button disabled={state.busy || presenting} onClick={() => { reset(); access.reauthenticate(); }}>Verificar nuevamente con Google</button>}
     {state.phase === 'error' && <button disabled={state.busy || remaining > 0} onClick={() => void access.check()}>Consultar estado</button>}
     <button onClick={back}>Cancelar</button>
   </dialog>;

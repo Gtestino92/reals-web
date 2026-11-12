@@ -53,6 +53,19 @@ it('an ordinary same-UID Firebase observer update preserves the owner and grant'
   expect(h.session.admin.token()).toBe(token); expect(screen.getByText('Lucía')).toBe(row);
   expect(h.auth.observe).toHaveBeenCalledOnce();
 });
+it('explicit revoke retires local authority synchronously without a status check', async () => {
+  const h = await setup(); const checks = h.fetcher.mock.calls.filter(([path]) => path === '/api/admin-auth/status').length;
+  let finish!: (response: Response) => void;
+  h.fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  let pending!: Promise<void>;
+  act(() => { pending = h.session.revokeAdminAccess(); });
+  expect(h.session.admin.token()).toBeUndefined();
+  await expect(h.session.request('/admin/diagnostics/matchmaking', new AbortController().signal)).rejects.toMatchObject({ code: 'ADMIN_MFA_REQUIRED' });
+  await waitFor(() => expect(finish).toBeDefined());
+  await act(async () => { finish(new Response(null, { status: 204 })); await pending; });
+  expect(h.fetcher.mock.calls.filter(([path]) => path === '/api/admin-auth/status')).toHaveLength(checks);
+  expect(h.auth.signOut).not.toHaveBeenCalled();
+});
 it('a remounted modal entry waits for backend revalidation of an already-allowed grant before committing', async () => {
   const h = await setup(), verified = vi.fn();
   let finish!: (response: Response) => void;

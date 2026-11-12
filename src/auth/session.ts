@@ -91,10 +91,9 @@ export class SessionController {
     return raw.configured;
   };
   private pageHide = () => { void this.leaveAdmin(); };
-  revokeAdminAccess = async () => {
-    const generation = this.generation;
-    await this.leaveAdmin();
-    if (this.current(generation) && this.adminView) await this.admin.check();
+  revokeAdminAccess = () => {
+    this.setAdminView(false);
+    return this.leaveAdmin();
   };
   readonly admin = new AdminAccess(
     (path, signal, method, body) => this.request(path, signal, method, body),
