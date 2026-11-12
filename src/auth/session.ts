@@ -328,7 +328,7 @@ export class SessionController {
     const generation = this.generation;
     const signal = this.controller.signal;
     const preserved = ['temporarySuspension', 'permanentAppeal'].includes(this.snapshot.phase);
-    this.install({ phase: preserved ? this.snapshot.phase : 'loading', suspensionBusy: preserved, operation: null, error: null, account: null, profile: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false });
+    this.install({ phase: preserved ? this.snapshot.phase : 'loading', suspensionBusy: preserved, operation: this.snapshot.phase === 'authenticating' ? this.snapshot.operation : null, error: null, account: null, profile: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false });
     try {
       if (this.pendingVerification?.uid === user.uid) {
         await this.auth.verify(user);
@@ -338,7 +338,7 @@ export class SessionController {
       }
       const session = await bootstrap(this.api, user, signal, this.localVerification);
       if (this.current(generation)) {
-        this.install({ phase: 'ready', ...session, appeal: null, appealUncertain: false, suspensionBusy: false, suspensionExpiry: null });
+        this.install({ phase: 'ready', operation: null, ...session, appeal: null, appealUncertain: false, suspensionBusy: false, suspensionExpiry: null });
         void this.refreshAdminEligibility();
       }
     } catch (error) {
@@ -356,7 +356,7 @@ export class SessionController {
         const restricted = ['ACCOUNT_PENDING_DELETION', 'ACCOUNT_DELETED', 'ACCOUNT_TEMPORARILY_BANNED', 'ACCOUNT_PERMANENTLY_BANNED'].includes(errorCode(error));
         this.install({ phase: preserved && !restricted ? this.snapshot.phase : restricted ? 'restricted' : 'recoverable', error: { message: safeMessage(error), owner: 'shared' } });
       }
-    } finally { if (this.current(generation)) { this.locked = false; this.install({ suspensionBusy: false }); } }
+    } finally { if (this.current(generation)) { this.locked = false; this.install({ suspensionBusy: false, operation: null }); } }
   }
   retry = () => {
     if (!this.available() || this.locked) return;

@@ -34,6 +34,7 @@ it.each(['password', 'google'])('keeps the login DOM through %s authentication a
   await waitFor(() => expect(finish).toBeDefined());
   expect(document.querySelector('.login-panel')).toBe(panel); expect(screen.getByLabelText('Email')).toBe(email);
   expect(email).toBeDisabled(); expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  expect(screen.getByRole('button', { name: provider === 'google' ? 'Conectando con Google...' : 'Ingresando...' })).toBeDisabled();
   expect(screen.queryByText('Preparando Reals…')).toBeNull(); expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
   await act(async () => finish(json({ id: 'u', status: 'ACTIVE' })));
   await screen.findByText('Sin perfil: falta completar el registro.');

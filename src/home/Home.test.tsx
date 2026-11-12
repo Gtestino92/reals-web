@@ -564,3 +564,23 @@ function refreshView() {
   if (recovery) fireEvent.click(recovery);
   else { status.version++; act(() => document.dispatchEvent(new Event('visibilitychange'))); }
 }
+
+it('retains loaded affinity card content across a foreground refresh', async () => {
+  mount(); await ready(); await waitFor(() => expect(screen.queryByText('Cargando afinidades…')).toBeNull());
+  const card = screen.getByRole('button', { name: 'Afinidades' }), account = screen.getByRole('button', { name: 'Cuenta' });
+  const content = card.textContent;
+  const base = fetcher.getMockImplementation()!; let finish!: (value: Response) => void;
+  fetcher.mockImplementation((url, options) => url === '/api/reference/affinity-questions' ? new Promise(resolve => { finish = resolve; }) : base(url, options));
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(card.textContent).toBe(content); expect(screen.getByRole('button', { name: 'Cuenta' })).toBe(account);
+});
+
+it('renders a noninteractive structure while the first Home projection is pending', async () => {
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => url === '/api/me/home' ? new Promise(() => {}) : base(url, options));
+  mount(); await screen.findByText('Actualizando Inicio…');
+  expect(document.querySelector('.home-placeholder')).toHaveAttribute('aria-hidden', 'true');
+  expect(document.querySelectorAll('.home-placeholder-card')).toHaveLength(4);
+  expect(screen.queryByRole('button', { name: 'Cuenta' })).toBeNull();
+});

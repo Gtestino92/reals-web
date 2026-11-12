@@ -59,7 +59,7 @@ try {
           else if(path==='/api/me/profile')data={...defaults,id:'p',userId:'u',status:'ACTIVE',displayName:'Operador',birthDate:'1990-01-01',city:'Ciudad',countryCode:'AR'};
           else if(path==='/api/me/home/status')data={...homeStatus(),version:homeVersion};
           else if(path==='/api/me/home') {if(pauseRead)await new Promise(r=>reads.push(r));data=emptyHome();}
-          else if(path==='/api/reference/affinity-questions')data={catalogVersion:'empty',categories:[],questions:[]};
+          else if(path==='/api/reference/affinity-questions'){if(window.pauseAffinity)await new Promise(r=>reads.push(r));data={catalogVersion:'empty',categories:[],questions:[]};}
           else if(path==='/api/me/profile/affinity-answers')data={answers:[]};
           else if(path==='/api/admin-auth/status'){if(window.pauseStatus&&granted)await new Promise(r=>window.finishStatus=r);data={configured:true,grantValid:granted&&headers.get('X-Reals-Admin-Grant')==='A'.repeat(43)};}
           else if(path==='/api/admin-auth/verify'){if(window.pauseVerify)await new Promise(r=>window.finishVerify=r);if(window.invalidVerify){invalidVerify=false;return new Response(JSON.stringify({code:'ADMIN_MFA_INVALID_CODE'}),{status:400,headers:{'Retry-After':'1'}});}granted=true;data={grant:'A'.repeat(43),expiresAt:new Date(Date.now()+900000).toISOString()};}
@@ -80,6 +80,7 @@ try {
       if (!baseline) check(login['#login-email'].y === loading['#login-email'].y && login['.login-panel'].height === loading['.login-panel'].height, 'login bounds stable during bootstrap');
       await evaluate('pauseBootstrap=false;finishBootstrap()'); await wait("!!document.querySelector('.home[aria-busy=false] .home-admin-entry')", 'Home ready');
       const snapshot = () => evaluate(`({document:probe.document,timeOrigin:performance.timeOrigin,rootCount:probe.rootCount,navigation:performance.getEntriesByType('navigation').map(n=>({type:n.type,activationStart:n.activationStart})),mounts:{...probe.mounts},unmounts:{...probe.unmounts},mountEvents:[...probe.mountEvents],phases:[...probe.phases],ownership:[...probe.ownership],events:[...probe.events],hmr:[...probe.hmr],shifts:[...probe.shifts],otp:[...probe.otp],bootstraps:calls.filter(c=>c.path==='/api/me').length,verifies:calls.filter(c=>c.path==='/api/admin-auth/verify').length,revokes:calls.filter(c=>c.path==='/api/admin-auth/revoke').length})`);
+      const cards = () => evaluate("Array.from(document.querySelectorAll('.home-management > button')).map(n=>({name:n.getAttribute('aria-label'),height:n.getBoundingClientRect().height,y:n.getBoundingClientRect().y}))");
       for (const mode of ['home', 'admin']) {
         if (mode === 'admin') {
           await button('Admin'); await wait("!!document.getElementById('admin-totp')", 'OTP ready');
@@ -126,16 +127,18 @@ try {
         }
         await evaluate("window.savedScreen=document.querySelector('main');window.savedItem=document.querySelector('.admin-item')||document.querySelector('.home-search');void 0");
         const before = await snapshot();
+        const beforeCards = mode === 'home' ? await cards() : [];
         const other = await call('Target.createTarget', { url: 'about:blank' }); await call('Target.activateTarget', { targetId: other.targetId });
         await wait("document.visibilityState==='hidden'", 'hidden unrelated tab');
         console.log(`BACKGROUND ${mode} ${width} ownership=${ownership} for ${quick ? 0.1 : 60}s`);
         await delay(quick ? 100 : 60000);
         // Hold reconciliation so the intermediate presentation is measurable.
-        await evaluate('pauseRead=true;homeVersion++');
+        await evaluate('pauseRead=true;pauseAffinity=true;homeVersion++');
         await call('Target.activateTarget', { targetId: target.id }); await wait("document.visibilityState==='visible'&&reads.length>0", 'foreground read');
         const during = await evaluate("({sameScreen:savedScreen===document.querySelector('main'),sameItem:!!savedItem?.isConnected,items:document.querySelectorAll('.admin-item').length,loadingText:document.body.textContent.includes('Cargando…'),page:document.body.textContent.match(/Página \\d+ de \\d+/)?.[0]})");
         await shot(`resume-${mode}-${width}-${ownership}`);
-        await evaluate('pauseRead=false;reads.splice(0).forEach(r=>r())'); await delay(200);
+        if (mode === 'home') { const duringCards = await cards(); console.log('CARD GEOMETRY', JSON.stringify({before:beforeCards,during:duringCards})); check(JSON.stringify(beforeCards) === JSON.stringify(duringCards), 'foreground cards retain exact bounds'); }
+        await evaluate('pauseRead=false;pauseAffinity=false;reads.splice(0).forEach(r=>r())'); await delay(200);
         const after = await snapshot(); const page = await evaluate("document.body.textContent.match(/Página \\d+ de \\d+/)?.[0]??null");
         check(before.document === after.document && before.timeOrigin === after.timeOrigin, `${mode}: zero document reloads`);
         check(after.hmr.length === 0 && JSON.stringify(before.ownership) === JSON.stringify(after.ownership), `${mode}: no HMR or ownership transition`);
@@ -172,13 +175,19 @@ try {
           await evaluate("document.getElementById('login-email').focus()"); await call('Input.insertText', { text: 'synthetic@example.invalid' });
           await evaluate("document.getElementById('login-password').focus()"); await call('Input.insertText', { text: 'synthetic-only' });
           initialBounds = await evaluate('bounds()'); await button('Ingresar'); await wait('!!window.finishSignIn', 'password pending');
+          await evaluate("window.authPresentation={label:document.querySelector('button[type=submit]').textContent,status:document.getElementById('login-description').textContent}");
           await evaluate('pauseSignIn=false;finishSignIn()');
         }
         await wait('!!window.finishBootstrap', 'slow backend'); const bootstrapBounds = await evaluate('bounds()');
+        if (method === 'password') { const presentation = await evaluate("({auth:authPresentation,bootstrap:{label:document.querySelector('button[type=submit]').textContent,status:document.getElementById('login-description').textContent}})"); console.log('PASSWORD PRESENTATION', JSON.stringify(presentation)); check(JSON.stringify(presentation.auth) === JSON.stringify(presentation.bootstrap), 'password feedback remains stable across auth and bootstrap'); }
         check(initialBounds['#login-email'].y === bootstrapBounds['#login-email'].y && initialBounds['.login-panel'].height === bootstrapBounds['.login-panel'].height, `${method}: stable fields/panel through bootstrap`);
         check(await evaluate("document.getElementById('login-email').disabled&&document.body.textContent.includes('Preparando tu sesión')&&!document.querySelector('.home')"), `${method}: feedback without optimistic Home`);
         await shot(`${method}-bootstrap-${width}-${ownership}`);
-        await evaluate('pauseBootstrap=false;finishBootstrap()'); await wait("!!document.querySelector('.home[aria-busy=false]')", 'ready after bootstrap');
+        await evaluate('pauseRead=true;pauseBootstrap=false;finishBootstrap()');
+        await wait("!!document.querySelector('.home-placeholder')&&reads.length>0", 'structured initial Home loading');
+        check(await evaluate("document.querySelectorAll('.home-placeholder-card').length===4&&!Array.from(document.querySelectorAll('button')).some(n=>n.textContent==='Cuenta')"), 'Home loading has structure without actionable cards');
+        await shot(`${method}-initial-home-${width}-${ownership}`);
+        await evaluate('pauseRead=false;reads.splice(0).forEach(r=>r())'); await wait("!!document.querySelector('.home[aria-busy=false]')", 'ready after bootstrap');
         if (method === 'password') check(await evaluate("!document.querySelector('.home-admin-entry')"), 'password context has no Admin entry');
         extraLogins.push({ width, ownership, method, checkingBounds, initialBounds, bootstrapBounds });
       }

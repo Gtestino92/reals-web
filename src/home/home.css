@@ -13,6 +13,12 @@ html:has(.home) { scrollbar-gutter: stable; }
 .home-card { min-width: 0; border: 1px solid var(--color-outline-variant); border-radius: var(--radius-card); background: var(--color-surface); padding: 24px; }
 .home-search { border-color: var(--color-secondary); background: var(--color-primary-container); }
 .home-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.home-placeholder { display: grid; gap: 24px; }
+.home-loading-status { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.home-placeholder-search { min-height: 218px; }
+.home-placeholder-card { min-height: 180px; }
+.home-placeholder span { display: block; height: 16px; max-width: 80%; margin-block: 16px; border-radius: 4px; background: var(--color-outline-variant); }
+.home-placeholder span:first-child { height: 24px; width: 45%; }
 .home-notice { padding: 16px; border-inline-start: 3px solid var(--color-secondary); background: var(--color-secondary-container); border-radius: var(--radius-extra-small); }
 .home-terminal-notice { display:flex; align-items:center; gap:8px; }
 .home-terminal-notice > span { flex:1; min-width:0; }

@@ -1,5 +1,24 @@
 # Browser return, login layout and OTP feedback
 
+## Residual flicker follow-up (`64eff2e`)
+
+Controlled synthetic Chromium showed another presentation-only transition: password authentication displayed `Ingresando...` with the ordinary description, then bootstrap reverted to `Ingresar` and replaced the description. Authentication operation now remains pending through the owned bootstrap, is cleared on completion/failure, and uses the same status description from authentication onward. There is no extra authentication request or delay.
+
+Foreground affinity refresh inserted `Actualizando afinidades?` into an already-loaded summary card. Chromium measured **32px** extra height: desktop stretched Cuenta in the same grid row; mobile pushed Cuenta down 32px. The loading row now appears only before a catalog exists; background reads still run and install authoritative results. Measurements after the fix show identical card bounds during the held foreground request at 390/1440px, with ownership enabled/disabled.
+
+The first authorized Home had no projected model yet, so its options appeared only after the separate Home read. It now renders static, noninteractive structural placeholders while that initial request is pending. They are hidden from assistive technology; the existing loading status remains accessible, and no actionable card is exposed before the response. No arbitrary delay or animation is added.
+
+| Path | Invariant / installation review |
+| --- | --- |
+| Authenticate → bootstrap | Same LoginScreen nodes and pending operation; backend readiness still gates Home. Generation checks reject obsolete completion; finally clears pending operation on success/failure. |
+| Identity/logout/cancel | Existing generation/abort and Firebase persistence behavior retained. No late response can revive a retired session. |
+| Affinity foreground read | Retain loaded content and exact card geometry; retain existing owner, overlap exclusion, error recovery and mutation reconciliation. |
+| Initial Home read | Structural placeholders only after ready session; success installs model, failure removes placeholder and keeps explicit recovery. No guessed domain permissions. |
+
+Android reference remains LoginScreen's explicit busy-state callbacks, SessionCoordinator's bootstrap ownership and MatchmakingHomeScreen's distinction between absent model/loading and loaded model refresh. The static browser structure is an authorized adaptation, not a claim of identical native loading visuals. Real SDK/backend, physical keyboards and assistive technologies remain manual checks.
+
+Validation for this follow-up: `npm run test:focused -- src/App.test.tsx src/auth/LoginScreen.test.tsx src/home/Home.test.tsx` **148/148 PASS**; final Home run **72/72 PASS**. Full `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/lifecycle/flicker-full-final.json` **1154/1154 PASS in 48 files** after bootstrap cleanup changes. Typecheck, production build and diff check PASS (existing >500 kB main-chunk warning persists). `node tools/lifecycle-smoke.mjs --quick` passes desktop/mobile with ownership on/off: identical password status/button text between authentication and bootstrap, identical card bounds during held affinity foreground reads, noninteractive initial Home structure, retained grant and OTP regressions. Screenshots of the initial Home structure were inspected at 390/1440px. This quick run is not a new 60-second-background test. Evidence is under ignored `artifacts/lifecycle/flicker-before.log` and `flicker-after-final.log`; synthetic identities/HTTP only, no credential values collected. No backend, Android, Firebase settings or `.env.local` changes; no commit/push.
+
 Reviewed base: `25950ae91cd7176e3d40529da45d8600799c8432`. Backend and Android are read-only; Firebase configuration is unchanged. Browser evidence uses synthetic identities and HTTP, never real tokens or account data.
 
 ## Audit and mutation review
