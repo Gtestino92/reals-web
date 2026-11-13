@@ -10,15 +10,4 @@ secrets/
 *.log
 .idea/
 
-/artifacts/affinities/
-/artifacts/profile-questions/
-/artifacts/notification-settings/
-
-artifacts/account-deletion-recovery/
-
-/artifacts/account-suspension/
-
-/artifacts/admin/
-/artifacts/lifecycle/
-/artifacts/navigation-flicker/
-/artifacts/auth-controls/
+/artifacts/
