@@ -1,20 +1,21 @@
+import { photoIdentity } from './photoIdentity';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ApiError, object } from '../auth/api';
 import type { SessionController } from '../auth/session';
 import { parseVisualProfile, type VisualProfile } from './contracts';
 import './visual.css';
 
-type State = { profile: VisualProfile | null; busy: boolean; error: string; terminal: boolean; context: string; matchId: string };
+type State = { profile: VisualProfile | null; busy: boolean; error: string; terminal: boolean; imageRevision: number; context: string; matchId: string };
 export function VisualReview({ controller, matchId, onBack }: { controller: SessionController; matchId: string; onBack: () => void }) {
   const session = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const context = `${session.account?.id}/${session.profile?.id}/${session.authContextVersion}/${session.phase}`;
   const [attempt, retry] = useState(0);
-  const [state, setState] = useState<State>({ profile: null, busy: true, error: '', terminal: false, context, matchId });
+  const [state, setState] = useState<State>({ profile: null, busy: true, error: '', terminal: false, imageRevision: attempt, context, matchId });
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     let disposed = false, halted = false, serial = 0, read: AbortController | null = null, deadline: ReturnType<typeof setTimeout> | undefined;
-    const empty = { profile: null, busy: false, error: '', terminal: false, context, matchId };
+    const empty = { profile: null, busy: false, error: '', terminal: false, imageRevision: attempt, context, matchId };
     const currentSession = () => {
       const s = controller.getSnapshot();
       return !disposed && `${s.account?.id}/${s.profile?.id}/${s.authContextVersion}/${s.phase}` === context && s.phase === 'ready';
@@ -25,7 +26,7 @@ export function VisualReview({ controller, matchId, onBack }: { controller: Sess
       const request = new AbortController(), ticket = ++serial; read = request;
       const current = () => currentSession() && ticket === serial && !request.signal.aborted;
       if (!current()) return;
-      setState(previous => ({ ...empty, busy: true, profile: previous.context === context && previous.matchId === matchId ? previous.profile : null }));
+      setState(previous => ({ ...empty, busy: true, imageRevision: previous.imageRevision, profile: previous.context === context && previous.matchId === matchId ? previous.profile : null }));
       try {
         const path = `/matches/${encodeURIComponent(matchId)}`;
         const match = await controller.request(path, request.signal);
@@ -53,7 +54,7 @@ export function VisualReview({ controller, matchId, onBack }: { controller: Sess
   }, [controller, context, matchId, attempt, session.account?.id]);
   const visible = state.context === context && state.matchId === matchId && session.phase === 'ready';
   const profile = visible ? state.profile : null;
-  const photo = (index: number) => { const p = profile?.photos[index]; return p && <ProfileImage key={p.id + p.url} url={p.url} label={`Foto ${index+1} de ${profile.photos.length} de ${profile.displayName}`} eager={index === 0} />; };
+  const photo = (index: number) => { const p = profile?.photos[index]; return p && <ProfileImage key={JSON.stringify([context, matchId, profile.profileId, photoIdentity(p.id, p.url), state.imageRevision])} url={p.url} label={`Foto ${index+1} de ${profile.photos.length} de ${profile.displayName}`} eager={index === 0} />; };
   return <section className="visual-review" aria-busy={!visible || state.busy}>
     <header className="home-heading"><h2 ref={heading} tabIndex={-1}>Perfil por descubrir</h2><button className="login-button login-outlined" onClick={onBack}>Volver a Actividad</button></header>
     {(!visible || state.busy) && <p role="status">{state.profile ? 'Actualizando perfil…' : 'Cargando perfil…'}</p>}
@@ -76,9 +77,14 @@ export function VisualReview({ controller, matchId, onBack }: { controller: Sess
   </section>;
 }
 function ProfileImage({ url, label, eager }: { url: string; label: string; eager: boolean }) {
-  const [status, setStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const [image, setImage] = useState<{ url: string; status: 'loading' | 'loaded' | 'failed' }>(() => ({ url, status: 'loading' }));
+  // Pin the exact request string while loading/loaded. Only a failed request
+  // adopts a renewed signature automatically; explicit refresh remounts after
+  // the new authoritative response, never with the previous expired URL.
+  if (image.status === 'failed' && image.url !== url) setImage({ url, status: 'loading' });
+  const status = image.status;
   return <figure className="visual-photo">
-    {status !== 'failed' && <img src={url} alt={label} loading={eager ? 'eager' : 'lazy'} referrerPolicy="no-referrer" onLoad={() => setStatus('loaded')} onError={() => setStatus('failed')} />}
+    {status !== 'failed' && <img src={image.url} alt={label} loading={eager ? 'eager' : 'lazy'} referrerPolicy="no-referrer" onLoad={() => setImage(current => ({ ...current, status: 'loaded' }))} onError={() => setImage(current => ({ ...current, status: 'failed' }))} />}
     {status !== 'loaded' && <span role="status">{status === 'failed' ? 'No se pudo cargar esta foto. Actualizá el perfil para reintentar.' : 'Cargando foto…'}</span>}
     <figcaption>{label}</figcaption>
   </figure>;

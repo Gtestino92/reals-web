@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { ApiClient, ApiError } from '../auth/api';
 import { SessionController } from '../auth/session';
 import { VisualReview } from './VisualReview';
-import { visualProfile } from './fixtures';
+import { photo, visualProfile } from './fixtures';
 function setup() {
  const user = { uid:'f',emailVerified:true,getIdToken:async()=> 'test',reload:async()=>{} };
  const controller = new SessionController({ observe:()=>()=>{},signIn:async()=>user,signUp:async()=>user,google:async()=>user,verify:async()=>{},signOut:async()=>{} },new ApiClient(),false);
@@ -59,4 +59,53 @@ it('aborts background reads and foreground refresh supersedes them',async()=>{
  const {controller,request}=setup(),pending=deferred();request.mockReturnValueOnce(pending.promise);render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);
  vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));expect(request.mock.calls[0]![1].aborted).toBe(true);
  vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');act(()=>document.dispatchEvent(new Event('visibilitychange')));await screen.findByText('María');await act(async()=>pending.resolve({id:'bad'}));expect(screen.queryByRole('alert')).toBeNull();
+});
+
+// AWS-style signatures are synthetic and are never sent by these DOM tests.
+const signed = (resource: string, signature: string) => `https://media.example/${resource}?X-Amz-Date=20261112T120000Z&X-Amz-Signature=${signature}%2Fraw&versionId=v1`;
+async function rotatingPhotos() {
+ vi.useFakeTimers();
+ const {controller,request}=setup();
+ let photos=[photo('one',0,{url:signed('one','old')})];
+ request.mockImplementation(async path=>path.endsWith('/visual-profile')?visualProfile({photos}):{id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'});
+ render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);
+ await act(async()=>{});
+ return { request, update: (next: typeof photos) => {photos=next;}, poll: async()=> {await act(async()=>vi.advanceTimersByTime(30000));} };
+}
+it('keeps the same loaded img and exact src across signature rotation while still revalidating',async()=>{
+ const {request,update,poll}=await rotatingPhotos();const img=screen.getByRole('img');fireEvent.load(img);
+ const mutations=vi.fn();const observer=new MutationObserver(mutations);observer.observe(img,{attributes:true,attributeFilter:['src']});
+ try {
+  update([photo('one',0,{url:signed('one','new')})]);await poll();
+  expect(screen.getByRole('img')).toBe(img);expect(img).toHaveAttribute('src',signed('one','old'));expect(mutations).not.toHaveBeenCalled();expect(request).toHaveBeenCalledTimes(4);
+ } finally {observer.disconnect();}
+});
+it.each(['id','path','version','origin'] as const)('loads a real replacement when %s changes',async kind=>{
+ const {update,poll}=await rotatingPhotos();const old=screen.getByRole('img');fireEvent.load(old);
+ const url=kind==='path'?signed('replacement','new'):kind==='version'?signed('one','new').replace('versionId=v1','versionId=v2'):kind==='origin'?signed('one','new').replace('media.example','other.example'):signed('one','new');
+ update([photo(kind==='id'?'replacement':'one',0,{url})]);await poll();
+ expect(screen.getByRole('img')).not.toBe(old);expect(screen.getByRole('img')).toHaveAttribute('src',url);expect(old).not.toBeInTheDocument();
+});
+it.each(['removed','revoked'] as const)('removes a previously loaded photo when %s',async kind=>{
+ const {update,poll}=await rotatingPhotos();const img=screen.getByRole('img');fireEvent.load(img);
+ update(kind==='removed'?[]:[photo('one',0,{url:signed('one','new'),moderationStatus:'NEEDS_REVIEW'})]);await poll();expect(screen.queryByRole('img')).toBeNull();expect(img).not.toBeInTheDocument();
+});
+it('applies new ordering and labels rather than pinning an old profile snapshot',async()=>{
+ const {update,poll}=await rotatingPhotos();update([photo('two',0),photo('one',1,{url:signed('one','new')})]);await poll();
+ const images=screen.getAllByRole('img');expect(images[0]).toHaveAttribute('src',photo('two',0).url);expect(images[0]).toHaveAttribute('alt',expect.stringContaining('Foto 1 de 2'));expect(images[1]).toHaveAttribute('alt',expect.stringContaining('Foto 2 de 2'));
+});
+it('recovers a failed signed image using the latest exact URL on automatic revalidation',async()=>{
+ const {update,poll}=await rotatingPhotos();fireEvent.error(screen.getByRole('img'));expect(screen.queryByRole('img')).toBeNull();
+ update([photo('one',0,{url:signed('one','fresh')})]);await poll();expect(screen.getByRole('img')).toHaveAttribute('src',signed('one','fresh'));fireEvent.load(screen.getByRole('img'));expect(screen.queryByText(/No se pudo cargar esta foto/)).toBeNull();
+});
+it('can recover an older in-flight URL failure after the newer signature has already arrived',async()=>{
+ const {update,poll}=await rotatingPhotos();update([photo('one',0,{url:signed('one','fresh')})]);await poll();expect(screen.getByRole('img')).toHaveAttribute('src',signed('one','old'));
+ fireEvent.error(screen.getByRole('img'));expect(screen.getByRole('img')).toHaveAttribute('src',signed('one','fresh'));
+});
+it('intentional refresh waits for the authoritative response then uses its renewed URL',async()=>{
+ const {request}=await rotatingPhotos();const old=screen.getByRole('img');fireEvent.load(old);const pending=deferred();request.mockReturnValueOnce(pending.promise);
+ fireEvent.click(screen.getByRole('button',{name:'Actualizar perfil'}));expect(screen.getByRole('img')).toBe(old);expect(old).toHaveAttribute('src',signed('one','old'));
+ request.mockResolvedValueOnce(visualProfile({photos:[photo('one',0,{url:signed('one','manual')})]}));
+ await act(async()=>pending.resolve({id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'}));
+ expect(screen.getByRole('img')).not.toBe(old);expect(screen.getByRole('img')).toHaveAttribute('src',signed('one','manual'));
 });

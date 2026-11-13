@@ -714,3 +714,20 @@ State/response review (read-only feature; no domain mutations):
 Validation evidence: `src/visual/contracts.test.ts`, `src/visual/VisualReview.test.tsx`, `src/home/Home.test.tsx`, and existing history/First Chat regressions. Reproducible Chromium harness: `node tools/visual-review-smoke.mjs` against Vite at port 5174; synthetic session/API and intercepted synthetic media only. Checks cover editorial order, no overflow, retained Home, Activity scroll, Back/Forward, explicit Return, transient recovery, expiry removal and absence of personal-message GET. Screenshots in ignored `artifacts/visual-review/`. These are simulated browser checks, not real Firebase/backend or device validation.
 
 Final validation for this increment: focused `npm run test:focused -- src/visual/contracts.test.ts src/visual/VisualReview.test.tsx src/auth/api.test.ts src/home/Home.test.tsx` 157/157 PASS; history-focused run 36/36 PASS. `npm test -- --maxWorkers=2` 1325/1325 PASS across 52 files; `npm run typecheck` PASS; `npm run check:architecture` PASS (63 production modules, zero runtime cycles); `npm run build` PASS with the existing >500 kB chunk advisory; `git diff --check` PASS. Chromium harness 11 assertions PASS across the two viewports. Spanish strings inspected as UTF-8; no mojibake found. No physical device, real authenticated API, reference screenshot, screen-reader or Safari validation claimed.
+
+
+### Visual Review signed-image revalidation fix (2026-11-12)
+
+Audit: Android `ProfilePhotoCacheKeys.kt` separates photo identity from signed queries; Web previously keyed images by the entire URL (**PARTIAL**). Backend `ProfilePhotoService.replacePhoto` uses a new storage object path, and `S3StorageService` uses AWS presigning. Web now retains the exact requested URL for a loaded/in-flight image across automatic signature rotation (**COMPLETE** for AWS/MinIO signing fields). Unlike Android's whole-query omission, `visual/photoIdentity.ts` preserves resource query selectors such as `versionId`; only known signing parameters are excluded from comparison. No network URL is reconstructed. Existing background concealment, session isolation and authoritative revalidation remain unchanged.
+
+| Response / event | Invariant / image installation |
+| --- | --- |
+| Automatic poll, deadline or online revalidation | Stable profile/photo ID, origin, path and resource query retain the img and original src. Latest signed URL remains a prop available for recovery. |
+| Replacement, reordered or revoked photos | New identity replaces the image; authoritative positions/labels are rendered; filtered or removed photos unmount. No previous profile snapshot is pinned. |
+| Failed image / renewed URL | Failed request adopts the latest exact validated URL, including when failure arrives after signature rotation. No automatic same-URL retry loop. |
+| Explicit refresh | Image revision advances only after successful authoritative response; newly returned URL is used even for unchanged resources. Pending refresh never forces an old expired URL request. |
+| Error, background, navigation or session replacement | Existing clearing, cancellation and stale-response guards remain authoritative; there is no persistent cache. |
+
+Regression evidence: `VisualReview.test.tsx` covers signature rotation with no DOM/src mutation, replacement by ID/path/origin/version, removal/moderation revocation, reordering, failure recovery and intentional refresh. Chromium harness additionally counts intercepted image requests during signed-URL rotation at mobile and desktop widths. Physical devices and real media-server behavior remain unverified.
+
+Fix validation: `npm run test:focused -- src/visual/VisualReview.test.tsx src/visual/contracts.test.ts` 40/40 PASS; `npm test -- --maxWorkers=2` 1336/1336 PASS (52 files); `npm run typecheck`, `npm run build`, `npm run check:architecture` (64 production modules, no cycles), and `git diff --check` PASS. Build retains the >500 kB advisory. `node tools/visual-review-smoke.mjs`: 15 assertions PASS at 390x844 and 1440x900, including no extra image request on signature rotation.

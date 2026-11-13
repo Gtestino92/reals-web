@@ -21,20 +21,22 @@ try {
   const check=(v,label)=>{if(!v)throw Error(label);console.log('PASS',label);};
   await mkdir('artifacts/visual-review',{recursive:true});
   const screenshot=async name=>writeFile('artifacts/visual-review/'+name+'.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+  const mediaRequests=[];
   await call('Fetch.enable',{patterns:[{urlPattern:'https://synthetic.example/*'}]});
   ws.addEventListener('message',async event=>{const m=JSON.parse(event.data);if(m.method==='Fetch.requestPaused'){
+    mediaRequests.push(m.params.request.url);
     const svg='<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500"><rect width="400" height="500" fill="#D6C39A"/><circle cx="200" cy="160" r="65" fill="#31435A"/><path d="M80 470 Q80 270 200 270 Q320 270 320 470" fill="#31435A"/><text x="200" y="490" text-anchor="middle" fill="#0F1F35">Synthetic test image</text></svg>';
     await call('Fetch.fulfillRequest',{requestId:m.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'image/svg+xml'},{name:'Cache-Control',value:'no-store'}],body:Buffer.from(svg).toString('base64')});
   }});
   await evaluate(`(async()=>{
     const React=await import('/node_modules/.vite/deps/react.js'),ReactDOM=await import('/node_modules/.vite/deps/react-dom_client.js');const {Home}=await import('/src/home/Home.tsx');const {ApiError}=await import('/src/auth/api.ts');await import('/src/styles/tokens.css');await import('/src/styles/global.css');
     document.body.innerHTML='<main class="login-page"><section class="login-panel"><div id="probe"></div></section></main>';
-    window.reads=[];window.mode='ok';window.lag=0;window.rev=1;
+    window.signature=0;window.reads=[];window.mode='ok';window.lag=0;window.rev=1;
     const snapshot={phase:'ready',authContextVersion:1,account:{id:'me'},profile:{id:'p',userId:'me',status:'ACTIVE',displayName:'Lucía'}};
     const photo=(id,position)=>({id,position,url:'https://synthetic.example/'+id,moderationStatus:'APPROVED'});
     const profile={profileId:'partner',displayName:'María',age:29,bio:'Me gusta caminar.',visualExpiresAt:'2099-11-12T18:00:00Z',photos:[photo('one',1),photo('two',2),photo('three',3),photo('four',4)],affinityIndicators:[{categoryId:'outdoors',title:'Aire libre'}],profileQuestions:[{questionId:'q',prompt:'¿Tu lugar favorito?',answer:'El bosque',position:0}]};
     const controller={snapshot,getSnapshot:()=>snapshot,subscribe:()=>()=>{},request:async(path,signal)=>{reads.push(path);if(path==='/me/home/status')return {version:rev,dirty:false,nextRefreshAt:null,serverTime:new Date().toISOString()};if(path==='/me/profile')return snapshot.profile;if(path==='/me/home')return {profileStatus:'ACTIVE',matchmaking:{inQueue:false,canSearch:true,blockedReason:null},activeInteractionsSummary:{activeInitialCount:1,activeConnectionCount:0,actionableConnectionCount:0,hasPendingSchedulingConnection:false},pendingActions:[{type:'VISUAL_REVIEW',matchId:'m',visualExpiresAt:profile.visualExpiresAt}],nextSteps:[],passiveNotices:[]};
-    if(path==='/matches/m'){if(lag)await new Promise(r=>setTimeout(r,lag));if(mode==='expired')throw new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE');if(mode==='error')throw new ApiError('network');return {id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'};}if(path==='/matches/m/visual-profile')return profile;throw new ApiError('backend',404);}};
+    if(path==='/matches/m'){if(lag)await new Promise(r=>setTimeout(r,lag));if(mode==='expired')throw new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE');if(mode==='error')throw new ApiError('network');return {id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'};}if(path==='/matches/m/visual-profile')return {...profile,photos:profile.photos.map(p=>({...p,url:p.url+'?X-Amz-Signature='+signature}))};throw new ApiError('backend',404);}};
     ReactDOM.default.createRoot(document.querySelector('#probe')).render(React.default.createElement(Home,{controller}));
   })()`);
   const waitFor=async(expression,label)=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await delay(40);}throw Error(label+': '+await evaluate('document.body.innerText'));};
@@ -49,6 +51,12 @@ try {
     await waitFor("!!document.querySelector('.visual-profile')",'profile ready');
     check(await evaluate("Array.from(document.querySelector('.visual-profile').children).map(e=>e.tagName).join(',')==='HEADER,FIGURE,SECTION,FIGURE,SECTION,FIGURE,SECTION,FIGURE'"),'Android Review order '+width);
     check(await evaluate("document.documentElement.scrollWidth<=innerWidth"),'no horizontal overflow '+width);
+    await waitFor("document.querySelector('.visual-profile img')?.complete",'first image loaded');
+    const before=mediaRequests.filter(url=>url.includes('/one?')).length;
+    await evaluate("window.firstImage=document.querySelector('.visual-profile img');window.firstSrc=firstImage.getAttribute('src');window.priorReads=reads.length;signature++;dispatchEvent(new Event('online'));void 0");
+    await waitFor("reads.length>priorReads+1&&document.querySelector('.visual-review')?.getAttribute('aria-busy')==='false'",'signed revalidation complete');
+    check(await evaluate("firstImage===document.querySelector('.visual-profile img')&&firstImage.getAttribute('src')===firstSrc"),'signature rotation preserves img and src '+width);
+    check(mediaRequests.filter(url=>url.includes('/one?')).length===before,'no extra image download '+width);
     await screenshot('review-'+width);
     await evaluate("history.back()");await waitFor("!document.querySelector('.visual-review')",'Back Activity');
     check(await evaluate("retained===document.querySelector('.home')&&Math.abs(scrollY-savedScroll)<2"),'retained Home and Activity scroll '+width);
