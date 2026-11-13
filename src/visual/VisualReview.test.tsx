@@ -112,7 +112,7 @@ it('failed image recovery waits for the authoritative response then uses its ren
 
 it('retains loaded image DOM across background concealment and authoritative resume',async()=>{
  const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const img=screen.getAllByRole('img')[0]!;fireEvent.load(img);
- vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));expect(img).toBeInTheDocument();expect(img).not.toBeVisible();
+ vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));expect(img).toBeInTheDocument();expect(img).not.toBeVisible();expect(img.closest('.visual-content')).not.toHaveAttribute('hidden');expect(img.closest('.visual-content')).toHaveAttribute('inert');
  vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');act(()=>document.dispatchEvent(new Event('visibilitychange')));await waitFor(()=>expect(img).toBeVisible());expect(screen.getAllByRole('img')[0]).toBe(img);expect(request).toHaveBeenCalledTimes(4);
 });
 it('never auto-reads unread messages; explicit read is single and optional for decisions',async()=>{
@@ -173,6 +173,14 @@ it('guards a pending save synchronously and confirms a single successful immutab
 
 it('keeps concealed images mounted when the expiry timer fires in a hidden tab',async()=>{
  vi.useFakeTimers();const {controller,request}=setup();const base=request.getMockImplementation()!;request.mockImplementation(async(...args)=>args[0].endsWith('/visual-profile')?visualProfile({visualExpiresAt:new Date(Date.now()+1000).toISOString()}):base(...args));render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await act(async()=>{});const img=screen.getAllByRole('img')[0]!;
- vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));await act(async()=>vi.advanceTimersByTime(1000));expect(request).toHaveBeenCalledTimes(2);expect(img).toBeInTheDocument();expect(img).not.toBeVisible();
+ vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));await act(async()=>vi.advanceTimersByTime(1000));expect(request).toHaveBeenCalledTimes(2);expect(img).toBeInTheDocument();expect(img).not.toBeVisible();expect(img.closest('.visual-content')).not.toHaveAttribute('hidden');expect(img.closest('.visual-content')).toHaveAttribute('inert');
  request.mockRejectedValueOnce(new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE'));vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');await act(async()=>document.dispatchEvent(new Event('visibilitychange')));expect(img).not.toBeInTheDocument();
+});
+
+it('places a single Return action above the title and reserves message transition slots',async()=>{
+ const {controller}=setup();const {container}=render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const back=screen.getByRole('button',{name:'Volver a Actividad'}),title=screen.getByRole('heading',{name:'Descubrimiento'});expect(back.closest('header')).toContainElement(title);expect(back.compareDocumentPosition(title)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(container.querySelector('.visual-message-body')).toHaveAttribute('aria-live','polite');expect(container.querySelector('.visual-message-action')).toBeInTheDocument();
+});
+
+it('reveals the same authorized snapshot immediately while a slow foreground check remains pending',async()=>{
+ const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const img=screen.getAllByRole('img')[0]!;vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));const pending=deferred();request.mockReturnValueOnce(pending.promise);vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');act(()=>document.dispatchEvent(new Event('visibilitychange')));expect(img).toBeVisible();expect(screen.getAllByRole('img')[0]).toBe(img);await act(async()=>pending.resolve({id:'m',userAId:'me',userBId:'them',state:'EXPIRED'}));expect(img).not.toBeInTheDocument();
 });

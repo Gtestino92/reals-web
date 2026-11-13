@@ -59,10 +59,12 @@ try {
     check(await evaluate("firstImage===document.querySelector('.visual-profile img')&&firstImage.getAttribute('src')===firstSrc"),'signature rotation preserves img and src '+width);
     check(mediaRequests.filter(url=>url.includes('/one?')).length===before,'no extra image download '+width);
     check(await evaluate("!reads.some(p=>p.endsWith('/partner'))"),'no unread message GET '+width);
+    await evaluate("scrollTo(0,800);window.readingScroll=scrollY;window.readingHeight=document.documentElement.scrollHeight;void 0");
     const other=await call('Target.createTarget',{url:'about:blank'});await call('Target.activateTarget',{targetId:other.targetId});await delay(100);
     check(await evaluate("document.visibilityState==='hidden'&&firstImage.isConnected"),'hidden tab retains image DOM '+width);
     await call('Target.activateTarget',{targetId:target.id});await delay(200);await call('Target.closeTarget',{targetId:other.targetId});
     check(await evaluate("firstImage===document.querySelector('.visual-profile img')"),'foreground keeps same image '+width);
+    check(await evaluate("Math.abs(scrollY-readingScroll)<2&&document.documentElement.scrollHeight===readingHeight"),'foreground retains reading position and document height '+width);
     check(mediaRequests.filter(url=>url.includes('/one?')).length===before,'foreground no image download '+width);
     await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Leer mensaje').click()");await waitFor("document.body.textContent.includes('Hola, este es un mensaje')",'explicit message read');
     await evaluate("var input=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Hola desde Web');input.dispatchEvent(new Event('input',{bubbles:true}));");await delay(50);

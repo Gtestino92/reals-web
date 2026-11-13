@@ -31,6 +31,13 @@ export class VisualSession {
   private denied(error: unknown) { return error instanceof ApiError && ([401,403,404].includes(error.status) || ['VISUAL_CONTENT_NOT_AVAILABLE','VISUAL_REVIEW_EXPIRED'].includes(error.code)); }
   private request(path: string, signal: AbortSignal, method='GET', body?: unknown) {return this.controller.request(`/matches/${encodeURIComponent(this.matchId)}${path}`,signal,method,body);}
   conceal = () => {if(!this.writing){this.read?.abort();this.read=null;this.serial++;}this.install({concealed:true});};
+  resume = () => {
+    const expiry=this.state.profile?.visualExpiresAt;
+    // Same-session snapshot may remain visible during ordinary revalidation,
+    // just as during polling. Locally expired content waits for authority.
+    if(this.current() && this.state.profile && (!expiry || Date.parse(expiry)>Date.now())) this.install({concealed:false});
+    return this.refresh();
+  };
   refresh = async (retryImages = false) => {
     if(!this.current()||document.visibilityState!=='visible'||this.writing||this.read||this.state.terminal) return;
     const read=new AbortController(), ticket=++this.serial;this.read=read;

@@ -24,3 +24,14 @@
 .visual-progress.critical { accent-color: var(--color-error); }
 
 .visual-photo-retry { position: absolute; top: 60%; left: 16px; right: 16px; }
+
+.visual-review { margin-block-start: 24px; overflow-anchor: none; }
+.visual-header { display: grid; gap: 24px; }
+.visual-header h2 { margin: 0; }
+.visual-concealed { visibility: hidden; pointer-events: none; }
+.visual-message-badge { min-block-size: 1.5em; }
+.visual-message-body { min-block-size: 6em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.visual-message-action { min-block-size: 48px; }
+.visual-message-loaded { animation: visual-message-appear 180ms ease-out; }
+@keyframes visual-message-appear { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .visual-message-loaded { animation: none; } }
