@@ -27,7 +27,7 @@ export function deadline(end: string | null, now: number, detail = false): strin
   if (d.toDateString() === tomorrow.toDateString()) return `vence mañana ${time}`;
   return `vence el ${date}, ${time}`;
 }
-export function VisualDeadline({ start, end }: { start: string | null; end: string | null }) {
-  const now = useVisualNow(), fraction = remaining(start,end,now), text = deadline(end,now);
+export function VisualDeadline({ start, end, now: authoritativeNow }: { start: string | null; end: string | null; now?: number }) {
+  const clock = useVisualNow(), now = authoritativeNow ?? clock, fraction = remaining(start,end,now), text = deadline(end,now);
   return <>{text && <span>{text}</span>}{fraction !== null && <progress className={`visual-progress ${fraction <= .1 ? 'critical' : fraction <= .4 ? 'warning' : ''}`} aria-label={`${Math.round(fraction*100)} % del tiempo restante`} value={fraction} max={1}/>}</>;
 }

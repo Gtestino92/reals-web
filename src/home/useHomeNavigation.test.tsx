@@ -77,3 +77,13 @@ it('a foreign admin entry cannot restore a stale account view and same-depth gua
     expect(result.current.destination).toBe('account'); expect(location.pathname).toBe('/'); expect(go).not.toHaveBeenCalledWith(0);
   } finally { go.mockRestore(); }
 });
+
+it('retains scheduling context through profile Back and Forward',async()=>{
+ const {result}=renderHook(()=>useHomeNavigation(()=>true));act(()=>result.current.open('activity'));act(()=>result.current.openScheduling('c','m','María'));
+ act(()=>result.current.openPartnerProfile());expect(result.current.destination).toBe('partner-profile');act(()=>result.current.backTo('scheduling'));await waitFor(()=>expect(result.current.destination).toBe('scheduling'));
+ expect(result.current.connectionId).toBe('c');act(()=>history.forward());await waitFor(()=>expect(result.current.destination).toBe('partner-profile'));expect(result.current.matchId).toBe('m');
+});
+it('returns directly from an Activity profile card without a phantom scheduling entry',async()=>{
+ const {result}=renderHook(()=>useHomeNavigation(()=>true));act(()=>result.current.open('activity'));act(()=>result.current.openScheduling('c','m',null,true));expect(history.state.trail).toEqual(['home','activity','partner-profile']);
+ act(()=>result.current.backTo('activity'));await waitFor(()=>expect(result.current.destination).toBe('activity'));act(()=>history.forward());await waitFor(()=>expect(result.current.destination).toBe('partner-profile'));
+});

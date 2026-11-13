@@ -67,7 +67,7 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
     {dialog&&<dialog ref={dialogRef} aria-labelledby="visual-block-title" onCancel={e=>{if(state.pending)e.preventDefault();else setDialog(false);}}><h3 id="visual-block-title">¿Bloquear a esta persona?</h3><p>Esta acción es definitiva y no se puede deshacer. Se cerrará la interacción actual y no volverán a ser emparejados. Bloquear no envía un reporte.</p>{state.error&&<p role="alert">{state.error}</p>}<button className="login-button login-outlined" disabled={!!state.pending} onClick={()=>setDialog(false)}>Cancelar</button><button className="login-button login-primary" disabled={disabled} onClick={()=>void model.act('block')}>{state.pending==='block'?'Bloqueando...':'Bloquear definitivamente'}</button></dialog>}
   </section>;
 }
-function ProfileImage({ url, label, eager, retryEpoch, onRetry }: { url: string; label: string; eager: boolean; retryEpoch: number; onRetry: () => void }) {
+export function ProfileImage({ url, label, eager, retryEpoch, onRetry }: { url: string; label: string; eager: boolean; retryEpoch: number; onRetry: () => void }) {
   const [image, setImage] = useState<{ epoch: number; url: string; status: 'loading' | 'loaded' | 'failed' }>(() => ({ epoch: retryEpoch, url, status: 'loading' }));
   // Pin the exact request string while loading/loaded. Only a failed request
   // adopts a renewed signature automatically; explicit refresh remounts after
