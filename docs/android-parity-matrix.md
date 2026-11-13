@@ -864,3 +864,42 @@ Final validation:
 - `git diff --check`: PASS; explicit UTF-8/mojibake scan PASS. Existing LF-to-CRLF Git notices remain without unrelated conversion.
 
 Diff inventory: 19 files. Added `src/scheduling/{contracts,policy,SchedulingSession,fixtures}.ts`, `Scheduling.tsx`, `PartnerProfile.tsx`, `scheduling.css` and three scheduling test files; added `tools/scheduling-smoke.mjs`. Modified Home, Home presentation/test, Home navigation/test, exported the existing ProfileImage for reuse, allowed an authoritative clock in VisualDeadline, and updated this matrix. Review evidence and the invariant table above describe mutation ownership. No commit, push, PR or deployment performed.
+
+
+### Scheduling polling priority audit (2026-11-13, base `738db71`)
+
+Scope: responsiveness during periodic/foreground reads, preserving all backend checks. Android `SchedulingScreen` keeps selector actions independent of refreshing but guards profile/menu with interactionBusy; `SchedulingCoordinator.refresh` distinguishes initial loading and silent refresh. Web currently disables all actions for every six-GET poll: PARTIAL. Existing Web round checks, mutation serialization, draft scope, deadlines and history ownership must remain COMPLETE. This task intentionally allows profile/menu during healthy background reads too. Backend [scheduling contract](../../reals-backend/docs/commons/api.md#connections-and-scheduling) still owns rounds, expiry and availability. No endpoint/contract changes.
+
+Pre-edit mutation/installation review:
+
+| Path | Invariant / proposed ownership |
+| --- | --- |
+| Initial / explicit retry | Blocking loading/refreshing, one gate; six-GET stable snapshot atomically installed. |
+| Background poll / online / foreground | Separate polling state, retain verified snapshot and draft while read runs; no loading-label flicker. Failed snapshot invalidates availability/write eligibility; authorization remains terminal. |
+| User mutation during poll | Synchronously acquire mutation/navigation ownership; abort and obsolete only the owned background read. Fresh complete snapshot before POST; captured round must still match. |
+| Obsolete poll completion / failure / finally | Signal plus generation reject state, feedback and gate changes, even if transport ignores abort. Never unlock a pending mutation. |
+| Submit / accept / reject / block | Single POST gate; fresh reads and expected round unchanged; uncertain writes still require snapshot + Home reconciliation, never replayed. |
+| Draft / deadline / session / tab / history | Draft editable during poll; same round retains latest edits. Server clock/expiry applied atomically. Disposal aborts owned reads and identity checks remain. Existing Back/Forward lock only while mutation is pending. |
+
+
+Polling priority implementation status: **COMPLETE for the scoped behavior**, with synthetic validation below. `SchedulingSession.activity` separates loading, idle, polling, explicit refreshing, mutating and reconciling. `busy` remains false during healthy polling, and `verified` retains the last atomically installed snapshot. `Scheduling.tsx` uses `poll()` for interval/online/foreground; explicit initial, retry and deadline reads retain blocking behavior. No new spinner/label on background start. View Profile, overflow/block confirmation and draft editing remain usable. A completed poll still applies fresh domain restrictions; failures clear availability and invalidate writes. This is not permission to POST using cached availability.
+
+A user action preempts only the owned healthy poll, aborts its signal and advances the operation generation before starting a fresh six-GET snapshot. The old generation cannot install a result/error or run gate cleanup. Every read checks its captured signal before/after awaiting, so a fetcher ignoring abort cannot continue the obsolete GET chain. Mutations remain synchronously serialized and navigation-locked through POST plus reconciliation. Uncertain-write recovery cannot be preempted. Draft edits during polling are retained on same-round install; authoritative round changes reset scope. Poll lifecycle/session/hidden/terminal rules are unchanged.
+
+Request budget (Scheduling resources only, excluding independent Home status/profile traffic):
+
+| Operation | Before | After | Interaction / tradeoff |
+| --- | --- | --- | --- |
+| Healthy complete initial/poll snapshot | 6 sequential GETs | 6 sequential GETs | No checks removed. Poll no longer disables controls; initial load still blocks. |
+| Successful submit/accept/reject | 6 preflight + 1 POST + 6 reconciliation GETs + 1 Home GET | Same | Fresh identity/domain, round, proposal and availability checks before POST, stable end guards and Home reconciliation after. |
+| Mutation arriving during slow poll | Ignored while gate held; user must act again | Poll aborted; fresh mutation preflight begins immediately | Can add one already-issued GET at cancellation; obsolete chain stops. No reuse of a partial snapshot or replay of the user mutation. |
+| Seven-second idle polling cadence | Up to ~51 Scheduling GETs/minute | Same | Slower cycles still skip overlapping ticks. No claimed steady-state request-count reduction. |
+
+The closing negotiation and connection reads remain: separate unversioned endpoints do not supply a proven cheaper atomic snapshot. This optimization removes interaction stalls and unfinished obsolete read chains, not authoritative checks. Abort is best effort on the wire; a server may finish an already-received GET. No POST is canceled just to prioritize another action.
+
+Deterministic focused tests cover slow-poll draft editing and exact six-read count; submit/accept/reject/block priority, duplicate writes, stale read success/failure before and after mutation, navigation lock retention, changed round with zero POST, expired server clock, 401/403 revocation, torn snapshots and non-preemptible uncertain reconciliation. Component tests verify enabled draft/submit/profile/block controls and absent updating label during a held background request. Existing session/round/expiry/navigation tests remain enabled.
+
+Chromium `node tools/scheduling-smoke.mjs`: PASS at 390x844 and 1440x900, with a held GET that deliberately ignores abort. Both viewports verify enabled controls without flicker, View Profile/Back draft retention during the held poll, immediate mutation priority, aborted poll signal, exactly one proposal POST from double activation, rejected Back during held mutation and no unlock from the obsolete poll completion. Existing confirmation, uncertainty, failed availability, rejection, expiry and block smoke paths also pass. These are synthetic browser tests; no real backend/mobile-device or Android instrumentation verification is claimed. Android's polling cadence is retained; profile/menu availability during a healthy poll intentionally improves on Android interactionBusy gating as explicitly requested.
+
+
+Polling validation: `npm run test:focused -- src/scheduling/SchedulingSession.test.ts src/scheduling/Scheduling.test.tsx` PASS (51 tests, 2 files); `npm test -- --maxWorkers=2` PASS (1,442 tests, 56 files, 102.03s); `npm run typecheck` PASS; `npm run check:architecture` PASS (71 production modules, zero runtime cycles); `npm run build` PASS (existing chunk-size advisory only); `git diff --check` PASS; explicit UTF-8 scan PASS. `node tools/scheduling-smoke.mjs` PASS for both viewports after correcting the harness's repeated top-level variable declaration. Six files changed: Scheduling session/component and their tests, browser smoke, this parity matrix. No dependencies, backend/Android changes, environment reads, commit, push or deployment. Real-network latency/cancellation and physical-device behavior remain unverified.

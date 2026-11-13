@@ -83,3 +83,57 @@ it('never accepts an own proposal',async()=>{
 it('respects authoritative closure without inventing negotiation failure',async()=>{
  const {model,state}=await ready();state.c={...state.c,state:'CLOSED'};await model.refresh();expect(model.getSnapshot().terminal).toBe(true);expect(model.getSnapshot().negotiation?.status).toBe('PENDING');
 });
+
+
+function deferred<T>() {let resolve!:(v:T)=>void, reject!:(error:unknown)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
+it('keeps a slow poll editable and retains six guarded GETs per complete snapshot',async()=>{
+ const {model,request,state}=await ready();request.mockClear();const slow=deferred<unknown>();request.mockReturnValueOnce(slow.promise);
+ const poll=model.poll();expect(model.getSnapshot()).toMatchObject({activity:'polling',busy:false,verified:true,pending:false});
+ model.setDraft([slot]);slow.resolve({...state.c});await poll;
+ expect(model.getSnapshot().draft).toEqual([slot]);expect(request).toHaveBeenCalledTimes(6);expect(model.getSnapshot().activity).toBe('idle');
+});
+it.each(['submit','accept','reject','block'] as const)('prioritizes %s over an ignored-abort poll and retains the mutation navigation lock',async operation=>{
+ vi.useFakeTimers();vi.setSystemTime(time);const f=setup(),lock=vi.fn(),model=new SchedulingSession(f.controller,'c','m',vi.fn(),lock);await model.refresh();
+ if(operation==='accept'||operation==='reject'){f.state.p=[proposal()];await model.refresh();}else model.setDraft([slot]);
+ const read=f.request.getMockImplementation()!, stale=deferred<unknown>(),write=deferred<unknown>();
+ f.request.mockReturnValueOnce(stale.promise);const poll=model.poll();const signal=f.request.mock.calls.at(-1)![1];
+ f.request.mockImplementation(async(path,abort,method,body)=>method==='POST'?write.promise:read(path,abort,method,body));
+ const action=model.act(operation,'p1');expect(signal?.aborted).toBe(true);expect(lock).toHaveBeenLastCalledWith(true);
+ await vi.waitFor(()=>expect(f.request.mock.calls.some(c=>c[2]==='POST')).toBe(true));
+ stale.resolve({...f.state.c,state:'CLOSED'});await poll;
+ expect(model.getSnapshot()).toMatchObject({activity:'mutating',pending:true,busy:true});expect(lock).toHaveBeenLastCalledWith(true);
+ await model.act(operation,'p1');await model.poll();expect(f.request.mock.calls.filter(c=>c[2]==='POST')).toHaveLength(1);
+ write.resolve(operation==='submit'?[]:operation==='block'?{id:'block'}:f.state.n);await action;expect(lock).toHaveBeenLastCalledWith(false);
+});
+it('discards a stale poll after a completed mutation and does not continue its GET chain',async()=>{
+ const {model,request,state}=await ready();model.setDraft([slot]);const read=request.getMockImplementation()!,stale=deferred<unknown>();
+ request.mockReturnValueOnce(stale.promise);const poll=model.poll();
+ request.mockImplementation(async(path,signal,method,body)=>{if(method==='POST'){state.p=[proposal({userId:'me'})];return state.p;}return read(path,signal,method,body);});
+ await model.act('submit');const count=request.mock.calls.length;stale.resolve({...state.c});await poll;
+ expect(request.mock.calls).toHaveLength(count);expect(model.getSnapshot().proposals).toEqual(state.p);expect(model.getSnapshot().verified).toBe(true);
+});
+it('refuses to replay against a round changed while a poll yields',async()=>{
+ const {model,request,state}=await ready();model.setDraft([slot]);const stale=deferred<unknown>();request.mockReturnValueOnce(stale.promise);const poll=model.poll();
+ state.n={...state.n,roundNumber:2};await model.act('submit');stale.reject(new ApiError('network'));await poll;
+ expect(request.mock.calls.filter(c=>c[2]==='POST')).toHaveLength(0);expect(model.getSnapshot().negotiation?.roundNumber).toBe(2);expect(model.getSnapshot().draft).toEqual([]);expect(model.getSnapshot().error).toMatch(/ronda/);
+});
+it.each([401,403])('installs background authorization revocation %i and refuses writes',async status=>{
+ const {model,request}=await ready();request.mockRejectedValueOnce(new ApiError('backend',status));await model.poll();
+ expect(model.getSnapshot()).toMatchObject({verified:false,terminal:true,availability:null});await model.act('block');expect(request.mock.calls.filter(c=>c[2]==='POST')).toHaveLength(0);
+});
+it('installs a background server-clock expiry and enforces it before POST',async()=>{
+ const {model,state,request}=await ready();model.setDraft([slot]);state.a.serverTime='2026-11-16T12:00:00Z';await model.poll();
+ expect(model.now()).toBeGreaterThanOrEqual(Date.parse(state.n.schedulingExpiresAt));await model.act('submit');expect(request.mock.calls.filter(c=>c[2]==='POST')).toHaveLength(0);
+});
+it('a torn background snapshot invalidates write eligibility without installing mixed rounds',async()=>{
+ const {model,request,state}=await ready();const read=request.getMockImplementation()!;let count=0;
+ request.mockImplementation(async(path,...args)=>path.endsWith('/negotiation')&&++count===2?{...state.n,roundNumber:2}:read(path,...args));
+ await model.poll();expect(model.getSnapshot()).toMatchObject({verified:false,availability:null});expect(model.getSnapshot().negotiation?.roundNumber).toBe(1);
+});
+it('does not let a poll bypass unresolved uncertain-write reconciliation',async()=>{
+ const {model,request}=await ready();model.setDraft([slot]);const read=request.getMockImplementation()!;let failed=false;
+ request.mockImplementation(async(path,...args)=>{if(args[1]==='POST'){failed=true;throw new ApiError('network');}if(failed)throw new ApiError('network');return read(path,...args);});await model.act('submit');
+ failed=false;const slow=deferred<unknown>();request.mockReturnValueOnce(slow.promise);const recovery=model.poll();expect(model.getSnapshot()).toMatchObject({activity:'reconciling',busy:true,uncertain:true});
+ const count=request.mock.calls.length;await model.act('submit');expect(request.mock.calls).toHaveLength(count);slow.resolve(await read('/connections/c',new AbortController().signal));await recovery;
+ expect(model.getSnapshot().uncertain).toBe(false);expect(request.mock.calls.filter(c=>c[2]==='POST')).toHaveLength(1);
+});

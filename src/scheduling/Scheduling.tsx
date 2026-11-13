@@ -22,8 +22,8 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onBack,o
   useEffect(()=>{if(dialog){const d=dialogRef.current;d?.showModal();return()=>{d?.close();menuButton.current?.focus();};}},[dialog]);
   useEffect(()=>{
     model.start();void model.refresh();
-    const resume=()=>{if(document.visibilityState==='visible')void model.refresh();};
-    const timer=setInterval(()=>{const state=model.getSnapshot();if(!state.terminal&&(!state.negotiation||state.negotiation.status==='PENDING'))void model.refresh();},7000);
+    const resume=()=>{if(document.visibilityState==='visible')void model.poll();};
+    const timer=setInterval(()=>{const state=model.getSnapshot();if(!state.terminal&&(!state.negotiation||state.negotiation.status==='PENDING'))void model.poll();},7000);
     document.addEventListener('visibilitychange',resume);window.addEventListener('online',resume);
     return()=>{model.dispose();clearInterval(timer);document.removeEventListener('visibilitychange',resume);window.removeEventListener('online',resume);};
   },[model]);

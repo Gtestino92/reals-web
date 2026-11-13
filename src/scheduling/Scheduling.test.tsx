@@ -33,3 +33,11 @@ it('disables expired negotiation without inventing failure and refreshes authori
 it('shows transient availability errors and retries safely',async()=>{
  const f=setup();f.request.mockRejectedValueOnce(new ApiError('network'));view(f);await screen.findByRole('alert');fireEvent.click(screen.getByRole('button',{name:'Reintentar'}));await screen.findByRole('heading',{name:'Proponé tus horarios'});expect(screen.getByRole('button',{name:'Agregar opción'})).toBeEnabled();
 });
+
+it('keeps picker, submit, profile and block responsive during a slow background poll without loading flicker',async()=>{
+ const f=view();await screen.findByRole('heading',{name:'Proponé tus horarios'});const read=f.request.getMockImplementation()!;let resolve!:(v:unknown)=>void;
+ f.request.mockReturnValueOnce(new Promise(r=>{resolve=r;}));act(()=>window.dispatchEvent(new Event('online')));
+ fireEvent.click(screen.getByRole('button',{name:'Agregar opción'}));expect(screen.getByRole('button',{name:'Enviar horarios'})).toBeEnabled();expect(screen.getByRole('button',{name:'Ver perfil'})).toBeEnabled();
+ expect(screen.queryByText(/Actualizando/)).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Más acciones'}));fireEvent.click(screen.getByRole('menuitem'));expect(screen.getByRole('button',{name:'Bloquear definitivamente'})).toBeEnabled();
+ await act(async()=>resolve(await read('/connections/c',new AbortController().signal)));
+});
