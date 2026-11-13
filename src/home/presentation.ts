@@ -5,7 +5,7 @@ function group(item: Activity): typeof activityGroups[number] {
   switch (item.type) {
     case 'FIRST_CHAT': return 'En curso';
     case 'VISUAL_REVIEW': return 'Requiere tu acción';
-    case 'SCHEDULING': return item.requiresAction ? 'Requiere tu acción' : 'En curso';
+    case 'SCHEDULING': return item.requiresAction ? 'Requiere tu acción' : 'Otros';
     case 'SECOND_CHAT_AVAILABLE': return 'En curso';
     case 'SECOND_CHAT_SCHEDULED': return item.secondChat?.chatStatus === 'ACTIVE' ? 'En curso' : 'Próximamente';
     case 'SECOND_CHAT_EXPIRED': case 'SECOND_CHAT_READ_ONLY': return 'Recientes';
