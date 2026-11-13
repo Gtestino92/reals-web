@@ -22,3 +22,5 @@ artifacts/account-deletion-recovery/
 /artifacts/lifecycle/
 /artifacts/navigation-flicker/
 /artifacts/auth-controls/
+
+/artifacts/visual-review/

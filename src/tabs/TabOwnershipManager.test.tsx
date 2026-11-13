@@ -1,3 +1,5 @@
+import { VisualReview } from '../visual/VisualReview';
+import { visualProfile } from '../visual/fixtures';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -126,4 +128,14 @@ it('synchronous lock and channel failures can be retried without a false owner',
   vi.stubGlobal('BroadcastChannel', class extends FakeChannel { postMessage() { throw Error('Unavailable'); } });
   m.request(); await flush(); expect(m.getSnapshot()).toBe('error');
   vi.stubGlobal('BroadcastChannel', FakeChannel); m.request(); await flush(); expect(m.getSnapshot()).toBe('active');
+});
+
+it('Visual Review private DOM is destroyed on ownership transfer and reloaded on regain',async()=>{
+ const controller=new SessionController({observe:()=>()=>{},signIn:async()=>{throw Error('unused');},signUp:async()=>{throw Error('unused');},google:async()=>{throw Error('unused');},verify:async()=>{},signOut:async()=>{}},new ApiClient(),false);
+ controller.snapshot={...controller.snapshot,phase:'ready',account:{id:'me',status:'ACTIVE'},profile:{id:'p',userId:'me',status:'ACTIVE'}};
+ vi.spyOn(controller,'subscribe').mockImplementation(()=>()=>{});
+ const request=vi.spyOn(controller,'request').mockImplementation(async path=>path.endsWith('/visual-profile')?visualProfile():{id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'});
+ const a=new TabOwnershipManager();managers.push(a);render(<TabGate manager={a}>{()=> <VisualReview controller={controller} matchId="m" onBack={()=>{}}/>}</TabGate>);await act(flush);const image=screen.getAllByRole('img')[0]!;
+ const b=create();await act(flush);expect(a.getSnapshot()).toBe('blocked');expect(image).not.toBeInTheDocument();expect(screen.queryByRole('img')).toBeNull();
+ act(()=>a.request());await act(flush);expect(b.getSnapshot()).toBe('blocked');expect(screen.getAllByRole('img')[0]).not.toBe(image);expect(request.mock.calls.filter(c=>c[0].endsWith('/visual-profile'))).toHaveLength(2);
 });

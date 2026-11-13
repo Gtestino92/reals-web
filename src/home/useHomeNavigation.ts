@@ -2,18 +2,20 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { QuestionContext } from '../profile/affinities/presentation';
 import { object } from '../auth/api';
 
-const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection', 'admin'] as const;
+const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection', 'admin', 'visual-review'] as const;
 export type HomeDestination = typeof destinations[number];
-interface Entry { owner: string; trail: HomeDestination[]; question?: QuestionContext; profileQuestionId?: string }
+interface Entry { owner: string; trail: HomeDestination[]; question?: QuestionContext; profileQuestionId?: string; matchId?: string }
 function destination(value: unknown): value is HomeDestination {
   return destinations.some(item => item === value);
 }
 function entry(value: unknown): Entry | null {
   if (!object(value) || typeof value.owner !== 'string' || !Array.isArray(value.trail) || !value.trail.length || value.trail[0] !== 'home' || !value.trail.every(destination)) return null;
+  if (value.matchId !== undefined && (typeof value.matchId !== 'string' || !value.matchId.trim())) return null;
+  if (value.trail.at(-1) === 'visual-review' && typeof value.matchId !== 'string') return null;
   const q = value.question;
   if (value.profileQuestionId !== undefined && typeof value.profileQuestionId !== 'string') return null;
   if (q !== undefined && (!object(q) || typeof q.questionId !== 'string' || !['continue', 'category', 'review'].includes(String(q.source)) || typeof q.categoryId !== 'string' || typeof q.reviewAll !== 'boolean')) return null;
-  return { owner: value.owner, trail: value.trail, ...(typeof value.profileQuestionId === 'string' ? { profileQuestionId: value.profileQuestionId } : {}), ...(q === undefined ? {} : { question: { questionId: String(q.questionId), source: q.source === 'category' ? 'category' : q.source === 'review' ? 'review' : 'continue', categoryId: String(q.categoryId), reviewAll: q.reviewAll === true } }) };
+  return { owner: value.owner, trail: value.trail, ...(typeof value.matchId === 'string' ? { matchId: value.matchId } : {}), ...(typeof value.profileQuestionId === 'string' ? { profileQuestionId: value.profileQuestionId } : {}), ...(q === undefined ? {} : { question: { questionId: String(q.questionId), source: q.source === 'category' ? 'category' : q.source === 'review' ? 'review' : 'continue', categoryId: String(q.categoryId), reviewAll: q.reviewAll === true } }) };
 }
 
 // One authenticated Home owns its same-document entries, including nested Account.
@@ -67,6 +69,11 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const value: Entry = { owner: initial.owner, trail: [...current.current.trail, 'profile-question-editor'], profileQuestionId };
     window.history.pushState(value, '', path(value)); current.current = value; setState(value);
   };
-  return { destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
+  const openVisualReview = (matchId: string) => {
+    if (moving.current || !matchId.trim() || !guard.current('visual-review') || current.current.trail.at(-1) === 'visual-review') return;
+    const value: Entry = { owner: initial.owner, trail: [...current.current.trail, 'visual-review'], matchId };
+    window.history.pushState(value, '', path(value)); current.current = value; setState(value);
+  };
+  return { trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
 }
 export type HomeNavigation = ReturnType<typeof useHomeNavigation>;
