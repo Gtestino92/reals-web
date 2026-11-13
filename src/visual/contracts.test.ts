@@ -11,3 +11,5 @@ it('filters blank sections, deduplicates positive indicators and caps at three; 
  expect(p.bio).toBeNull();expect(p.affinityIndicators.map(a=>a.title)).toEqual(['A','B','C']);expect(p.profileQuestions.map(q=>q.questionId)).toEqual(['a','b']);
 });
 it.each([null,{},visualProfile({age:'29'}),visualProfile({photos:null}),visualProfile({visualExpiresAt:'invalid'}),visualProfile({profileQuestions:{}})])('rejects malformed profiles',v=>expect(()=>parseVisualProfile(v)).toThrow());
+
+it.each(['myPersonalMessageSubmitted','partnerPersonalMessageSubmitted','partnerPersonalMessageRead','decisionRequiresPartnerPersonalMessageRead'])('fails closed for missing or malformed %s',key=>{expect(()=>parseVisualProfile(visualProfile({[key]:undefined}))).toThrow();expect(()=>parseVisualProfile(visualProfile({[key]:'true'}))).toThrow();});

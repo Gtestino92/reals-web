@@ -108,7 +108,7 @@ it('renders all known summaries, notices and unknown types as text without navig
   home.pendingActions = [{ type: 'VISUAL_REVIEW', matchId: 'm', chatId: null, partner: { displayName: '<img src=x>' } }, { type: 'VISUAL_REVIEW', matchId: 'v', chatId: null }];
   home.nextSteps = ['SCHEDULING','SECOND_CHAT_SCHEDULED','SECOND_CHAT_AVAILABLE','SECOND_CHAT_EXPIRED','SECOND_CHAT_READ_ONLY','FUTURE'].map(type => ({ type, connectionId: type, matchId: 'm', requiresAction: true }));
   home.passiveNotices = [{ type: 'SCHEDULING_PREPARING' }, { type: 'UNKNOWN' }];
-  mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Ver Actividad' })); expect(screen.getByText('Con <img src=x>')).toBeVisible(); expect(screen.getByText('Actividad pendiente')).toBeVisible();
+  mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Ver Actividad' })); expect(screen.getByText('Descubrí el perfil de <img src=x>')).toBeVisible(); expect(screen.getByText('Actividad pendiente')).toBeVisible();
   expect(screen.queryByText(/Podés continuar tu primer chat/)).toBeNull(); expect(screen.queryByRole('link')).toBeNull(); expect(document.body.textContent).not.toContain('SECOND_CHAT_');
 });
 it('blocks ineligible search and offers cancellation while queued', async () => {
@@ -473,7 +473,7 @@ it.each(['CHAT_ABANDONED','CHAT_EXPIRED'])('hides terminal %s from every Home su
   status.version++;await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});
   fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));
   expect(screen.queryByRole('button',{name:'Abrir primer chat'})).toBeNull();
-  expect(screen.getByText('Con Otra persona')).toBeVisible();
+  expect(screen.getByText('Descubrí el perfil de Otra persona')).toBeVisible();
   expect(document.body.textContent).not.toContain('Tenés una conversación inicial');
   expect(fetcher.mock.calls.filter(([url])=>url==='/api/matches/m/chat')).toHaveLength(before);
 });
@@ -592,7 +592,7 @@ it('opens visual review only from its card, retains Home and restores Activity w
  fetcher.mockImplementation((path,options)=> path === '/api/matches/visual' ? Promise.resolve(json({id:'visual',userAId:'u',userBId:'them',state:'VISUAL_PHASE'})) : path === '/api/matches/visual/visual-profile' ? Promise.resolve(json(visualProfile())) : base(path,options));
  mount();await ready();expect(screen.queryByRole('heading',{name:'Perfil por descubrir'})).toBeNull();
  const retained = document.querySelector('.home');
- fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));fireEvent.click(screen.getByRole('button',{name:'Descubrir ahora'}));
+ fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));fireEvent.click(screen.getByRole('button',{name:/Descubrí el perfil/}));
  await screen.findByRole('heading',{name:'María'});expect(history.state.matchId).toBe('visual');
  fireEvent.click(screen.getByRole('button',{name:'Volver a Actividad'}));await screen.findByRole('heading',{name:'Actividad'});expect(document.querySelector('.home')).toBe(retained);
  act(()=>history.forward());await screen.findByRole('heading',{name:'María'});

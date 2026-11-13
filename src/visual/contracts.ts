@@ -4,6 +4,7 @@ import { browserUrl } from '../shared/browserUrl';
 const text = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 const position = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
 export interface VisualProfile {
+  myPersonalMessageSubmitted: boolean; partnerPersonalMessageSubmitted: boolean; partnerPersonalMessageRead: boolean; decisionRequiresPartnerPersonalMessageRead: boolean;
   profileId: string; displayName: string; age: number; bio: string | null; visualExpiresAt: string | null;
   photos: { id: string; url: string; position: number }[];
   affinityIndicators: { categoryId: string; title: string }[];
@@ -14,6 +15,7 @@ export function parseVisualProfile(v: unknown): VisualProfile {
     (v.bio != null && typeof v.bio !== 'string') || !Array.isArray(v.photos) ||
     (v.visualExpiresAt != null && (typeof v.visualExpiresAt !== 'string' || !Number.isFinite(Date.parse(v.visualExpiresAt)))) ||
     (v.affinityIndicators != null && !Array.isArray(v.affinityIndicators)) || (v.profileQuestions != null && !Array.isArray(v.profileQuestions))) throw new ApiError('invalid');
+  for (const key of ['myPersonalMessageSubmitted', 'partnerPersonalMessageSubmitted', 'partnerPersonalMessageRead', 'decisionRequiresPartnerPersonalMessageRead']) if (typeof v[key] !== 'boolean') throw new ApiError('invalid');
   const photos: VisualProfile['photos'] = [];
   for (const row of v.photos) {
     if (!object(row) || row.moderationStatus !== 'APPROVED') continue;
@@ -28,6 +30,6 @@ export function parseVisualProfile(v: unknown): VisualProfile {
   for (const row of v.profileQuestions ?? []) {
     if (object(row) && text(row.questionId) && text(row.prompt) && text(row.answer) && position(row.position)) profileQuestions.push({ questionId: row.questionId, prompt: row.prompt, answer: row.answer, position: row.position });
   }
-  return { profileId: v.profileId, displayName: v.displayName, age: v.age, bio: v.bio?.trim() ? v.bio : null,
+  return { myPersonalMessageSubmitted: v.myPersonalMessageSubmitted === true, partnerPersonalMessageSubmitted: v.partnerPersonalMessageSubmitted === true, partnerPersonalMessageRead: v.partnerPersonalMessageRead === true, decisionRequiresPartnerPersonalMessageRead: v.decisionRequiresPartnerPersonalMessageRead === true, profileId: v.profileId, displayName: v.displayName, age: v.age, bio: v.bio?.trim() ? v.bio : null,
     visualExpiresAt: v.visualExpiresAt ?? null, photos: photos.sort((a,b) => a.position-b.position), affinityIndicators, profileQuestions: profileQuestions.sort((a,b) => a.position-b.position) };
 }

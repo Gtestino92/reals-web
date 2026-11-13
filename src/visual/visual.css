@@ -11,3 +11,16 @@
 .visual-photo figcaption { position: absolute; bottom: 10px; right: 10px; left: 10px; width: fit-content; max-width: calc(100% - 20px); border-radius: 16px; padding: 6px 12px; background: var(--color-surface); overflow-wrap: anywhere; }
 .visual-affinities { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0; list-style: none; }
 .visual-affinities li { border: 1px solid var(--color-outline); border-radius: 24px; padding: 8px 12px; overflow-wrap: anywhere; }
+
+.visual-section { margin-top: 16px; display: grid; gap: 12px; }
+.visual-section textarea { display: block; width: 100%; box-sizing: border-box; font: inherit; padding: 12px; border: 1px solid var(--color-outline); border-radius: 12px; background: var(--color-surface); color: var(--color-on-surface); }
+.visual-decisions { display: flex; flex-wrap: wrap; gap: 12px; }
+.visual-decisions button { flex: 1 1 10rem; min-height: 48px; }
+.visual-unread { border-color: var(--color-secondary); }
+.visual-activity { position: relative; padding-right: 48px; }
+.visual-chevron { position: absolute; right: 18px; top: 24px; font-size: 24px; }
+.visual-progress { width: 100%; height: 4px; accent-color: var(--color-primary); }
+.visual-progress.warning { accent-color: var(--color-secondary); }
+.visual-progress.critical { accent-color: var(--color-error); }
+
+.visual-photo-retry { position: absolute; top: 60%; left: 16px; right: 16px; }
