@@ -4,28 +4,32 @@ import { mergeMessages, parseMessage, plainText, reactable, reactionCursor, str,
 import { messageRequest, type Outgoing } from './messageRequest';
 import { parseSecondStatus, secondPolicy, type SecondStatus } from './secondContracts';
 interface State {
-  status: SecondStatus | null; receivedAt: number; messages: Message[]; partnerId: string; partnerName: string;
+  returnHome: string | null; status: SecondStatus | null; receivedAt: number; messages: Message[]; partnerId: string; partnerName: string;
   retryBlocked: boolean; busy: boolean; blocked: boolean; error: string; outgoing: Outgoing | null; confirmed: Outgoing | null; confirmationVersion: number; historyLimited: boolean;
 }
 /** Owns one connection and one authenticated lifetime. Reads never release mutation ownership. */
 export class SecondChatSession {
-  private state: State = { status: null, receivedAt: 0, messages: [], partnerId: '', partnerName: '', retryBlocked: false, busy: false, blocked: true, error: '', outgoing: null, confirmed: null, confirmationVersion: 0, historyLimited: false };
+  private state: State = { returnHome: null, status: null, receivedAt: 0, messages: [], partnerId: '', partnerName: '', retryBlocked: false, busy: false, blocked: true, error: '', outgoing: null, confirmed: null, confirmationVersion: 0, historyLimited: false };
   private listeners = new Set<() => void>();
   private lifetime = new AbortController();
   private read: AbortController | null = null;
+  private readTask: Promise<void> | null = null;
   private generation = 0;
   private writing = false;
   private entering = false;
   private alternate = false;
-  constructor(private controller: Pick<SessionController,'request'>, readonly connectionId: string, readonly matchId: string, readonly me: string) {}
+  private retired = false;
+  private expiryPending = false;
+  private identityCurrent() { const s = this.controller.getSnapshot?.(); return !s || s.phase === 'ready' && s.account?.id === this.me; }
+  constructor(private controller: Pick<SessionController,'request'> & Partial<Pick<SessionController,'getSnapshot'>>, readonly connectionId: string, readonly matchId: string, readonly me: string) {}
   subscribe = (f: () => void) => { this.listeners.add(f); return () => { this.listeners.delete(f); }; };
   getSnapshot = () => this.state;
   private install(p: Partial<State>) { if (!this.lifetime.signal.aborted) { this.state = { ...this.state, ...p }; this.listeners.forEach(f => f()); } }
-  start() { if (this.lifetime.signal.aborted) { this.lifetime = new AbortController(); this.generation++; this.read = null; this.writing = false; this.entering = false; } }
-  dispose() { this.lifetime.abort(); this.read?.abort(); this.generation++; this.state = { ...this.state, outgoing: null, confirmed: null, messages: [], blocked: true }; }
+  start() { if (this.retired || !this.identityCurrent()) return; if (this.lifetime.signal.aborted) { this.lifetime = new AbortController(); this.generation++; this.read = null; this.writing = false; this.entering = false; } }
+  dispose() { this.lifetime.abort(); this.read?.abort(); this.generation++; this.state = { ...this.state, returnHome: null, status: null, partnerId: '', partnerName: '', outgoing: null, confirmed: null, messages: [], busy: false, blocked: true }; this.listeners.forEach(f => f()); }
   get now() { return this.state.status ? Date.parse(this.state.status.serverTime) + Math.max(0, Date.now() - this.state.receivedAt) : Date.now(); }
   get rules() { return secondPolicy(this.state.status,this.now); }
-  private current(g: number, signal: AbortSignal) { return g === this.generation && !signal.aborted && !this.lifetime.signal.aborted; }
+  private current(g: number, signal: AbortSignal) { return this.identityCurrent() && !this.retired && g === this.generation && !signal.aborted && !this.lifetime.signal.aborted; }
   private request(path: string, signal: AbortSignal, method = 'GET', body?: unknown) { return this.controller.request(path,signal,method,body); }
   private async load(signal: AbortSignal, g: number, full = false) {
     let partnerId = this.state.partnerId;
@@ -43,6 +47,7 @@ export class SecondChatSession {
     if (!rules.readable) { this.install({ messages: [], blocked: false }); return; }
     const raw = await this.request(`/chats/${status.chatId}`,signal);
     if (!object(raw) || raw.id !== status.chatId || raw.matchId !== this.matchId || raw.connectionId !== this.connectionId || raw.chatType !== 'SECOND_CHAT' || !object(raw.partner) || raw.partner.userId !== partnerId) throw new ApiError('invalid');
+    if (!this.current(g,signal)) return;
     const partnerName = str(raw.partner.displayName);
     this.alternate = !this.alternate;
     let cursor = full ? undefined : this.alternate ? reactionCursor(this.state.messages) : this.state.messages.at(-1)?.id;
@@ -50,6 +55,7 @@ export class SecondChatSession {
     const seen = new Set<string>();
     for (let page = 0; page < 20; page++) {
       const value = await this.request(`/chats/${status.chatId}/messages?limit=500${cursor ? `&after=${encodeURIComponent(cursor)}` : ''}`,signal);
+      if (!this.current(g,signal)) return;
       const rows = Array.isArray(value) ? value : object(value) && Array.isArray(value.messages) && typeof value.hasMore === 'boolean' ? value.messages : null;
       if (!rows) throw new ApiError('invalid');
       const parsed = rows.map(v => parseMessage(v,status.chatId ?? '',[this.me,partnerId]));
@@ -66,13 +72,19 @@ export class SecondChatSession {
     this.install({ messages, partnerName, blocked: false, historyLimited: limited,
       ...(confirmed ? { outgoing: null, confirmed: outgoing, confirmationVersion: this.state.confirmationVersion + 1 } : {}) });
   }
-  refresh = async (full = false, silent = false) => {
-    if (this.writing || this.read || this.lifetime.signal.aborted) return;
+  refresh = async (full = false, silent = false): Promise<void> => {
+    if (this.retired || !this.identityCurrent() || this.writing || this.lifetime.signal.aborted) return;
+    if (this.read) {
+      // Playback renewal needs a full snapshot, not the result of an incremental poll.
+      if (full && this.readTask) { try { await this.readTask; } catch { return; } return this.refresh(true,silent); }
+      return;
+    }
     const read = new AbortController(); this.read = read;
     const signal = AbortSignal.any([read.signal,this.lifetime.signal]), g = ++this.generation;
-    try { await this.load(signal,g,full); if (this.current(g,signal) && !silent) this.install({ error: '' }); }
+    const task = this.load(signal,g,full); this.readTask = task;
+    try { await task; if (this.current(g,signal) && !silent) this.install({ error: '' }); }
     catch { if (this.current(g,signal)) this.install({ blocked: true, error: 'No pudimos actualizar el chat. Revisá tu conexión y reintentá.' }); }
-    finally { if (g === this.generation) this.read = null; }
+    finally { if (g === this.generation) { this.read = null; this.readTask = null; } }
   };
   resume = () => { if (this.writing) return; this.read?.abort(); this.read = null; return this.refresh(); };
   private async write(path: string, method: string, body?: unknown, outgoing?: Outgoing) {
@@ -81,9 +93,18 @@ export class SecondChatSession {
     const g = ++this.generation, signal = this.lifetime.signal;
     this.install({ busy: true, error: '', ...(outgoing ? { outgoing: { ...outgoing, phase: 'pending' } } : {}) });
     let errorText = '';
+    const safety = path.endsWith('/safety-cancellations') || path.endsWith('/block');
     try {
       const result = await this.request(path,signal,method,body);
       if (!this.current(g,signal)) return;
+      if (safety) {
+        const valid = path.endsWith('/block')
+          ? object(result) && typeof result.id === 'string' && result.id.length > 0 && typeof result.source === 'string' && ['MANUAL','SAFETY_REPORT','ADMIN'].includes(result.source) && typeof result.createdAt === 'string' && Number.isFinite(Date.parse(result.createdAt))
+          : object(result) && object(result.chat) && result.chat.id === this.state.status?.chatId && result.chat.status === 'CANCELLED';
+        if (!valid) throw new ApiError('invalid');
+        this.returnToHome(path.endsWith('/block') ? 'La persona qued\u00f3 bloqueada.' : 'Recibimos tu reporte y cerramos el chat por seguridad. Ser\u00e1 revisado.');
+        return;
+      }
       if (outgoing || method === 'PUT') {
         const message = parseMessage(result,this.state.status?.chatId ?? '',[this.me,this.state.partnerId]);
         if (outgoing && (message.senderId !== this.me || message.clientMessageId !== outgoing.clientMessageId)) throw new ApiError('invalid');
@@ -95,11 +116,31 @@ export class SecondChatSession {
       errorText = 'No pudimos confirmar la acción. Actualizamos el estado antes de permitir otro intento.';
       if (outgoing && this.state.outgoing) this.install({ retryBlocked: e instanceof ApiError && e.code.includes('IDEMPOTENCY'), outgoing: { ...outgoing, phase: ambiguous ? 'uncertain' : 'failed' } });
     }
-    try { await this.load(signal,g,!!outgoing); }
-    catch { if (this.current(g,signal)) this.install({ blocked: true }); errorText = 'No pudimos reconciliar la acción. Reintentá la conexión antes de continuar.'; }
+    try {
+      await this.load(signal,g,!!outgoing);
+      if (safety && this.current(g,signal) && ['CANCELLED','CLOSED'].includes(this.state.status?.chatStatus ?? '')) this.returnToHome('La interacci\u00f3n ya no est\u00e1 disponible. Actualizamos Inicio.');
+    }
+    catch (error) { if (safety && this.current(g,signal) && error instanceof ApiError && [403,404].includes(error.status)) { this.returnToHome('La interacci\u00f3n no est\u00e1 accesible. Consult\u00e1 Inicio para actualizar el estado.'); return; } if (this.current(g,signal)) this.install({ blocked: true }); errorText = 'No pudimos reconciliar la acción. Reintentá la conexión antes de continuar.'; }
     finally { if (this.current(g,signal)) { this.writing = false; this.install({ busy: false, error: errorText }); } }
   }
-  private get allowed() { return !this.entering && !this.writing && !this.state.blocked && !this.lifetime.signal.aborted; }
+  private returnToHome(message: string) {
+    this.install({ returnHome: message, busy: false, blocked: true, messages: [], outgoing: null, confirmed: null });
+    this.retired = true; this.read?.abort();
+  }
+  checkAbsoluteExpiry = () => {
+    if (this.retired || !this.identityCurrent()) return;
+    if (this.rules.active && this.rules.expired) this.expiryPending = true;
+    if (this.expiryPending && !this.state.busy) this.returnToHome('El segundo chat venci\u00f3.');
+  };
+  prepareSafety = async () => {
+    if (this.retired || this.writing || this.entering || this.lifetime.signal.aborted || !this.identityCurrent()) return false;
+    // Reconciliation only: a safety request never retries or replaces the retained UUID.
+    this.entering = true; this.install({ busy: true }); this.read?.abort(); this.read = null;
+    try { await this.refresh(true); }
+    finally { this.entering = false; if (!this.retired) this.install({ busy: false }); }
+    return this.allowed && this.rules.active && !this.rules.expired;
+  };
+  private get allowed() { return !this.retired && this.identityCurrent() && !this.entering && !this.writing && !this.state.blocked && !this.lifetime.signal.aborted; }
   join = async () => {
     if (!this.allowed || this.state.outgoing) return;
     const lifetime = this.lifetime;
@@ -134,7 +175,7 @@ export class SecondChatSession {
     return this.write(`/chats/${this.state.status?.chatId}/messages/${encodeURIComponent(id)}/reaction`,'PUT',{ type: 'HEART' });
   };
   action = (kind: 'no-show' | 'completion' | 'inactivity' | 'ACCEPTED' | 'REJECTED' | 'safety' | 'block', body?: unknown) => {
-    if (!this.allowed || this.state.outgoing) return;
+    if (!this.allowed || (this.state.outgoing && kind !== 'safety' && kind !== 'block')) return;
     const p = this.rules, s = this.state.status;
     if (!s || !p.active || p.expired) return;
     if (kind === 'no-show' && !p.noShow || kind === 'completion' && !p.completion || kind === 'inactivity' && !p.inactivity) return;

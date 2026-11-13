@@ -1,8 +1,8 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { QuestionContext } from '../profile/affinities/presentation';
 import { object } from '../auth/api';
 
-const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection', 'admin', 'visual-review', 'scheduling', 'partner-profile'] as const;
+const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection', 'admin', 'visual-review', 'scheduling', 'partner-profile', 'second-chat'] as const;
 export type HomeDestination = typeof destinations[number];
 interface Entry { owner: string; trail: HomeDestination[]; question?: QuestionContext; profileQuestionId?: string; matchId?: string; connectionId?: string; partnerName?: string | null }
 function destination(value: unknown): value is HomeDestination {
@@ -12,7 +12,7 @@ function entry(value: unknown): Entry | null {
   if (!object(value) || typeof value.owner !== 'string' || !Array.isArray(value.trail) || !value.trail.length || value.trail[0] !== 'home' || !value.trail.every(destination)) return null;
   if (value.matchId !== undefined && (typeof value.matchId !== 'string' || !value.matchId.trim())) return null;
   if (value.trail.at(-1) === 'visual-review' && typeof value.matchId !== 'string') return null;
-  if (value.trail.some(v => v === 'scheduling' || v === 'partner-profile') && (typeof value.connectionId !== 'string' || !value.connectionId.trim() || typeof value.matchId !== 'string')) return null;
+  if (value.trail.some(v => v === 'scheduling' || v === 'partner-profile' || v === 'second-chat') && (typeof value.connectionId !== 'string' || !value.connectionId.trim() || typeof value.matchId !== 'string')) return null;
   if (value.partnerName != null && typeof value.partnerName !== 'string') return null;
   const q = value.question;
   if (value.profileQuestionId !== undefined && typeof value.profileQuestionId !== 'string') return null;
@@ -26,6 +26,11 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
   const [state, setState] = useState(initial);
   const current = useRef(initial), guard = useRef(canLeave), moving = useRef(false);
   guard.current = canLeave;
+  const secondChat = useRef<{ canLeave: () => boolean; leave: () => void } | null>(null);
+  const registerSecondChat = useCallback((policy: { canLeave: () => boolean; leave: () => void }) => {
+    secondChat.current = policy;
+    return () => { if (secondChat.current === policy) secondChat.current = null; };
+  }, []);
   const path = (value: Entry) => value.trail.at(-1) === 'admin' ? '/admin' : '/';
   useLayoutEffect(() => {
     if (!enabled) return;
@@ -33,6 +38,27 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const pop = (event: PopStateEvent) => {
       const previous = current.current, incoming = entry(event.state);
       moving.current = false;
+      if (previous.trail.at(-1) === 'second-chat' && incoming?.trail.at(-1) !== 'second-chat' && secondChat.current) {
+        if (!secondChat.current.canLeave()) {
+          const delta = previous.trail.length - (incoming?.trail.length ?? 1);
+          if (incoming?.owner === previous.owner && delta) { moving.current = true; window.history.go(delta); }
+          else window.history.replaceState(previous, '', path(previous));
+          return;
+        }
+        const policy = secondChat.current; secondChat.current = null;
+        const next: Entry = { owner: previous.owner, trail: ['home'] };
+        window.history.replaceState(next, '', path(next)); current.current = next; setState(next); policy.leave(); return;
+      }
+      if (incoming?.trail.at(-1) === 'second-chat' && !secondChat.current) {
+        if (!guard.current('home') && previous.trail.at(-1) !== 'home') {
+          const delta = previous.trail.length - incoming.trail.length;
+          if (incoming.owner === previous.owner && delta) { moving.current = true; window.history.go(delta); }
+          else window.history.replaceState(previous, '', path(previous));
+          return;
+        }
+        const next: Entry = { owner: previous.owner, trail: ['home'] };
+        window.history.replaceState(next, '', path(next)); current.current = next; setState(next); return;
+      }
       if (incoming?.owner === previous.owner) {
         if (!guard.current(incoming.trail.at(-1)) && incoming.trail.join('/') !== previous.trail.join('/')) {
           const delta = previous.trail.length - incoming.trail.length;
@@ -86,6 +112,16 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const value: Entry = { ...current.current, trail: [...current.current.trail, 'partner-profile'] };
     window.history.pushState(value, '', path(value)); current.current = value; setState(value);
   };
-  return { trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
+  const openSecondChat = (connectionId: string, matchId: string) => {
+    if (moving.current || !connectionId.trim() || !matchId.trim() || !guard.current('second-chat')) return false;
+    const value: Entry = { owner: initial.owner, trail: [...current.current.trail, 'second-chat'], connectionId, matchId };
+    window.history.pushState(value, '', '/'); current.current = value; setState(value); return true;
+  };
+  const closeSecondChat = () => {
+    secondChat.current = null; moving.current = false;
+    const value: Entry = { owner: initial.owner, trail: ['home'] };
+    window.history.replaceState(value, '', '/'); current.current = value; setState(value);
+  };
+  return { registerSecondChat, openSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
 }
 export type HomeNavigation = ReturnType<typeof useHomeNavigation>;

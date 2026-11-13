@@ -87,3 +87,22 @@ it('returns directly from an Activity profile card without a phantom scheduling 
  const {result}=renderHook(()=>useHomeNavigation(()=>true));act(()=>result.current.open('activity'));act(()=>result.current.openScheduling('c','m',null,true));expect(history.state.trail).toEqual(['home','activity','partner-profile']);
  act(()=>result.current.backTo('activity'));await waitFor(()=>expect(result.current.destination).toBe('activity'));act(()=>history.forward());await waitFor(()=>expect(result.current.destination).toBe('partner-profile'));
 });
+
+it('gives Second Chat one history owner and retires stale Forward entries', async () => {
+ let rootLocked=false,canReturn=false;const leave=vi.fn();
+ const {result}=renderHook(()=>useHomeNavigation(()=>!rootLocked));
+ act(()=>result.current.open('activity'));act(()=>{expect(result.current.openSecondChat('connection','match')).toBe(true);});rootLocked=true;
+ let unregister: (()=>void)|undefined;act(()=>{unregister=result.current.registerSecondChat({canLeave:()=>canReturn,leave});});
+ const length=history.length;act(()=>history.back());await waitFor(()=>expect(history.state.trail.at(-1)).toBe('second-chat'));expect(leave).not.toHaveBeenCalled();expect(history.length).toBe(length);
+ canReturn=true;act(()=>history.back());await waitFor(()=>expect(result.current.destination).toBe('home'));expect(leave).toHaveBeenCalledOnce();act(()=>unregister?.());rootLocked=false;
+ act(()=>history.forward());await waitFor(()=>expect(history.state.trail).toEqual(['home']));expect(result.current.destination).toBe('home');expect(leave).toHaveBeenCalledOnce();
+});
+it('explicit Second Chat exit replaces its entry without invoking a conflicting root guard',()=>{
+ let rootLocked=false;const {result}=renderHook(()=>useHomeNavigation(()=>!rootLocked));act(()=>result.current.openSecondChat('connection','match'));rootLocked=true;act(()=>result.current.closeSecondChat());expect(result.current.destination).toBe('home');expect(history.state.trail).toEqual(['home']);
+});
+
+it('does not let a stale Second Chat entry bypass another screen navigation lock',()=>{
+ let locked=false;const {result}=renderHook(()=>useHomeNavigation(()=>!locked));act(()=>result.current.open('account'));const previous=history.state;locked=true;
+ act(()=>window.dispatchEvent(new PopStateEvent('popstate',{state:{owner:previous.owner,trail:['home','second-chat'],connectionId:'old',matchId:'old'}})));
+ expect(result.current.destination).toBe('account');expect(history.state).toEqual(previous);
+});

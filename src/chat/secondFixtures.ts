@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
 import { controllerFixture, messageFixture } from './fixtures';
+import type { Message } from './contracts';
 import type { SecondStatus } from './secondContracts';
 export const secondFixture = (): SecondStatus => ({
   connectionId:'connection',chatId:'c',scheduledAt:'2026-11-13T12:00:00Z',onTimeUntil:'2026-11-13T12:05:00Z',entryClosesAt:'2026-11-13T12:15:00Z',absoluteExpiresAt:'2026-11-13T14:00:00Z',serverTime:'2026-11-13T12:12:00Z',
@@ -9,7 +10,7 @@ export const secondFixture = (): SecondStatus => ({
   audioPolicy:{enabled:true,unavailableReason:null,maxDurationMillis:60000,maxFileSizeBytes:1000000,remainingMessages:null},
 });
 export function secondHarness() {
-  const controller = controllerFixture(), status = secondFixture(), messages: ReturnType<typeof messageFixture>[] = [];
+  const controller = controllerFixture(), status = secondFixture(), messages: Message[] = [];
   const request = vi.spyOn(controller,'request').mockImplementation(async (path,_signal,method,body) => {
     if (path === '/matches/m') return {id:'m',userAId:'me',userBId:'them'};
     if (path.endsWith('/status')) return structuredClone(status);

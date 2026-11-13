@@ -66,3 +66,14 @@ export function secondPolicy(s: SecondStatus | null, now: number) {
     inactivity: active && !expired && !pending && !!s?.canClaimPartnerInactivity && !elapsedInactivity,
   };
 }
+
+export type SecondPresentation = 'loading' | 'pre-entry' | 'waiting' | 'active' | 'terminal-readable' | 'terminal-unavailable' | 'unavailable';
+export function secondPresentation(s: SecondStatus | null, now: number): SecondPresentation {
+  if (!s) return 'loading';
+  if (['FINISHED','ABANDONED','EXPIRED','CANCELLED','CLOSED'].includes(s.chatStatus ?? '')) {
+    return secondPolicy(s,now).readable ? 'terminal-readable' : 'terminal-unavailable';
+  }
+  if (s.chatStatus === 'ACTIVE' && joined(s.myAttendanceStatus) && s.chatId) return joined(s.partnerAttendanceStatus) ? 'active' : 'waiting';
+  if ((s.chatStatus === null || s.chatStatus === 'AVAILABLE' || s.chatStatus === 'ACTIVE') && !joined(s.myAttendanceStatus) && s.myAttendanceStatus !== 'NO_SHOW' && now < Date.parse(s.entryClosesAt)) return 'pre-entry';
+  return 'unavailable';
+}
