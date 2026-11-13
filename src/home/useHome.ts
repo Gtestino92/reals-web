@@ -63,6 +63,21 @@ export function useHome(controller: SessionController, active = true) {
       }
     }
   };
+  const dismissSecondChat = async (connectionId: string) => {
+    const r = owner.current;
+    if (!r || r.mutation || state.busy || state.blocked || r.lifetime.signal.aborted) return;
+    r.mutation = true; r.read?.abort(); r.read = null;
+    const serial = ++r.serial, signal = r.lifetime.signal;
+    setState(s => ({ ...s, busy: true, error: '' }));
+    let failure = '';
+    try {
+      const value = await controller.request(`/connections/${connectionId}/second-chat-dismissal`,signal,'POST');
+      if (!object(value) || value.dismissed !== true) throw new ApiError('invalid');
+    } catch { failure = 'No pudimos confirmar la acci\u00f3n. Actualizamos Inicio antes de permitir otro intento.'; }
+    try { r.reconcile = true; await load(r,serial,signal); }
+    catch { r.uncertain = true; failure = 'No pudimos actualizar Inicio. Revis\u00e1 tu conexi\u00f3n y us\u00e1 Reintentar.'; }
+    finally { if (valid(r,serial)) { r.mutation = false; setState(s => ({ ...s, busy: false, blocked: r.uncertain, error: failure })); } }
+  };
   const mutate = async (cancel: boolean) => {
     const r = owner.current, model = latest.current;
     if (cancel && r?.mutation) {
@@ -162,5 +177,5 @@ export function useHome(controller: SessionController, active = true) {
   }, [active]);
   const canRetryLocation = state.searchPhase === 'failed' && state.locationFailure !== null && !state.busy && !state.blocked &&
     state.model?.home.profileStatus === 'ACTIVE' && state.model.home.matchmaking.canSearch && !state.model.home.matchmaking.inQueue;
-  return { ...state, canRetryLocation, retryLocation: () => { if (canRetryLocation) void mutate(false); }, refresh: () => void refresh(), search: () => void mutate(false), cancel: () => void mutate(true), backFromSearch: () => { if (!state.busy && !state.blocked && !latest.current?.home.matchmaking.inQueue) setState(s => ({ ...s, searchPhase: 'idle', error: '', locationFailure: null })); } };
+  return { ...state, dismissSecondChat, canRetryLocation, retryLocation: () => { if (canRetryLocation) void mutate(false); }, refresh: () => void refresh(), search: () => void mutate(false), cancel: () => void mutate(true), backFromSearch: () => { if (!state.busy && !state.blocked && !latest.current?.home.matchmaking.inQueue) setState(s => ({ ...s, searchPhase: 'idle', error: '', locationFailure: null })); } };
 }

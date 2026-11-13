@@ -6,12 +6,16 @@ const bool = (v: unknown): boolean => typeof v === 'boolean' ? v : invalid();
 const count = (v: unknown): number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : invalid();
 const date = (v: unknown): string | null => v === null || v === undefined ? null : typeof v === 'string' && /^\d{4}-\d\d-\d\dT/.test(v) && Number.isFinite(Date.parse(v)) ? v : invalid();
 const optionalText = (v: unknown): string | null => v == null ? null : text(v);
+export interface SecondChatMetadata {
+  availableAt: string; entryClosesAt: string; expiresAt: string; readOnlyUntil: string | null;
+  chatId: string | null; chatStatus: string | null; chatType: string | null; myAttendanceStatus: string; durationMinutes: number;
+}
 export interface Activity {
   type: string; matchId: string; connectionId: string | null; chatId: string | null;
   partnerName: string | null; requiresAction: boolean;
   visualStartedAt: string | null; visualExpiresAt: string | null;
   createdAt: string | null; schedulingExpiresAt: string | null;
-  secondChat: Record<string, unknown> | null;
+  secondChat: SecondChatMetadata | null;
 }
 export interface HomeData {
   profileStatus: 'ACTIVE' | 'DRAFT' | 'INACTIVE' | null;
@@ -41,7 +45,7 @@ function activities(raw: unknown, next: boolean): Activity[] {
       chatId, partnerName: object(partner) ? text(partner.displayName) : null,
       requiresAction: next ? bool(v.requiresAction) : true,
       visualStartedAt: date(v.visualStartedAt), visualExpiresAt: date(v.visualExpiresAt),
-      createdAt: date(v.createdAt), schedulingExpiresAt: date(v.schedulingExpiresAt), secondChat: object(second) ? { ...second } : null };
+      createdAt: date(v.createdAt), schedulingExpiresAt: date(v.schedulingExpiresAt), secondChat: object(second) ? { availableAt: date(second.availableAt) ?? invalid(), entryClosesAt: date(second.entryClosesAt) ?? invalid(), expiresAt: date(second.expiresAt) ?? invalid(), readOnlyUntil: date(second.readOnlyUntil), chatId: optionalText(second.chatId), chatStatus: optionalText(second.chatStatus), chatType: optionalText(second.chatType), myAttendanceStatus: text(second.myAttendanceStatus), durationMinutes: count(second.durationMinutes) } : null };
   });
 }
 export function parseHome(raw: unknown): HomeData {

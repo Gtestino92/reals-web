@@ -1,7 +1,10 @@
+import { secondHomePresentation } from './secondHomePresentation';
 import type { Activity, HomeData } from './contracts';
 
 export const activityGroups = ['Requiere tu acción', 'En curso', 'Próximamente', 'Recientes', 'Otros'] as const;
-function group(item: Activity): typeof activityGroups[number] {
+function group(item: Activity, now: number): typeof activityGroups[number] {
+  const p = secondHomePresentation(item,now);
+  if (p) return p.state === 'Open' ? 'En curso' : p.state === 'Waiting' ? 'Próximamente' : 'Recientes';
   switch (item.type) {
     case 'FIRST_CHAT': return 'En curso';
     case 'VISUAL_REVIEW': return 'Requiere tu acción';
@@ -21,8 +24,11 @@ function event(item: Activity) {
 }
 export function activityPresentation(home: HomeData, now = Date.now()) {
   const items = [...home.pendingActions, ...home.nextSteps];
-  const groups = activityGroups.map(title => ({ title, items: items.filter(item => group(item) === title).sort((a, b) => event(a) - event(b)) })).filter(section => section.items.length > 0);
+  const groups = activityGroups.map(title => ({ title, items: items.filter(item => group(item,now) === title).sort((a, b) => event(a) - event(b)) })).filter(section => section.items.length > 0);
   const priorities = items.filter(item => {
+    const p = secondHomePresentation(item,now);
+    if (p && p.state !== 'Open' && p.state !== 'Waiting') return false;
+    if (p?.state === 'Open') return true;
     if (item.type === 'FIRST_CHAT' || item.type === 'SECOND_CHAT_AVAILABLE' || (item.type === 'SECOND_CHAT_SCHEDULED' && item.secondChat?.chatStatus === 'ACTIVE')) return true;
     if (item.type === 'VISUAL_REVIEW') {
       const start = timestamp(item.visualStartedAt), end = timestamp(item.visualExpiresAt);

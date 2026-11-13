@@ -903,3 +903,115 @@ Chromium `node tools/scheduling-smoke.mjs`: PASS at 390x844 and 1440x900, with a
 
 
 Polling validation: `npm run test:focused -- src/scheduling/SchedulingSession.test.ts src/scheduling/Scheduling.test.tsx` PASS (51 tests, 2 files); `npm test -- --maxWorkers=2` PASS (1,442 tests, 56 files, 102.03s); `npm run typecheck` PASS; `npm run check:architecture` PASS (71 production modules, zero runtime cycles); `npm run build` PASS (existing chunk-size advisory only); `git diff --check` PASS; explicit UTF-8 scan PASS. `node tools/scheduling-smoke.mjs` PASS for both viewports after correcting the harness's repeated top-level variable declaration. Six files changed: Scheduling session/component and their tests, browser smoke, this parity matrix. No dependencies, backend/Android changes, environment reads, commit, push or deployment. Real-network latency/cancellation and physical-device behavior remain unverified.
+
+## Second Chat — audit before implementation (2026-11-13)
+
+Base: `a6eaa0a` includes `1cd3f2cb`; clean initial tree. Work branch `feature/second-chat`, no upstream. Android `development` at `87e2979`; backend development `01cee43` (checkout `21a1a32` differs only in password-reset files, unrelated to this flow). Siblings are read-only.
+
+Source roots: [Android UI](../../reals-app/app/src/main/java/com/reals/app/ui/), [Android DTO](../../reals-app/app/src/main/java/com/reals/app/data/dto/ChatDto.kt), [backend API](../../reals-backend/docs/commons/api.md), [backend services](../../reals-backend/src/main/kotlin/com/reals/backend/service/). References below are relative to these roots. Initial statuses describe Web BEFORE implementation; evidence must be added separately, without treating source inspection as testing.
+
+| Capability / states / visibility | Android owner | Backend authority / boundary | Initial Web |
+| --- | --- | --- | --- |
+| Scheduled/waiting, opening soon (15 min), available, already active | matchmaking/HomeSecondChatAvailability, HomeCards, HomePendingPresentation | Home secondChat availableAt, expiresAt, entryClosesAt, durationMinutes, attendance, chatId/status | PARTIAL: informational cards only |
+| Read-only vs retention-ended; expired/non-actionable; dismissal; profile restrictions | same | FINISHED/ABANDONED/EXPIRED retained until readOnlyUntil; dismissal POST idempotent, conflict while actionable | MISSING |
+| Explicit entry; early, on-time, late, closed, already joined, no-show, resolved | root/SecondChatCoordinator, SecondChatTimingPresentation | GET status; POST join only after user entry and canJoin. scheduledAt <= now < onTimeUntil ON_TIME; onTimeUntil <= now < entryClosesAt LATE; equality cutoff closed | MISSING |
+| Joined waiting; messaging does not imply attendance; partner arrival | chat/SecondChatPanels | joined ON_TIME/LATE; partner PENDING/NO_SHOW; no local attendance mutation | MISSING |
+| No-show request; requester countdown; partner cancels by entry; hard cutoff; automatic resolution | same, root/SecondChatCoordinator | canClaimPartnerNoShow; onTimeUntil <= now < entryClosesAt; 60 s capped at cutoff | MISSING |
+| Read authorized chat, bounded history, incremental pages, chronology, metadata reconciliation | root/ChatMessageCollection, ChatMessageActionHandler, SecondChatCoordinator | GET chats/{id}; messages limit/after, hasMore; no implicit join via connection/chat | PARTIAL: reusable First Chat infrastructure |
+| Text <=1000, stable UUID, pending, failed/uncertain retry, shallow partner replies, hearts | chat/ChatScreen, ChatChrome; root/ChatMessageActionHandler | ChatMessageService, idempotent clientMessageId; last eligible partner run; reactions are not activity | PARTIAL: First Chat only |
+| Audio permission/record/preview/cancel/MP4 AAC/upload/replay/conflict/playback URL recovery | chat/ChatAudioComposer, ChatAudioSession; repository/ChatRepository | ChatAudioPolicyService, enabled/max duration/file size/remaining; waiting partner does not independently disable audio | PARTIAL: shared browser pipeline |
+| Completion eligibility, overflow, confirmation, one-time false-to-true coachmark | chat/SecondChatPanels, ChatChrome | canRequestMutualCompletion; both joined, >=10 min, both messaged, no conflict/cooldown | MISSING |
+| Completion requester/responder, explicit ACCEPTED/REJECTED, timeout, new-message cancellation, cooldown | root/SecondChatTimingPresentation, SecondChatCoordinator | completion-requests; decision scoped requestId; 60 s capped absolute expiry; 60 s requester cooldown | MISSING |
+| Inactivity eligibility, confirmation, requester/responder countdown, message cancellation | same | canClaimPartnerInactivity, last-message author; [5,10) min response clock; 60 s capped inactivity/absolute deadlines | MISSING |
+| Initial silence / automatic inactivity | same | SecondChatConversationLifecycleService; server resolves; client never attributes penalties | MISSING |
+| Safety report reason/details/optional block; separate manual block; pending safeguards | chat/ChatSafetyDialogs, ChatSafetyReportFormState; root/RealsRootViewModel | safety-cancellations; matches/{id}/block; reporting is not sanctioning | PARTIAL: First Chat only |
+| Absolute 10 min warning; local write fence; authoritative refresh; ended reasons | root/SecondChatTimingPresentation; chat/ChatChrome | serverTime + elapsed from receipt; ACTIVE/AVAILABLE/FINISHED/ABANDONED/EXPIRED/CANCELLED/CLOSED | MISSING |
+| Read-only composer/reaction withdrawal and retention access cutoff | chat/ChatScreen, ChatChrome | readOnlyUntil; no locally invented terminal state | MISSING |
+| Back/Home restrictions, partner cutoff exception, unavailable/terminal return | root/RealsRootUiState.canReturnHomeNow, RealsApp, RealsRootViewModel | joined genuinely ACTIVE restricts return; partner unjoined after entry cutoff permits it | MISSING |
+| Nonoverlapping polling, resume, obsolete responses, pending write ownership | root/RealsRootViewModel, SecondChatCoordinator | status reads side-effect-free; ~2 s writable Android polling; writes reconcile before unlock | PARTIAL: First Chat/Scheduling infrastructure |
+| Browser reload/close/external navigation, permissions/codec differences | platform adaptation | cannot prevent browser close; beforeunload advisory; in-memory blobs only | PLATFORM-LIMITED |
+
+### Contracts and failure inventory
+
+Status response: connectionId, chatId?, scheduledAt, onTimeUntil, entryClosesAt, absoluteExpiresAt, serverTime, myAttendanceStatus/myJoinedAt, partnerAttendanceStatus/partnerJoinedAt, canJoin, canClaimPartnerNoShow, activeNoShowClaim?, activeResolutionRequest?, chatStatus?, conversationStartedAt?, endedReason?/endedAt?, readOnlyUntil?, mutualCompletionEligibleAt?, canRequestMutualCompletion, mutualCompletionCooldownUntil?, inactivityClaimableAt?, inactivityClosesAt?, canClaimPartnerInactivity, mustRespondToPartner, lastMessageAt?/lastMessageSenderId?, audioPolicy?. Resolution: id/type/requesterUserId/responderUserId/referenceMessageId?/status/createdAt/expiresAt. Types PARTNER_NO_SHOW, MUTUAL_COMPLETION, PARTNER_INACTIVITY; only pending responder completion accepts explicit decisions. Audio policy: enabled, unavailableReason?, enabledAt?, maxDurationMillis, maxFileSizeBytes, remainingMessages?.
+
+Failures: malformed/foreign identity responses fail closed; network/5xx/invalid mutation bodies are potentially committed and require GET reconciliation, never automatic resolution replay. Auth/session/ownership errors remain SessionController-owned. SECOND_CHAT_NOT_AVAILABLE_YET, SECOND_CHAT_ENTRY_CLOSED, SECOND_CHAT_ALREADY_RESOLVED, SECOND_CHAT_NOT_AVAILABLE, SECOND_CHAT_NO_SHOW_CLAIM_ALREADY_PENDING, SECOND_CHAT_NO_SHOW_CLAIM_NOT_AVAILABLE, SECOND_CHAT_CONVERSATION_ALREADY_RESOLVED, SECOND_CHAT_COMPLETION_NOT_AVAILABLE, SECOND_CHAT_COMPLETION_REQUEST_NOT_ACTIONABLE, SECOND_CHAT_INACTIVITY_CLAIM_NOT_AVAILABLE require authoritative refresh. Audio payload/idempotency conflicts require retaining same UUID/file/target or explicit discard, not silently creating a new mutation. Non-success HTTP must surface actionable Spanish errors without private payloads.
+
+### Transition and mutation review (implementation invariants)
+
+| Path | Preconditions / atomic installation / concurrency fence |
+| --- | --- |
+| Home preview/poll | GET only; never joins, never auto-enters after Scheduling |
+| Entry | user action + fresh status eligibility; join locks synchronously, reconciles ambiguous response |
+| Status/history read | per-lifetime generation; obsolete/aborted reads cannot install or release a write lock; status receipt time installed with snapshot |
+| Text/audio/retry | stable UUID + immutable payload/target; confirm only own server message; reconcile before retry; no duplicate outgoing |
+| Reaction | backend eligible partner message; reconcile metadata; never conversation activity |
+| Completion/inactivity/no-show/decision | authoritative capability + local deadline; serialize against send; reconcile before another mutation; no blind retry |
+| Safety/block | stop owned recording before mutation; report/block remain distinct; pending lock persists through reconciliation |
+| Local deadlines | immediately fence prohibited actions; refresh server; no synthesized closure/penalty |
+| Dispose/sign-out/ownership replacement | abort owned requests/timers/listeners, interrupt playback/recording, discard private memory; no stale UI reopening |
+
+Android tests to preserve as behavioral references: SecondChatCoordinatorTest, SecondChatTimingPresentationTest, SecondChatCompletionOverflowPresentationTest, HomeSecondChatAvailabilityTest, HomeCardsTest, HomePendingPresentationTest, ChatMessageCollectionTest, ChatMessageActionHandlerTest, ChatRepositoryTest and audio/scroll/reaction/safety tests. Backend ConnectionControllerIntegrationTest exercises sequential/concurrent joins, claim cancellation, hard-cutoff commits and completion/inactivity races; ChatControllerIntegrationTest includes bounded retained history. These tests were inspected as source; they were not executed against Web or a live backend.
+
+### Second Chat implementation and evidence (same branch)
+
+The lifecycle is implemented across all functional sections; **overall Android parity remains PARTIAL**, because exhaustive scenario coverage and screenshot comparison are not established. COMPLETE below means the named bounded policy was implemented and exercised, not that the entire product flow was verified on Android or a real backend.
+
+| Audited capability | Current status | Web location / evidence / outstanding difference |
+| --- | --- | --- |
+| Scheduled/waiting and opening-soon Home presentation | PARTIAL | `home/secondHomePresentation.ts`, `presentation.ts`, `SecondChatCard.tsx`; boundary tests. Existing Home grouping retained; priority copy and exact Android priority tie-breaking need visual/product review. |
+| Available/active entry destination | COMPLETE | `Home.tsx` opens SecondChat by connectionId even without chatId; polling never joins. Session tests verify GET-only previews. |
+| Read-only / read-only-ended / expired cards | COMPLETE | `secondHomePresentation.test.ts` checks exact retention/cutoff, profile restrictions, CTA and dismissal capability. |
+| Contextual time/duration/expiration copy | PARTIAL | Card renders date/time/duration; exact contextual Android wording and typography not screenshot-verified. |
+| Partner profile access | PARTIAL | Uses existing Scheduling partner-profile surface only for permitted active/waiting cards; no new dedicated end-to-end profile scenario. |
+| Home dismissal | COMPLETE | `useHome.ts` owns mutation/read fence and authoritative Home reload; `useHome.secondChat.test.tsx` covers success, uncertain result and duplicate exclusion. |
+| No automatic entry after Scheduling | COMPLETE | Scheduling unchanged; Second Chat is opened explicitly from Activity and has an explicit attendance button. Browser entry has an extra confirmation step relative to Android's immediate eligible card-entry join. |
+| Validated lifecycle contract | COMPLETE | `chat/secondContracts.ts`; mandatory booleans, timestamps, identity, attendance, request roles and known statuses validated; malformed response tests. |
+| Early/on-time/late/cutoff admission | COMPLETE | `secondContracts.test.ts` covers before/at/after boundaries; joined attendance is server-provided; `SecondChatSession.test.ts` covers uncertain late admission reconciliation. |
+| Waiting and messaging without implied attendance | COMPLETE | `SecondChat.tsx`; policy/component tests and Chromium two-participant waiting scenario. No additional both-joined audio condition. |
+| No-show creation/countdown/cancellation/hard-cutoff | PARTIAL | Status-derived claim UI and deadlines, local cutoff fence, no penalty logic. Eligibility/deadline policy tested; full concurrent join/claim and automatic no-show closure not browser-tested. |
+| Authorized chat details | COMPLETE | `SecondChatSession.ts` verifies chatId/matchId/connectionId/type/partner; never uses connection/chat to join. |
+| Bounded/paginated/incremental messages | PARTIAL | limit=500, after/hasMore, cursor progress guard, maximum 20 response pages; merge/reaction cursor reused. Nonprogressing page test; large multi-page browser history remains unverified. |
+| Chronology and metadata merge | COMPLETE | Existing `mergeMessages`, `reactionCursor` and contract regressions reused; heart response reconciliation tested. |
+| Reading position/new-message indicator | PARTIAL | Timeline follows bottom intent and exposes explicit new-message control; no forced scroll for a reader above bottom. Resize/keyboard/image/audio-layout shifts need dedicated browser scenarios. |
+| Text, optimistic pending, stable UUID | COMPLETE | Shared `messageRequest.ts`; class tests plus two-participant Chromium exchange. No first-chat approval/guidance UI. |
+| Uncertain delivery/idempotent retry | COMPLETE | Reconcile full history before retry; preserve UUID/content/file/reply. Tests cover committed-but-lost response and uncommitted retry. |
+| Replies | COMPLETE | Existing ReplySwipe/ReplyQuote; controller rejects own-message and guidance targets. Partner-only shallow replies tested. |
+| Heart reactions | COMPLETE | Existing ReactionLane and eligibility; backend response reconciled, no locally invented conversational activity. Dedicated session and existing shared tests. |
+| Recording/preview/cancel/upload | PARTIAL | Existing AudioComposer/MP4 validation reused; second-chat tests cover policy gating and same-file/target multipart retry. No actual microphone/device Second Chat recording was exercised. |
+| Playback/signed-URL recovery | PARTIAL | Existing MessageAudio with authorized full-refresh callback; unmounted at retention withdrawal. Shared tests retained; no Second Chat real signed-URL/browser failure scenario. |
+| Audio idempotency conflict | PARTIAL | Conflict prevents retry until explicit failed-send discard; same-target retries tested. Full replay/conflict UI matrix remains unverified. |
+| Completion menu/dialog/coachmark | PARTIAL | Exact action/confirmation copy, false-to-true one-time coachmark logic; menu/dialog Chromium tested. Dedicated coachmark transition test remains to add. |
+| Completion requester/responder/accept/reject | COMPLETE | Backend capability and role/deadline guards; class/component tests; two distinct Chromium participants reject then accept. |
+| Completion timeout/cooldown/message cancellation | PARTIAL | Countdown fence, cooldown waits for authoritative refresh, messages remain possible before deadline. Policy tests; timeout/cooldown/message-cancellation end-to-end scenarios remain unverified. |
+| Inactivity confirmation/active requester/responder | PARTIAL | Capability-gated action, dialog, countdown, responder-message guidance; controller serializes messages/resolutions. Full claim/cancel/timeout scenario tests remain to add. |
+| Initial silence / automatic inactivity | PARTIAL | Status-driven closure and ended-reason rendering; no browser-activity inference. Actual scheduler/domain transitions not exercised. |
+| Safety report / optional block / manual block | PARTIAL | Shared accessible dialogs/menu; separate endpoints; recorder unmounted before safety dialog, pending serialization and uncertain reconciliation. Report UI/failure tests exist; full block/report-and-block terminal scenarios remain unverified. |
+| Absolute warning/local write fencing | COMPLETE | Ten-minute warning; rules use serverTime + elapsed since receipt; local deadline triggers GET revalidation and never invents terminal state. Boundary tests. |
+| Terminal status/read-only retention | COMPLETE | ACTIVE/AVAILABLE/FINISHED/ABANDONED/EXPIRED/CANCELLED/CLOSED recognized; composition/hearts withdrawn; Chromium confirms retained text then access removal. |
+| Back/Home active restriction and cutoff exception | PARTIAL | Root Home keeps ownership while chat mounted; screen permits Home only under timing policy and not during writes. Existing history unchanged, no extra history push/loop. Policy tested; dedicated Back/Forward/ownership replacement Second Chat browser scenarios remain unverified. |
+| Browser close/reload/external navigation | PLATFORM-LIMITED | Advisory beforeunload only; cannot prevent browser closure. Private drafts remain memory-only and cleanup is lifetime-owned. |
+| Nonoverlapping status/message polling and resume | COMPLETE | 2.5 s foreground interval with one read owner, abort-on-resume, lifetime generation guards and write serialization. Tests confirm background reads/resume cannot unlock a mutation. |
+| Audio URL refresh lane | PARTIAL | Playback uses full authorized refresh and can return no replacement if another operation owns the session; dedicated independently scheduled URL reads were not introduced. |
+| Mobile/desktop/large fonts | PARTIAL | Chromium 390/1280 px, 200% root font, no horizontal overflow; exact Android visual comparison and physical touch/accessibility testing remain pending. |
+
+Additional backend error inventory from lifecycle services: `SECOND_CHAT_COMPLETION_REQUEST_ALREADY_PENDING`, `SECOND_CHAT_COMPLETION_REQUEST_COOLDOWN`, `SECOND_CHAT_COMPLETION_REQUEST_NOT_FOUND`, `SECOND_CHAT_INACTIVITY_CLAIM_ALREADY_PENDING`, `SECOND_CHAT_EXPIRED`. All use explicit failure feedback and GET reconciliation; no blind resolution POST retry.
+
+Shared versus new: extracted existing overflow/safety dialogs into `ChatControls.tsx` and text/audio request construction into `messageRequest.ts`, used by both sessions. Existing AudioComposer, MessageAudio, ReplySwipe, ReplyQuote, ReactionLane, browser recording/validation and message merge/eligibility helpers remain shared. New SecondChatSession owns connection lifecycle independently of ChatSession; no new routing library, runtime dependency, global store or backend/Android change.
+
+Diff summary: modified `ChatSession.ts`, `FirstChat.tsx` only for those narrow extractions; Home integration, typed Home metadata, presentation grouping and Home dismissal lane; added Second Chat contracts/controller/screen, card/presentation, deterministic tests and a standalone synthetic Chromium harness. The authoritative mutation review above applies to every new response-installation path. Home dismissal additionally owns `useHome`'s mutation flag through its final reload, so background Home reads cannot release its lock. No secrets/environment values were read or copied.
+
+Validation commands/results:
+
+- `npm run test:focused -- src/chat/secondContracts.test.ts src/chat/SecondChatSession.test.ts src/chat/SecondChatSession.media.test.ts src/chat/SecondChat.test.tsx src/home/secondHomePresentation.test.ts`: 60/60 PASS.
+- `npm run test:focused -- src/home/useHome.secondChat.test.tsx`: 2/2 PASS (added after the full-suite invocation began).
+- First Chat/Home focused regression run: `npm run test:focused -- src/chat/SecondChatSession.media.test.ts src/home/Home.test.tsx src/chat/FirstChat.test.tsx`: 143/143 PASS.
+- `npm test -- --maxWorkers=2`: 1502/1502 PASS, 61 files, 108.62 s. Includes all production changes; the two additional dismissal tests passed separately.
+- `npm run typecheck`: PASS. `npm run check:architecture`: PASS, 78 production modules, zero runtime cycles.
+- `npm run build`: PASS; existing large-chunk warning remains outside this scope.
+- Start `npm run dev -- --host 127.0.0.1 --port 5175`, then `node tools/second-chat-browser.mjs`: PASS, 17 assertions, two participants, two messages, eight mutations; entry/waiting/exchange/completion reject+accept/retention withdrawal/390 and 1280 px/200% font. Harness explicitly brings the participant tab foreground to exercise resume rather than assuming hidden tabs poll. Synthetic server validates UI integration only; it does not reproduce production transaction locking.
+- `git diff --check`: PASS; UTF-8 mojibake scan of changed chat/Home/doc paths found no matches. Git's CRLF normalization advisory is not a whitespace failure.
+
+Remaining delivery limits: overall parity is PARTIAL for the rows above. No Android screenshots/device comparison, live backend/Firebase accounts, production concurrency, microphone recording or physical mobile testing is claimed. Prioritize the listed resolution/no-show/audio/navigation browser scenarios and screenshot review before declaring full parity. No commit, push, PR, merge or deployment was performed.
+
+Final review correction: entry now acquires its pending/navigation fence synchronously before status preflight, supersedes any older background read and retains ownership through join reconciliation. Added regression `locks entry navigation synchronously through the status preflight`. Because this materially changed concurrency after the first full run, validation was repeated once: `npm test -- --maxWorkers=2` **1505/1505 PASS in 62 files (107.82 s)**, including the dismissal tests and new entry regression. Final `npm run build`, `npm run check:architecture`, `git diff --check` and the 17-assertion two-participant Chromium scenario also PASS. Final diff: 24 files (7 modified, 17 added), including documentation/test fixtures. Both sibling worktrees remain unchanged. Work branch has no upstream and HEAD remains the original base; all work is uncommitted.
