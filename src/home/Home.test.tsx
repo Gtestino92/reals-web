@@ -1,3 +1,5 @@
+import { homeSecondFixture } from './secondHome.fixtures';
+import { secondFixture } from '../chat/secondFixtures';
 import { visualProfile } from '../visual/fixtures';
 import { confirmSignOut } from '../test/signOut';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -598,4 +600,23 @@ it('opens visual review only from its card, retains Home and restores Activity w
  act(()=>history.forward());await screen.findByRole('heading',{name:'María'});
  act(()=>history.back());await screen.findByRole('heading',{name:'Actividad'});
  expect(fetcher.mock.calls.some(([path])=>String(path).includes('personal-message'))).toBe(false);
+});
+
+it('opens Second Chat directly from priority once, preserving history and never joining on Home render',async()=>{
+ const now=Date.now(),item=homeSecondFixture(),second=item.secondChat!;
+ Object.assign(second,{availableAt:new Date(now-60000).toISOString(),entryClosesAt:new Date(now+7*60000).toISOString(),expiresAt:new Date(now+120*60000).toISOString()});
+ home.nextSteps=[{...item,partner:{displayName:'Ana'}}];
+ const statusResponse={...secondFixture(),scheduledAt:second.availableAt,onTimeUntil:new Date(now+60000).toISOString(),entryClosesAt:second.entryClosesAt,absoluteExpiresAt:second.expiresAt,serverTime:new Date(now).toISOString(),myAttendanceStatus:'PENDING',myJoinedAt:null,chatId:null,chatStatus:'AVAILABLE',canJoin:true,canRequestMutualCompletion:false};
+ const base=fetcher.getMockImplementation()!;
+ fetcher.mockImplementation((path,options)=>path==='/api/matches/m'?Promise.resolve(json({id:'m',userAId:'u',userBId:'them'})):path==='/api/connections/connection/second-chat/status'?Promise.resolve(json(statusResponse)):base(path,options));
+ mount();await ready();const action=screen.getByRole('button',{name:/Entrar al chat/}),length=history.length,push=vi.spyOn(history,'pushState');
+ expect(fetcher.mock.calls.some(([path])=>String(path).includes('/second-chat/'))).toBe(false);
+ act(()=>{action.click();action.click();});await screen.findByRole('region',{name:'Segundo chat'});await screen.findByRole('button',{name:'Entrar al segundo chat'});
+ expect(history.length).toBeLessThanOrEqual(length+1);expect(push).toHaveBeenCalledOnce();push.mockRestore();expect(history.state.trail.at(-1)).toBe('second-chat');expect(fetcher.mock.calls.filter(([path])=>String(path).endsWith('/second-chat/status'))).toHaveLength(1);expect(fetcher.mock.calls.some(([path])=>String(path).endsWith('/second-chat/join'))).toBe(false);
+});
+
+it.each([[false,true],[true,true],[false,false],[true,false]])('keeps Scheduling labels metadata-bound with ownSubmitted=%s and partnerPending=%s',async(ownSubmitted,_partnerPending)=>{
+ // partnerPending is known only to this test scenario, never supplied by Home.
+ home.nextSteps=[{type:'SCHEDULING',connectionId:'connection',matchId:'m',requiresAction:!ownSubmitted,createdAt:new Date(Date.now()-60000).toISOString(),schedulingExpiresAt:new Date(Date.now()+60000).toISOString()}];
+ mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));expect(screen.getByRole('button',{name:ownSubmitted?'Ver coordinación':'Elegir horarios'})).toBeEnabled();expect(screen.queryByText('Esperando respuesta.')).not.toBeInTheDocument();expect(fetcher.mock.calls.some(([path])=>String(path).includes('/proposals'))).toBe(false);
 });

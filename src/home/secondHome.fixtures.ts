@@ -1,0 +1,2 @@
+﻿import type { Activity } from './contracts';
+export const homeSecondFixture = (): Activity => ({type:'SECOND_CHAT_SCHEDULED',connectionId:'connection',matchId:'m',chatId:null,partnerName:'Ana',requiresAction:false,createdAt:null,schedulingExpiresAt:null,visualStartedAt:null,visualExpiresAt:null,secondChat:{availableAt:'2026-11-13T12:00:00Z',entryClosesAt:'2026-11-13T12:19:00Z',expiresAt:'2026-11-13T14:00:00Z',readOnlyUntil:null,chatId:null,chatStatus:null,chatType:'SECOND_CHAT',myAttendanceStatus:'PENDING',durationMinutes:120}});

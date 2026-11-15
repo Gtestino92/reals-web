@@ -7,7 +7,7 @@ it('filters by match ID across chat IDs without hiding unrelated interactions or
   const raw=emptyHome();raw.pendingActions=[{type:'FIRST_CHAT',matchId:'closed',chatId:'new-id'},{type:'FIRST_CHAT',matchId:'active',chatId:'other'},{type:'VISUAL_REVIEW',matchId:'visual',chatId:null}];raw.activeInteractionsSummary.activeInitialCount=3;
   const model=parseHome(raw),hidden=new Set(['closed']),projected=visibleHome(model,hidden);
   expect(projected.pendingActions.map(i=>i.matchId)).toEqual(['active','visual']);expect(projected.summary.activeInitialCount).toBe(2);expect(model.pendingActions).toHaveLength(3);
-  const presentation=activityPresentation(projected);expect(presentation.priorities.map(i=>i.matchId)).toEqual(['active']);expect(presentation.groups.flatMap(g=>g.items).some(i=>i.matchId==='closed')).toBe(false);
+  const presentation=activityPresentation(projected);expect(presentation.priorities).toEqual([]);expect(presentation.groups.find(g=>g.title==='En curso')?.items.map(i=>i.matchId)).toEqual(['active']);expect(presentation.groups.flatMap(g=>g.items).some(i=>i.matchId==='closed')).toBe(false);
 });
 it('retires suppression only after authoritative Home omits the interaction',()=>{
   const hidden=new Set(['closed']);const raw=emptyHome();raw.pendingActions=[{type:'FIRST_CHAT',matchId:'closed',chatId:'c'}];

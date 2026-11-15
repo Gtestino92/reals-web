@@ -1,3 +1,5 @@
+import { HomePriorities } from './HomePriorities';
+import { useHomeTime } from './useHomeTime';
 import { SecondChat } from '../chat/SecondChat';
 import { SecondChatCard } from './SecondChatCard';
 import { Scheduling } from '../scheduling/Scheduling';
@@ -157,7 +159,8 @@ function HomeOverview({ returnScroll, actedVisuals, affinities, notice, retireNo
     if (active && heading) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; heading.tabIndex = -1; heading.focus({ preventScroll: true }); if (restoring && returnScroll.current) window.scrollTo(0, returnScroll.current); }
   }, [active, screen, returnScroll]);
   const affinity = affinities.catalog ? affinityPresentation(affinities.catalog, affinities.answers) : null;
-  const presentation = home ? activityPresentation(home) : null;
+  const now = useHomeTime(active);
+  const presentation = home ? activityPresentation(home,now) : null;
   if (waiting) return <div ref={root}><SearchingScreen phase={searchPhase === 'idle' ? 'queued' : searchPhase} error={error} busy={busy} blocked={blocked} inQueue={!!m?.inQueue} onCancel={cancel} onRefresh={refresh} onBack={backFromSearch} canRetryLocation={canRetryLocation} onRetryLocation={retryLocation}/></div>;
   if (surface === 'activity' && home && presentation) return <div ref={root} className={`home ${busy && model ? 'home-reconciling' : ''}`} aria-busy={busy}>
     <header className="home-heading"><h2>Actividad</h2><button className="login-button login-outlined" onClick={onReturnHome}>Volver a Inicio</button></header>
@@ -177,7 +180,7 @@ function HomeOverview({ returnScroll, actedVisuals, affinities, notice, retireNo
     {!model && !busy && error && <SignOutButton onConfirm={controller.signOut} />}
     {home && <>
       {home.profileStatus !== 'ACTIVE' && <aside className="home-card"><h3>{home.profileStatus === 'DRAFT' ? 'Tu perfil está en borrador' : 'Tu perfil no está activo'}</h3><p>Tus interacciones se conservan. Para buscar nuevas personas, revisá y activá tu perfil.</p>{onCompleteProfile && <button className="login-button login-outlined" onClick={onCompleteProfile} disabled={busy}>Completar perfil</button>}</aside>}
-      {!!presentation?.priorities.length && <section className="home-priority" aria-label="Prioridad ahora"><h3>Prioridad ahora</h3>{presentation.priorities.map((item, index) => <p key={`${item.matchId}-${item.type}-${index}`}>{labels[item.type] ?? 'Actividad pendiente'}{item.partnerName ? ` con ${item.partnerName}` : ''} · Revisá tu Actividad.</p>)}</section>}
+      {presentation && <HomePriorities items={presentation.priorities} overflow={presentation.priorityOverflow} now={now} disabled={busy || blocked} onOpen={onOpenChat} onActivity={onActivity}/>}
       <section className="home-card home-search" aria-labelledby="search-title"><h3 id="search-title">Buscar chat</h3>
         <p>Una conversación es el comienzo de algo real.</p>
           {!m?.canSearch && <p>{blockedLabels[m?.blockedReason?.code ?? ''] ?? 'La búsqueda no está disponible por ahora. Actualizá el estado o revisá tus interacciones.'}</p>}

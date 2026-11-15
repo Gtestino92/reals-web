@@ -113,7 +113,7 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     window.history.pushState(value, '', path(value)); current.current = value; setState(value);
   };
   const openSecondChat = (connectionId: string, matchId: string) => {
-    if (moving.current || !connectionId.trim() || !matchId.trim() || !guard.current('second-chat')) return false;
+    if (moving.current || current.current.trail.at(-1) === 'second-chat' || !connectionId.trim() || !matchId.trim() || !guard.current('second-chat')) return false;
     const value: Entry = { owner: initial.owner, trail: [...current.current.trail, 'second-chat'], connectionId, matchId };
     window.history.pushState(value, '', '/'); current.current = value; setState(value); return true;
   };

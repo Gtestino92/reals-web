@@ -1,3 +1,4 @@
+import { runHomeCases } from './home-parity-browser-cases.mjs';
 // Real Home + useHomeNavigation + SecondChat, driven by two synthetic participants.
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -22,7 +23,7 @@ async function page(group,user,width){
 async function wait(p,expression){await p.call('Page.bringToFront');for(let i=0;i<120;i++){if(await p.evaluate(expression)){checks++;return;}await new Promise(r=>setTimeout(r,100));}throw Error('Timeout '+expression+' '+await p.evaluate('document.body.innerText+JSON.stringify([...document.querySelectorAll(\"audio\")].map(a=>({src:a.src,error:a.error?.code,paused:a.paused})))'));}
 async function refresh(p){await p.call('Page.bringToFront');await p.evaluate("document.dispatchEvent(new Event('visibilitychange'))");}
 const visible="!b.closest('[hidden]')";
-async function click(p,text){await wait(p,`!![...document.querySelectorAll('button')].find(b=>(b.textContent===${JSON.stringify(text)}||b.getAttribute('aria-label')===${JSON.stringify(text)})&&!b.disabled&&${visible})`);await p.evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>(b.textContent===${JSON.stringify(text)}||b.getAttribute('aria-label')===${JSON.stringify(text)})&&!b.disabled&&${visible});b.click();})()`);}
+async function click(p,text){await wait(p,`!![...document.querySelectorAll('button')].find(b=>(b.textContent===${JSON.stringify(text)}||b.getAttribute('aria-label')===${JSON.stringify(text)}||b.querySelector('.home-priority-action')?.textContent===${JSON.stringify(text)})&&!b.disabled&&${visible})`);await p.evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>(b.textContent===${JSON.stringify(text)}||b.getAttribute('aria-label')===${JSON.stringify(text)}||b.querySelector('.home-priority-action')?.textContent===${JSON.stringify(text)})&&!b.disabled&&${visible});b.click();})()`);}
 async function setText(p,selector,text){await p.evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,${JSON.stringify(text)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`);}
 async function open(p,label='Entrar al segundo chat'){await click(p,'Ver Actividad');await click(p,label);await wait(p,"!!document.querySelector('.second-chat')");await wait(p,"!document.querySelector('.second-chat').innerText.includes('Cargando el segundo chat')");}
 async function send(p,text){await wait(p,"!!document.querySelector('#second-draft:not(:disabled)')");await setText(p,'#second-draft',text);await click(p,'Enviar mensaje');await wait(p,"!document.querySelector('.second-chat').innerText.includes('Enviando…')");}
@@ -34,6 +35,8 @@ async function run(name,width,initial,body){const key=`${width}-${name}`,s=scena
 try{
  for(let i=0;i<60;i++){try{port=(await readFile(join(directory,'DevToolsActivePort'),'utf8')).split('\n')[0].trim();break;}catch{}await new Promise(r=>setTimeout(r,100));}
  for(const width of [390,1280]){
+  await runHomeCases(width,{run,click,assert,refresh,history,pageTime:async(p,time)=>p.evaluate(`window.fixture.setTime(${time})`)});
+  if(process.argv.includes('--home-only'))continue;
   await run('available-and-scheduled',width,{joined:new Set(),status:'AVAILABLE'},async({a,b,s})=>{
    await open(a);await open(b);await assert(a,"!document.querySelector('.second-chat').innerText.match(/ya no está activo|no está disponible para lectura/)");
    s.scheduled=s.now+60000;await refresh(a);await assert(a,"document.querySelector('.second-chat').innerText.includes('Todavía no está disponible')");await assert(a,"!document.querySelector('.second-chat').innerText.match(/ya no está activo|no está disponible para lectura/)");

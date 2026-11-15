@@ -17,6 +17,7 @@ controller.request = async (path, signal, method = 'GET', body) => {
   return response.json();
 };
 Object.assign(window, { fixture: {
+  setTime: (time: number) => { Date.now = () => time; document.dispatchEvent(new Event('visibilitychange')); },
   invalidate: () => { controller.snapshot = { ...controller.snapshot, phase: 'signingOut', account: null, authContextVersion: 10 }; listeners.forEach(fn => fn()); },
   replace: () => { controller.snapshot = { ...controller.snapshot, account: { id: 'replacement', status: 'ACTIVE' }, authContextVersion: 11 }; listeners.forEach(fn => fn()); },
 } });
