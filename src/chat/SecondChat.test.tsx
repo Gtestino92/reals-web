@@ -16,7 +16,7 @@ it('survives StrictMode effect replay with exactly one explicit entry and no joi
  const view=render(<StrictMode><SecondChat controller={h.controller} connectionId="connection" matchId="m" entryIntent={intent} onHome={vi.fn()}/></StrictMode>);
  await waitFor(()=>expect(h.request.mock.calls.filter(c=>c[0].endsWith('/join'))).toHaveLength(1));
  await waitFor(()=>expect(screen.queryByText('Procesando…')).toBeNull());
- view.unmount();h.request.mockClear();render(<SecondChat controller={h.controller} connectionId="connection" matchId="m" onHome={vi.fn()}/>);
+ view.unmount();Object.assign(h.status,{canJoin:true,myAttendanceStatus:'PENDING',myJoinedAt:null});h.request.mockClear();render(<SecondChat controller={h.controller} connectionId="connection" matchId="m" onHome={vi.fn()}/>);
  await screen.findByRole('button',{name:'Entrar al segundo chat'});fireEvent(window,new Event('online'));fireEvent(document,new Event('visibilitychange'));
  await waitFor(()=>expect(h.request.mock.calls.filter(c=>c[0].endsWith('/status')).length).toBeGreaterThan(0));expect(h.request.mock.calls.some(c=>c[0].endsWith('/join'))).toBe(false);
 });

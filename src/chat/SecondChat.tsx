@@ -25,14 +25,14 @@ function ResolutionDialog({ kind, busy, close, confirm }: { kind: 'completion' |
     <button disabled={busy} onClick={close}>Cancelar</button><button disabled={busy} onClick={confirm}>{kind === 'completion' ? 'Enviar solicitud' : 'Enviar reclamo'}</button>
   </dialog>;
 }
-export function SecondChat({ controller, connectionId, matchId, onHome, navigation, entryIntent }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation; entryIntent?: SecondChatEntryIntent | undefined }) {
+export function SecondChat({ controller, connectionId, matchId, onHome, navigation, entryIntent, partnerName }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation; entryIntent?: SecondChatEntryIntent | undefined; partnerName?: string | null | undefined }) {
   const identity = useSyncExternalStore(controller.subscribe,controller.getSnapshot);
   const [owner] = useState(() => ({ id: identity.account?.id, controller }));
   if (identity.phase !== 'ready' || identity.account?.id !== owner.id || controller !== owner.controller) return null;
-  return <SecondChatView controller={controller} connectionId={connectionId} matchId={matchId} onHome={onHome} entryIntent={entryIntent} {...(navigation ? { navigation } : {})}/>;
+  return <SecondChatView controller={controller} connectionId={connectionId} matchId={matchId} onHome={onHome} entryIntent={entryIntent} partnerName={partnerName} {...(navigation ? { navigation } : {})}/>;
 }
-function SecondChatView({ controller, connectionId, matchId, onHome, navigation, entryIntent }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation; entryIntent?: SecondChatEntryIntent | undefined }) {
-  const [session] = useState(() => new SecondChatSession(controller,connectionId,matchId,controller.snapshot.account?.id ?? ''));
+function SecondChatView({ controller, connectionId, matchId, onHome, navigation, entryIntent, partnerName }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation; entryIntent?: SecondChatEntryIntent | undefined; partnerName?: string | null | undefined }) {
+  const [session] = useState(() => new SecondChatSession(controller,connectionId,matchId,controller.snapshot.account?.id ?? '',partnerName));
   const state = useSyncExternalStore(session.subscribe,session.getSnapshot);
   const [,tick] = useState(0), [draft,setDraft] = useState(''), [reply,setReply] = useState<NonNullable<Message['replyTo']> | null>(null);
   const [audioDirty,setAudioDirty] = useState(false), [audioEpoch,setAudioEpoch] = useState(0), [dialog,setDialog] = useState<'completion' | 'inactivity' | 'safety' | 'block' | null>(null);
@@ -97,7 +97,7 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation,
     {canHome && <button onClick={home}>Volver a Inicio</button>}
     {!s && <p role="status">Cargando el segundo chat…</p>}
     {state.busy && <p role="status">Procesando…</p>}
-    {state.error && <p role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh(true)}>Reintentar conexión</button></p>}
+    {state.error && <p role="alert">{state.error} {state.diagnostic && <small>Referencia: second-chat/{state.diagnostic.stage}/{state.diagnostic.kind}/{state.diagnostic.httpStatus}</small>} <button disabled={state.busy} onClick={() => void session.refresh(true)}>Reintentar conexión</button></p>}
     {coachmark && <aside className="chat-panel">Ya podés proponer finalizar de común acuerdo desde las opciones del chat. <button onClick={() => setCoachmark(false)}>Entendido</button></aside>}
     {s && presentation === 'pre-entry' && <aside className="chat-panel"><h3>{now < Date.parse(s.scheduledAt) ? 'Todavía no está disponible' : now >= Date.parse(s.entryClosesAt) ? 'Segundo chat vencido' : 'Entrada al segundo chat'}</h3><p>{now < Date.parse(s.scheduledAt) ? `El segundo chat abre a las ${new Date(s.scheduledAt).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}.` : now >= Date.parse(s.entryClosesAt) ? 'La ventana para entrar terminó.' : 'Entrar registra tu asistencia.'}</p>{p.canJoin && <button disabled={state.busy || state.blocked} onClick={() => void session.join()}>Entrar al segundo chat</button>}</aside>}
     {s && presentation === 'waiting' && <aside className="chat-panel"><h3>Esperando a {state.partnerName || 'la otra persona'}</h3><p>{s.myAttendanceStatus === 'LATE' ? 'Llegaste tarde.' : 'Llegaste a tiempo.'}</p><p>Podés mandar mensajes mientras esperás. Eso no significa que la otra persona haya llegado.</p>{p.noShow && <button disabled={!ordinary} onClick={() => void session.action('no-show')}>{state.partnerName || 'La otra persona'} no se presentó</button>}{p.cutoff && <p>La ventana para entrar terminó. Podés volver a Inicio.</p>}</aside>}

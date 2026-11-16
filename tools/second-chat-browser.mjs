@@ -42,8 +42,15 @@ try{
   if(process.argv.includes('--home-only'))continue;
   await run('available-and-scheduled',width,{joined:new Set(),status:'AVAILABLE'},async({a,b,s})=>{
    await open(a);await open(b);await assert(a,"!document.querySelector('.second-chat').innerText.match(/ya no está activo|no está disponible para lectura/)");
-   await wait(a,"!!document.querySelector('#second-draft')");await wait(b,"!!document.querySelector('#second-draft')");if(s.writes.filter(w=>w.path.endsWith('/join')).length!==2)throw Error('Explicit entries must JOIN once each');checks++;
+   await wait(a,"!!document.querySelector('#second-draft')");await wait(b,"!!document.querySelector('#second-draft')");await send(a,'Mensaje de contrato');await refresh(b);await assert(b,"document.querySelector('.second-chat').innerText.includes('Mensaje de contrato')");await refresh(a);await assert(a,"!document.querySelector('.second-chat [role=alert]')");await assert(b,"!document.querySelector('.second-chat [role=alert]')");if(s.writes.filter(w=>w.path.endsWith('/join')).length!==2)throw Error('Explicit entries must JOIN once each');checks++;
 
+  });
+  await run('confirmed-join-read-failure-recovery',width,{joined:new Set(),status:'AVAILABLE',failChatReadOnce:true},async({a,b,s})=>{
+   await open(a);await assert(a,"document.querySelector('.second-chat [role=alert]')?.innerText.includes('second-chat/chat/backend/503')");
+   if(s.writes.filter(w=>w.path.endsWith('/join')).length!==1)throw Error('Unexpected entry count');
+   await click(a,'Reintentar conexi\u00f3n');await wait(a,"!!document.querySelector('#second-draft:not(:disabled)')");await open(b);await refresh(a);
+   await assert(a,"!document.querySelector('.second-chat [role=alert]')");await assert(b,"!document.querySelector('.second-chat [role=alert]')");
+   if(s.writes.filter(w=>w.path.endsWith('/join')).length!==2)throw Error('Recovery replayed successful JOIN');checks++;
   });
   await run('no-show-concurrent-join',width,{joined:new Set(['a'])},async({a,b,s})=>{
    await open(a);const gate={path:'/connections/connection/second-chat/no-show-claims'};s.gate=gate;

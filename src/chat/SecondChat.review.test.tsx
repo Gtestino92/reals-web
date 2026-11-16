@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { ApiError } from '../auth/api';
 import { SecondChat } from './SecondChat';
 import { SecondChatSession } from './SecondChatSession';
-import { secondHarness, secondFixture } from './secondFixtures';
+import { secondHarness, secondFixture, secondSafetyResponse } from './secondFixtures';
 import { secondPresentation } from './secondContracts';
 import { messageFixture } from './fixtures';
 it.each([null,'AVAILABLE','ACTIVE'] as const)('does not present unjoined %s as terminal',async chatStatus=>{
@@ -17,7 +17,7 @@ it('separates all presentation phases without deriving terminal state from timer
 });
 it.each(['block','safety'] as const)('returns Home after acknowledged %s without depending on inaccessible GETs',async kind=>{
  const h=secondHarness(),session=new SecondChatSession(h.controller,'connection','m','me');await session.refresh();const base=h.request.getMockImplementation()!;let acknowledged=false;
- h.request.mockImplementation(async(...args)=>{if(args[2]==='POST'){acknowledged=true;return kind==='block'?{id:'b',source:'MANUAL',createdAt:h.status.serverTime}:{chat:{id:'c',status:'CANCELLED'}};}if(acknowledged)throw new ApiError('backend',403);return base(...args);});
+ h.request.mockImplementation(async(...args)=>{if(args[2]==='POST'){acknowledged=true;return kind==='block'?{id:'b',source:'MANUAL',createdAt:h.status.serverTime}:secondSafetyResponse(h.status);}if(acknowledged)throw new ApiError('backend',403);return base(...args);});
  await session.action(kind,kind==='safety'?{reason:'HARASSMENT',details:'Reporte de prueba',blockUser:false}:undefined);
  expect(session.getSnapshot()).toMatchObject({busy:false,blocked:true,messages:[],outgoing:null});expect(session.getSnapshot().returnHome).toBeTruthy();expect(h.request.mock.calls.filter(c=>c[0].endsWith('/status'))).toHaveLength(1);
 });
@@ -27,7 +27,7 @@ it('reconciles an uncertain block and returns safely when access was withdrawn, 
 });
 it.each(['failed','uncertain'] as const)('allows explicit safety after %s send without retrying or replacing its UUID',async phase=>{
  const h=secondHarness(),session=new SecondChatSession(h.controller,'connection','m','me');await session.refresh();const base=h.request.getMockImplementation()!;
- h.request.mockImplementation(async(...args)=>{if(args[2]==='POST'&&args[0].endsWith('/messages'))throw new ApiError(phase==='uncertain'?'network':'backend',phase==='uncertain'?0:400);if(args[0].endsWith('/safety-cancellations'))return{chat:{id:'c',status:'CANCELLED'}};return base(...args);});await session.send('Borrador privado',null);const outgoing=session.getSnapshot().outgoing;expect(outgoing?.phase).toBe(phase);
+ h.request.mockImplementation(async(...args)=>{if(args[2]==='POST'&&args[0].endsWith('/messages'))throw new ApiError(phase==='uncertain'?'network':'backend',phase==='uncertain'?0:400);if(args[0].endsWith('/safety-cancellations'))return secondSafetyResponse(h.status);return base(...args);});await session.send('Borrador privado',null);const outgoing=session.getSnapshot().outgoing;expect(outgoing?.phase).toBe(phase);
  const preparation=session.prepareSafety();expect(session.getSnapshot().busy).toBe(true);await session.action('block');expect(await preparation).toBe(true);expect(session.getSnapshot().outgoing?.clientMessageId).toBe(outgoing?.clientMessageId);
  await session.action('safety',{reason:'HARASSMENT',details:'Necesito asistencia',blockUser:false});expect(h.request.mock.calls.filter(c=>c[0].endsWith('/messages')&&c[2]==='POST')).toHaveLength(1);expect(session.getSnapshot().returnHome).toBeTruthy();
 });

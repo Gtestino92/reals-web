@@ -1,5 +1,5 @@
 import { homeSecondFixture } from './secondHome.fixtures';
-import { secondFixture } from '../chat/secondFixtures';
+import { secondFixture, secondChatResponse } from '../chat/secondFixtures';
 import { visualProfile } from '../visual/fixtures';
 import { confirmSignOut } from '../test/signOut';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -647,13 +647,15 @@ it.each(['priority','activity'])('joins Second Chat directly from %s once, prese
  const statusResponse={...secondFixture(),scheduledAt:second.availableAt,onTimeUntil:new Date(now+60000).toISOString(),entryClosesAt:second.entryClosesAt,absoluteExpiresAt:second.expiresAt,serverTime:new Date(now).toISOString(),myAttendanceStatus:'PENDING',myJoinedAt:null,chatId:null,chatStatus:'AVAILABLE',canJoin:true,canRequestMutualCompletion:false};
  const base=fetcher.getMockImplementation()!;
  fetcher.mockImplementation((path,options)=>{
-  if(String(path).endsWith('/second-chat/join')) { Object.assign(statusResponse,{myAttendanceStatus:'LATE',myJoinedAt:new Date(now).toISOString(),canJoin:false}); return Promise.resolve(json(statusResponse)); }
+  if(String(path).endsWith('/second-chat/join')) { Object.assign(statusResponse,{myAttendanceStatus:'LATE',myJoinedAt:new Date(now).toISOString(),canJoin:false,chatId:'c',chatStatus:'ACTIVE',partnerAttendanceStatus:'PENDING'}); return Promise.resolve(json(statusResponse)); }
+  if(path==='/api/chats/c')return Promise.resolve(json(secondChatResponse()));
+  if(String(path).startsWith('/api/chats/c/messages?'))return Promise.resolve(json([]));
   return path==='/api/matches/m'?Promise.resolve(json({id:'m',userAId:'u',userBId:'them'})):path==='/api/connections/connection/second-chat/status'?Promise.resolve(json(statusResponse)):base(path,options);
  });
  mount();await ready();if(origin==='activity') fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));const action=screen.getByRole('button',{name:origin==='priority'?/Entrar al chat/:'Entrar al segundo chat'}),length=history.length,push=vi.spyOn(history,'pushState');
  expect(fetcher.mock.calls.some(([path])=>String(path).includes('/second-chat/'))).toBe(false);
  act(()=>{action.click();action.click();});await screen.findByRole('region',{name:'Segundo chat'});await waitFor(()=>expect(fetcher.mock.calls.filter(([path])=>String(path).endsWith('/second-chat/join'))).toHaveLength(1));
- expect(history.length).toBeLessThanOrEqual(length+1);expect(push).toHaveBeenCalledOnce();push.mockRestore();expect(history.state.trail.at(-1)).toBe('second-chat');expect(fetcher.mock.calls.filter(([path])=>String(path).endsWith('/second-chat/status'))).toHaveLength(2);expect(fetcher.mock.calls.filter(([path])=>String(path).endsWith('/second-chat/join'))).toHaveLength(1);
+ expect(history.length).toBeLessThanOrEqual(length+1);expect(push).toHaveBeenCalledOnce();push.mockRestore();expect(history.state.trail.at(-1)).toBe('second-chat');expect(await screen.findByRole('heading',{name:'Ana'})).toBeVisible();expect(await screen.findByRole('textbox',{name:'Mensaje'})).toBeEnabled();expect(screen.queryByRole('alert')).toBeNull();expect(fetcher.mock.calls.filter(([path])=>String(path).endsWith('/second-chat/status'))).toHaveLength(2);expect(fetcher.mock.calls.filter(([path])=>String(path).endsWith('/second-chat/join'))).toHaveLength(1);
 });
 
 it.each([[false,true],[true,true],[false,false],[true,false]])('keeps Scheduling labels metadata-bound with ownSubmitted=%s and partnerPending=%s',async(ownSubmitted,_partnerPending)=>{
