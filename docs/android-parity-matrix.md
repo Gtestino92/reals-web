@@ -1360,3 +1360,19 @@ Validation evidence:
 Diff summary: new `src/home/useSecondChatRestoration.ts`; Home/session handoff in `Home.tsx`, replace-only restoration in `useHomeNavigation.ts`; verified/uncertain exit policy and terminal audio reconciliation in `SecondChatSession.ts`/`SecondChat.tsx`; backend-compatible audio fixture; new `Home.secondRestoration.test.tsx` and `SecondChatSession.terminalAudio.test.ts`; one onboarding readiness assertion; persistent-auth/ownership fixture and reload/audio browser cases in `tools/second-chat-fixture.tsx`, `second-chat-synthetic.mjs`, `second-chat-browser.mjs`, new `second-chat-reload-browser-cases.mjs`, adjusted existing Home browser scenarios; this matrix. `useHome.ts`, App auth ownership, shared AudioComposer and backend contracts stay unchanged. No backend/Android/deployment edits, credentials read, personal data persistence, commit/push/merge/deploy.
 
 Limitations: simulated authentication/HTTP/scheduler and recorder, not live Firebase/backend transactions, a real microphone, physical Android/iOS or Android pixel comparisons. Interrupted/incomplete history reconciliation stays conservative as described above.
+
+
+### Browser identity assets and manifest (2026-11-16)
+
+Audit base: latest fetched Web HEAD and origin/feature/second-chat `339318b`. Existing uncommitted restoration/audio changes from the preceding task were present and preserved; this task changes no product flow. Android notification/seal, launcher/round launcher/adaptive foreground, adaptive icon background XML and Web theme tokens inspected read-only. Source hashes, transformations, stable URLs and reproduction commands: [browser identity](browser-identity.md).
+
+| Item | Scoped parity / evidence |
+| --- | --- |
+| Branding source | COMPLETE: existing Reals seal (byte-identical to Android large notification) and native xxxhdpi launcher. No new mark or monochrome status-icon substitution. Side-by-side 16/32 px review selected a tighter seal crop for tab legibility. |
+| Browser favicon | COMPLETE assets/declarations: optimized 16/32 PNG plus ICO with both frames. Chrome decoded assets; reviewed actual-size samples on light/dark backgrounds. PARTIAL native browser-chrome verification: Computer Use stopped because it could not determine the Windows browser URL confidently; no native-tab screenshot result claimed for normal/high DPI. |
+| Apple Touch and general app icons | COMPLETE assets/metadata: opaque 180, native launcher 192 with its original alpha corners, opaque 512 seal; typed manifest declarations. PLATFORM-LIMITED validation: no physical iOS/Android or OS install performed. |
+| Maskable icon | COMPLETE for generated asset: separate opaque 512 image; important ink/gold radius 184.2 px is inside the 204.8 px safe circle. Circle/rounded-square/square previews visually inspected. |
+| Manifest/theme/title | COMPLETE metadata: Reals names/title/product description; root id/start_url/scope; standalone; existing Ivory light and dark Ink HTML theme colors, static light manifest fallback. Dev/production HTTP status/MIME/path/dimension checks and Chrome manifest parsing pass. |
+| Offline/push/install interaction | OUTSIDE SCOPE: no Service Worker, caching, messaging, permissions, prompts or runtime dependencies added. Chrome reported no installability errors for this metadata; actual installation and platform-specific appearance are unverified. |
+
+This is a metadata/static-asset change: no stateful mutation paths, ownership/lifecycle changes, timers or API integrations. Prior Second Chat and authentication safeguards remain untouched. Full commands/results and remaining native-tab verification are recorded in the linked document.
