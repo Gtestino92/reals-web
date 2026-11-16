@@ -72,7 +72,7 @@ At 200% root text scaling activation top/bottom were 615.53/681.53 mobile and 56
 - `npm run typecheck`: PASS. `npm run check:architecture`: PASS, 83 production modules, zero runtime cycles.
 - `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/ux-audit/full-tests.json`: PASS, 1652/1652 tests, 68 files. Full suite run once.
 - `npm run build`: PASS, 128 transformed modules. Existing bundle-size advisory (>500 kB) remains; no runtime warning was silenced.
-- `node tools/ux-runtime-browser.mjs --before`: PASS at both widths. `node tools/ux-runtime-browser.mjs`: PASS at both widths, synthetic login/legal/create/slow write/validation/photo crop-upload/activation/Home/account/logout, zero captured diagnostics. Clicks use native CDP pointer events with hit testing; Enter uses native keyboard events. Form filling and file injection are synthetic.
+- `node tools/ux-runtime-browser.mjs --before`: PASS at both widths. `node tools/ux-runtime-browser.mjs`: originally reported PASS at both widths, synthetic login/legal/create/slow write/validation/photo crop-upload/activation/Home/account/logout, zero captured diagnostics. **Correction:** the committed scaling loop tested `overflow` on the result of `scrollTo`, not the measured object; that PASS did not establish the scaling-loop overflow assertion. See the independent-review correction below for the exact rerun and verified result. Clicks use native CDP pointer events with hit testing; Enter uses native keyboard events. Form filling and file injection are synthetic.
 - `node tools/visual-review-smoke.mjs`: PASS, 390/1440 widths and safety/ownership; zero diagnostics.
 - `node tools/scheduling-smoke.mjs`: PASS, 390/1440 widths plus DST/failure/block checks; zero diagnostics.
 - `node tools/first-chat-smoke.mjs`: PASS, send once/cleared draft at 390 and no overflow at 1280; zero diagnostics. Native headless MP4 recording not validated (zero-byte capture rejected).
@@ -93,3 +93,44 @@ Second-chat execution details and final diff review follow below. No live Fireba
 23 files: three production components (`ProfileForm`, `Onboarding`, `Home`), three regression-test files, three favicon assets, three docs and eleven browser/generation/fixture helpers. No dependency, backend contract, CSS token/layout system, manifest, installation asset or CI-suite change. `git diff --check`: PASS; changed text inspected for Spanish accents and mojibake. Android/backend working trees remain clean. No commit, push, PR, merge or deployment performed.
 
 Remaining validation is physical mobile toolbar/IME/safe-area behavior, full browser zoom (the executed 200% case scales text), assistive technology, real identity/mail/moderation/storage/scheduler/microphone, native-tab rendering and exhaustive Android screenshot/control parity. Backend deadlines are authoritative and unchanged; test success does not establish these unexecuted areas. Larger parity work stays in the existing matrix rather than this patch.
+
+
+## Independent-review corrections to e92ceeb
+
+Scope: only independent intention/interested-gender validation and the scaling-loop measurement assertion. Starting tree was clean on `feature/second-chat`; HEAD and available remote-tracking ref were `e92ceeb`. No backend, Android, assets, manifest or unrelated UX changes.
+
+### Confirmed validation defect and fix
+
+With all other fields valid and interested genders selected, leaving intention empty marked both controls invalid and focused the first checkbox. The inverse case also incorrectly marked a valid intention invalid. `contracts.ts` now emits independent errors for each condition; `ProfileForm.tsx` maps the interested-gender error only to that checkbox group. The allowed intention/gender enums, nonempty-interest requirement, normalization and payload structure are unchanged.
+
+| Path / invariant | Review |
+| --- | --- |
+| Create and filter validation | Invalid intention or interested genders independently block submission. Valid counterpart has neither invalid state nor error description; first invalid control retains focus and alert association. |
+| Corrected resubmission / saved profile | Existing saved choices remain intact; fixing the single missing field submits once with the same enum/list values. No auto-selection or payload change. |
+| Async/mutation ownership | No new requests, response-installation paths, timers or effects. Existing busy guard, synchronous owner lock, reconciliation and sign-out handling are unchanged. |
+
+Four focused regressions (each missing field independently, in create and filters modes) failed before the fix. They now assert focus, invalid/error-description isolation, no invalid write and exactly one corrected valid submission.
+
+### Exact Chromium execution and correction to prior evidence
+
+Before editing, the exact committed command `node tools/ux-runtime-browser.mjs` ran against Vite on `http://127.0.0.1:5174`: **exit code 0**, both viewports and both text sizes completed, zero captured diagnostics. Local native headless Chromium identifies itself as 157.0.0.0. A separate runtime probe observed that `scrollTo(0,0)` returns an object and, when awaited, resolves to `{interrupted:false}` here. Consequently `m.overflow` was undefined and silently skipped the intended check. On implementations returning undefined the same code would throw instead. The earlier PASS was therefore insufficient evidence for that assertion even though the script really exited successfully here.
+
+The fix obtains `m` directly from `measure('Activar perfil')` after scrolling; no assertion was removed. Running the exact edited repository command `node tools/ux-runtime-browser.mjs` again returned **exit code 0**. It completed login/legal/create/slow-write/validation/photo crop-upload/activation/Home/account/logout for both widths; diagnostics totals were empty. The existing viewport-bound checks also passed after scrolling each action into view.
+
+| Viewport / text size | Activation top / bottom at scroll zero | Measured overflow | Result |
+| --- | --- | --- | --- |
+| 390 x 844 / 100% | 350.25 / 394.25 | false | PASS |
+| 390 x 844 / 200% | 615.53 / 681.53 | false | PASS |
+| 1280 x 844 / 100% | 350.25 / 394.25 | false | PASS |
+| 1280 x 844 / 200% | 567.53 / 633.53 | false | PASS |
+
+Actual script JSON remains in ignored `artifacts/ux-audit/after-measurements.json`. Text scaling is still root-font enlargement, not physical keyboard/browser-toolbar testing or native browser zoom. This correction makes no new hardware or live-service parity claim.
+
+### Validation for these two fixes
+
+- `npm run test:focused -- src/onboarding/ProfileForm.test.tsx`: before fix, exit 1 (four new failures, 18 existing passes).
+- `npm run test:focused -- src/onboarding/ProfileForm.test.tsx src/onboarding/contracts.test.ts`: after fix, exit 0, 67/67 tests in two files.
+- `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/ux-audit/review-fixes-full-tests.json`: exit 0, 1656/1656 tests, 68 files; full suite run once for these corrections.
+- `npm run typecheck`: exit 0.
+- `npm run build`: exit 0, 128 transformed modules; existing >500 kB bundle advisory remains.
+- `git diff --check`: exit 0.

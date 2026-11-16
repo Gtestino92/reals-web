@@ -42,7 +42,7 @@ await withIdentityChrome(async ({ call, evaluate }) => {
     await evaluate('auditFixture.release()');await wait("!![...document.querySelectorAll('h2')].find(n=>n.textContent==='Completá tu perfil')&&!document.querySelector('.onboarding').getAttribute('aria-busy').includes('true')");
     await evaluate('scrollTo(0,0)');await measure('Activar perfil');
     if(phase==='after') {
-      for(const zoom of [1,2]) {await evaluate(`document.documentElement.style.fontSize='${zoom*100}%'`);await evaluate('scrollTo(0,0)');const m=await evaluate('scrollTo(0,0)');await measure('Activar perfil');if(m.overflow)throw Error('Horizontal overflow');await evaluate("[...document.querySelectorAll('button')].find(n=>n.textContent==='Activar perfil').scrollIntoView({block:'center'})");const reachable=await measure('Activar perfil');if(reachable.y<0||reachable.bottom>844)throw Error('Unreachable activation action');}
+      for(const zoom of [1,2]) {await evaluate(`document.documentElement.style.fontSize='${zoom*100}%'`);await evaluate('scrollTo(0,0)');const m=await measure('Activar perfil');if(m.overflow)throw Error('Horizontal overflow');await evaluate("[...document.querySelectorAll('button')].find(n=>n.textContent==='Activar perfil').scrollIntoView({block:'center'})");const reachable=await measure('Activar perfil');if(reachable.y<0||reachable.bottom>844)throw Error('Unreachable activation action');}
       await evaluate("document.documentElement.style.fontSize='100%'");
       const { root } = await call('DOM.getDocument');
       const { nodeId } = await call('DOM.querySelector',{nodeId:root.nodeId,selector:'.photo-slot input[type=file]'});

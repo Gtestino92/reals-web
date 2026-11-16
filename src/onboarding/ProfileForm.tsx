@@ -22,7 +22,7 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
     if (errors.length) form.current?.querySelector<HTMLElement>('[aria-invalid=true]')?.focus();
   }, [errors]);
   const invalidField = (key: keyof Fields) => {
-    const prefixes: Partial<Record<keyof Fields, string>> = { displayName: 'Nombre visible:', birthDate: 'Fecha de nacimiento:', city: 'Ciudad:', countryCode: 'Seleccioná un país', bio: 'Bio:', gender: 'Seleccioná un género', intention: 'Elegí una intención', lookingForGenders: 'Elegí una intención', preferredMinAge: 'Elegí edades', maxDistanceKm: 'Elegí edades' };
+    const prefixes: Partial<Record<keyof Fields, string>> = { displayName: 'Nombre visible:', birthDate: 'Fecha de nacimiento:', city: 'Ciudad:', countryCode: 'Seleccioná un país', bio: 'Bio:', gender: 'Seleccioná un género', intention: 'Elegí una intención', lookingForGenders: 'Elegí al menos un género', preferredMinAge: 'Elegí edades', maxDistanceKm: 'Elegí edades' };
     const invalid = errors.some(error => prefixes[key] && error.startsWith(prefixes[key]));
     return { name: key, 'aria-invalid': invalid || undefined, 'aria-describedby': invalid ? errorId : undefined };
   };

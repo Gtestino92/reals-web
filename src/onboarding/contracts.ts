@@ -80,7 +80,8 @@ export function validate(f: Fields, catalog: Country[], mode: 'create' | 'detail
     if (!genders.some(x => x === f.gender)) errors.push('Seleccioná un género válido.');
   }
   if (mode !== 'details') {
-    if (!intentions.some(x => x === f.intention) || !f.lookingForGenders.length || !f.lookingForGenders.every(x => genders.some(g => g === x))) errors.push('Elegí una intención y al menos un género que te interese.');
+    if (!intentions.some(x => x === f.intention)) errors.push('Elegí una intención válida.');
+    if (!f.lookingForGenders.length || !f.lookingForGenders.every(x => genders.some(g => g === x))) errors.push('Elegí al menos un género válido que te interese.');
     if (![f.preferredMinAge, f.preferredMaxAge, f.maxDistanceKm].every(Number.isInteger) || f.preferredMinAge < 18 || f.preferredMaxAge > 99 || f.preferredMinAge > f.preferredMaxAge || f.maxDistanceKm < 1 || f.maxDistanceKm > 100) errors.push('Elegí edades entre 18 y 99 y una distancia entre 1 y 100 km.');
   }
   return errors;
