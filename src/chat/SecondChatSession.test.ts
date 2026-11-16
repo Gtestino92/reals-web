@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { SecondChatSession } from './SecondChatSession';
+import { SecondChatSession, SecondChatEntryIntent } from './SecondChatSession';
 import { secondHarness } from './secondFixtures';
 import { messageFixture } from './fixtures';
 import { ApiError } from '../auth/api';
@@ -41,4 +41,52 @@ it('locks entry navigation synchronously through the status preflight',async()=>
  h.request.mockImplementation(async(...args)=>{if(args[0].endsWith('/status'))await new Promise<void>(r=>{finish=r;});return base(...args);});
  const entry=h.session.join();expect(h.session.getSnapshot().busy).toBe(true);await h.session.join();await h.session.action('block');expect(writes(h)).toHaveLength(0);
  await vi.waitFor(()=>expect(finish).toBeDefined());h.request.mockImplementation(base);finish?.();await entry;expect(writes(h)).toHaveLength(1);expect(h.session.getSnapshot().busy).toBe(false);
+});
+
+function entryHarness() {
+ const h=harness(); Object.assign(h.status,{canJoin:true,myAttendanceStatus:'PENDING',myJoinedAt:null});
+ const intent=new SecondChatEntryIntent(h.controller,'connection','m');
+ return {...h,intent};
+}
+it('consumes explicit entry once while blocked initially, serializing repeated clicks and reconciliation',async()=>{
+ const h=entryHarness(),base=h.request.getMockImplementation()!;let release!:()=>void;
+ h.request.mockImplementation(async(...args)=>{if(args[0].endsWith('/join')){await new Promise<void>(r=>{release=r;});h.status.canJoin=false;h.status.myAttendanceStatus='LATE';throw new ApiError('network');}return base(...args);});
+ const pending=h.session.openFromUserAction(h.intent);await vi.waitFor(()=>expect(release).toBeDefined());
+ await h.session.openFromUserAction(h.intent);await h.session.join();expect(writes(h)).toHaveLength(1);
+ release();await pending;await h.session.join();await h.session.openFromUserAction(h.intent);
+ expect(writes(h)).toHaveLength(1);expect(h.session.getSnapshot().status?.myAttendanceStatus).toBe('LATE');
+});
+it('does not join an already joined participant even with an inconsistent join flag',async()=>{
+ const h=entryHarness();h.status.myAttendanceStatus='ON_TIME';await h.session.openFromUserAction(h.intent);expect(writes(h)).toHaveLength(0);
+});
+it('uses authoritative cutoff reached after the explicit tap',async()=>{
+ const h=entryHarness();h.status.serverTime=h.status.entryClosesAt;await h.session.openFromUserAction(h.intent);expect(writes(h)).toHaveLength(0);
+});
+it('leaves a failed initial verification for manual recovery, never replaying the intent on reads',async()=>{
+ const h=entryHarness(),base=h.request.getMockImplementation()!;h.request.mockRejectedValue(new ApiError('network'));
+ await h.session.openFromUserAction(h.intent);expect(h.session.getSnapshot().blocked).toBe(true);
+ h.request.mockImplementation(base);await h.session.resume();await h.session.openFromUserAction(h.intent);expect(writes(h)).toHaveLength(0);
+ await h.session.join();expect(writes(h)).toHaveLength(1);
+});
+it.each(['logout','transfer','dispose'] as const)('cancels obsolete entry continuation on %s',async kind=>{
+ const h=entryHarness(),base=h.request.getMockImplementation()!;let release!:()=>void;
+ h.request.mockImplementation(async(...args)=>{if(args[0].endsWith('/status'))await new Promise<void>(r=>{release=r;});return base(...args);});
+ const pending=h.session.openFromUserAction(h.intent);await vi.waitFor(()=>expect(release).toBeDefined());
+ if(kind==='dispose')h.session.dispose();
+ else h.controller.snapshot={...h.controller.snapshot,...(kind==='logout'?{phase:'signingOut',account:null}:{account:{id:'replacement',status:'ACTIVE'}})};
+ release();await pending;expect(writes(h)).toHaveLength(0);expect(h.session.getSnapshot().status).toBeNull();
+});
+it('rejects entry capabilities belonging to another connection or ownership lifetime',async()=>{
+ const h=entryHarness();await h.session.openFromUserAction(new SecondChatEntryIntent(h.controller,'other','m'));expect(writes(h)).toHaveLength(0);h.request.mockClear();
+ h.controller.snapshot={...h.controller.snapshot,account:{id:'replacement',status:'ACTIVE'}};await h.session.openFromUserAction(h.intent);expect(h.request).not.toHaveBeenCalled();
+});
+
+it('auth notification cancels pending entry without freezing subsequent reads or replaying JOIN',async()=>{
+ const h=entryHarness(),base=h.request.getMockImplementation()!;let release!:()=>void;
+ h.request.mockImplementation(async(...args)=>{if(args[0].endsWith('/status'))await new Promise<void>(r=>{release=r;});return base(...args);});
+ const pending=h.session.openFromUserAction(h.intent);await vi.waitFor(()=>expect(release).toBeDefined());
+ await h.session.resume(); // foreground cannot abort or replace entry verification
+ h.controller.snapshot={...h.controller.snapshot,authContextVersion:(h.controller.snapshot.authContextVersion??0)+1};
+ release();await pending;expect(writes(h)).toHaveLength(0);expect(h.session.getSnapshot().busy).toBe(false);
+ h.request.mockImplementation(base);await h.session.resume();await h.session.refresh();await h.session.openFromUserAction(h.intent);expect(writes(h)).toHaveLength(0);expect(h.session.getSnapshot().blocked).toBe(false);
 });

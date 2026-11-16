@@ -965,7 +965,7 @@ The lifecycle is implemented across all functional sections; **overall Android p
 | Contextual time/duration/expiration copy | COMPLETE | Home presentation audit: contextual backend start, configured maximum duration, separate entryClosesAt/expiresAt copy, authoritative ON_TIME/LATE feedback, read-only retention text. Unit and Chromium 390/1280 px tests; exact glyph/device parity not claimed. |
 | Partner profile access | PARTIAL | Uses existing Scheduling partner-profile surface only for permitted active/waiting cards; no new dedicated end-to-end profile scenario. |
 | Home dismissal | COMPLETE | `useHome.ts` owns mutation/read fence and authoritative Home reload; `useHome.secondChat.test.tsx` covers success, uncertain result and duplicate exclusion. |
-| No automatic entry after Scheduling | COMPLETE | Scheduling unchanged; Second Chat is opened explicitly from Activity and has an explicit attendance button. Browser entry has an extra confirmation step relative to Android's immediate eligible card-entry join. |
+| No automatic entry after Scheduling | COMPLETE | Scheduling unchanged; explicit Home priority/Activity entry verifies status and joins when eligible. Passive reads/restoration never join. The manual attendance button remains for recovery; see direct-entry follow-up below. |
 | Validated lifecycle contract | COMPLETE | `chat/secondContracts.ts`; mandatory booleans, timestamps, identity, attendance, request roles and known statuses validated; malformed response tests. |
 | Early/on-time/late/cutoff admission | COMPLETE | `secondContracts.test.ts` covers before/at/after boundaries; joined attendance is server-provided; `SecondChatSession.test.ts` covers uncertain late admission reconciliation. |
 | Waiting and messaging without implied attendance | COMPLETE | `SecondChat.tsx`; policy/component tests and Chromium two-participant waiting scenario. No additional both-joined audio condition. |
@@ -1246,3 +1246,38 @@ Result: COMPLETE for these three spacing corrections. Scheduling.tsx groups meta
 COMPLETE for the scoped synthetic availability flow: Android HomeCoordinator status-first polling and HomePendingScreens summary/detail presentation match Web discovery at serverTime >= nextRefreshAt. Thirteen controlled-clock scenarios and native Chromium five-second polling verify Home/Activity discovery, hidden/resume, stale responses, concurrent reads and recovery. No production behavior changed. Live production reproduction and physical-device parity remain unverified. See [investigation and diagnostic checklist](home-availability-investigation.md).
 
 Delivery review integrates `origin/main` `8d8cde6` by fast-forward, preserves its browser-runner correction, fixes fixture summary/catalog consistency and makes native tab cleanup tolerate socket closure before command acknowledgment. Final full suite **1601/1601 PASS in 65 files**; focused Home/polling **103/103 PASS**; native availability browser PASS; complete Second Chat regression **540 checks / 40 combinations PASS**. Typecheck, build, architecture (82 modules, zero cycles), diff and UTF-8 checks PASS. No application production logic or backend/Android source changed; the original onboarding timeout did not recur and no timeout was altered. Exact evidence and the original investigation result remain linked above.
+
+
+### Direct Second Chat entry follow-up (2026-11-16)
+
+Scope/base: clean `feature/second-chat`, HEAD and `origin/feature/second-chat` both `835114d`. No local/remote `development` reference is available in Web. Android/backend remain read-only; no contract changes. Android references: `RealsRootViewModel.openSecondChat` (public explicit tap passes `joinIfAllowed = true`, restored entry passes false), `SecondChatCoordinator.load/openFromStatus/refresh` (status before JOIN, refresh passes false), `SecondChatTimingPresentationTest` (status receipt, JOIN success/failure and stale Home cutoff), `SecondChatCoordinatorTest`. Backend: [authoritative Second Chat endpoints](../../reals-backend/docs/commons/api.md), status and JOIN; the earlier full Second Chat audit above remains applicable.
+
+| Relevant behavior | Before | Result / implementation and evidence |
+| --- | --- | --- |
+| Available Home priority and Activity tap | PARTIAL: extra confirmation | COMPLETE: `Home.tsx` creates a memory-only `SecondChatEntryIntent` only after accepted explicit navigation. `SecondChat.tsx` passes it to `SecondChatSession.openFromUserAction`; fresh status gates the existing JOIN/write/reconciliation lane. Integration tests cover both CTA paths and synchronous repeated clicks. |
+| Starting soon / existing attendance | COMPLETE | Preserved: soon opens Activity, existing attendance opens conversation without POST. Status attendance must be PENDING as well as authoritative canJoin and timing eligibility. Tests cover stale cutoff and already joined. |
+| Passive navigation, polling, reload, resume, auth notification | COMPLETE | Intent never enters URL/history/storage. Passive paths only refresh. Consumed intent cannot replay. An auth-context change during preflight cancels JOIN; later reads remain usable. Tests cover reload-style remount, polling/resume and auth notification. |
+| Errors and retry | COMPLETE | Failed verification consumes intent; no automatic JOIN loop. Accessible existing manual entry and connection retry remain. Uncertain JOIN goes through post-write reconciliation before a manual retry can POST. |
+| State/lifecycle/navigation | COMPLETE for direct-entry scope | Existing attendance, expiry, no-show, read-only and tab/history guards retained. StrictMode defers work until effect setup survives cleanup. Disposal, identity replacement and sign-out reject obsolete responses. |
+| Visual structure, gestures, keyboard/focus, mobile/desktop | COMPLETE for unchanged entry surface | No styling, gestures or layouts changed. Existing focus and semantic buttons retained. Synthetic Chromium covers 390/1280 px, history and 200% text. Whole-screen pixel identity and physical-device parity remain subject to the earlier audit limitations. |
+
+Mutation/response review (all new paths):
+
+| Path | Invariant / ownership / response installation |
+| --- | --- |
+| Accepted explicit tap | One capability per accepted navigation, controller, account/auth context, connection and match. Repeated navigation rejected synchronously by existing router. No capability for automatic navigation. |
+| Initial entry and manual JOIN | Both reserve `entering`/busy before status verification. Only the explicit capability can bypass initial blocked state, and only to read status. Resume cannot interrupt preflight. Polling cannot release mutation ownership. Fresh verified PENDING + canJoin + window required before existing serialized write. |
+| POST and reconciliation | Existing write generation, abort signal, busy/blocked fields and authoritative reload unchanged. Ambiguous result reconciles without automatic replay; manual retry re-verifies. Failed reconciliation blocks writes until a successful read. |
+| Cancellation / cleanup | Intent consumed once even on failure. Effect cleanup cancels deferred setup and disposes session; lifetime/generation/identity reject obsolete reads and writes. Auth-context change during verification cancels pending JOIN without disabling future same-account reads. No local lifecycle transition invented. |
+
+Diff: Home intent plumbing; SecondChat deferred entry setup; session one-shot capability and shared verified entry lane; focused session/component/Home regressions; synthetic Chromium entry, auth/reload and navigation scenarios. No backend/Android/environment edits or new dependencies.
+
+Validation (final):
+
+- `npm run test:focused -- src/chat/SecondChatSession.test.ts src/chat/SecondChat.test.tsx src/home/Home.test.tsx src/home/HomeSecondPresentation.test.tsx src/home/useHomeNavigation.test.tsx`: PASS, 153 tests / 5 files. After correcting the new test's ellipsis literal, `npm run test:focused -- src/chat/SecondChat.test.tsx`: PASS, 5 tests.
+- `npm test`: final PASS, 1612 tests / 65 files. An earlier concurrent validation run timed out in the unchanged onboarding test `edits and resaves outdated answers...` (5000 ms); repeating the full suite without concurrent Chromium passed. No timeout/config changes made.
+- `npm run typecheck`: PASS; `npm run check:architecture`: PASS, 82 production modules / zero runtime cycles; `npm run build`: PASS (also runs typecheck), existing bundle-size warning above 500 kB.
+- `npm run dev -- --host 127.0.0.1 --port 5175`, `node tools/second-chat-browser.mjs`: PASS, 42 scenario/viewport combinations, 542 checks. After adding explicit auth notification/reload assertions, `node tools/second-chat-browser.mjs --home-only`: PASS, 16 combinations, 148 checks. Widths 390/1280 px. Auth notification remounts synthetic authenticated Home; actual browser reload returns to login because fixture authentication is not persisted. Authenticated remount without an intent is separately tested in jsdom.
+- `git diff --check`: PASS. Changed text scanned for replacement characters/mojibake; UTF-8 and existing Spanish retained.
+
+Browser coverage uses synthetic HTTP and auth; no real backend/Firebase, physical device, production transaction, Android screenshot comparison or microphone result is claimed. No visual redesign was made. Broader parity gaps from the earlier audit remain outside this entry fix. No credentials or `.env.local` values were read. No commit, push or deployment.

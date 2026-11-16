@@ -1,4 +1,6 @@
-﻿import { expect, it, vi } from 'vitest';
+﻿import { StrictMode } from 'react';
+import { SecondChatEntryIntent } from './SecondChatSession';
+import { expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SecondChat } from './SecondChat';
 import { secondHarness } from './secondFixtures';
@@ -7,3 +9,14 @@ it('renders joined waiting and no First Chat decisions or guidance',async()=>{co
 it('only responder sees completion decisions; preserves text composer during request',async()=>{const h=secondHarness();h.status.activeResolutionRequest={id:'r',type:'MUTUAL_COMPLETION',status:'PENDING',requesterUserId:'them',responderUserId:'me',referenceMessageId:null,createdAt:h.status.serverTime,expiresAt:'2026-11-13T12:13:00Z'};render(<SecondChat controller={h.controller} connectionId="connection" matchId="m" onHome={vi.fn()}/>);expect(await screen.findByRole('button',{name:'Finalizar el chat'})).toBeEnabled();expect(screen.getByRole('textbox',{name:'Mensaje'})).toBeEnabled();fireEvent.click(screen.getByRole('button',{name:'Seguir conversando'}));await waitFor(()=>expect(h.request.mock.calls.some(c=>c[0].endsWith('/r/decision')&&JSON.stringify(c[3]).includes('REJECTED'))).toBe(true));});
 it('renders retained messages without composition or new reactions',async()=>{const h=secondHarness();h.status.chatStatus='FINISHED';h.status.readOnlyUntil='2026-11-13T15:00:00Z';h.messages.push(messageFixture());render(<SecondChat controller={h.controller} connectionId="connection" matchId="m" onHome={vi.fn()}/>);await screen.findByText('Hola, ¿cómo estás?');expect(screen.queryByRole('textbox')).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'Volver a Inicio'})).toBeEnabled();});
 it('safety report and manual blocking keep separate endpoints and dialogs',async()=>{const h=secondHarness();render(<SecondChat controller={h.controller} connectionId="connection" matchId="m" onHome={vi.fn()}/>);await screen.findByRole('textbox',{name:'Mensaje'});fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));fireEvent.click(screen.getByRole('menuitem',{name:'Reportar por seguridad'}));fireEvent.change(await screen.findByRole('textbox',{name:'Detalle'}),{target:{value:'Conducta inapropiada'}});fireEvent.click(screen.getByRole('button',{name:'Confirmar'}));await waitFor(()=>expect(h.request.mock.calls.some(c=>c[0]==='/chats/c/safety-cancellations'&&JSON.stringify(c[3]).includes('blockUser'))).toBe(true));});
+
+it('survives StrictMode effect replay with exactly one explicit entry and no join on remount without intent',async()=>{
+ const h=secondHarness();Object.assign(h.status,{canJoin:true,myAttendanceStatus:'PENDING',myJoinedAt:null});
+ const intent=new SecondChatEntryIntent(h.controller,'connection','m');
+ const view=render(<StrictMode><SecondChat controller={h.controller} connectionId="connection" matchId="m" entryIntent={intent} onHome={vi.fn()}/></StrictMode>);
+ await waitFor(()=>expect(h.request.mock.calls.filter(c=>c[0].endsWith('/join'))).toHaveLength(1));
+ await waitFor(()=>expect(screen.queryByText('Procesando…')).toBeNull());
+ view.unmount();h.request.mockClear();render(<SecondChat controller={h.controller} connectionId="connection" matchId="m" onHome={vi.fn()}/>);
+ await screen.findByRole('button',{name:'Entrar al segundo chat'});fireEvent(window,new Event('online'));fireEvent(document,new Event('visibilitychange'));
+ await waitFor(()=>expect(h.request.mock.calls.filter(c=>c[0].endsWith('/status')).length).toBeGreaterThan(0));expect(h.request.mock.calls.some(c=>c[0].endsWith('/join'))).toBe(false);
+});

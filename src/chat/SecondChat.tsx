@@ -1,7 +1,7 @@
 import type { HomeNavigation } from '../home/useHomeNavigation';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { SessionController } from '../auth/session';
-import { SecondChatSession } from './SecondChatSession';
+import { SecondChatSession, type SecondChatEntryIntent } from './SecondChatSession';
 import { secondPresentation } from './secondContracts';
 import { plainText, reactable, type Message } from './contracts';
 import { AudioComposer } from './AudioComposer';
@@ -25,13 +25,13 @@ function ResolutionDialog({ kind, busy, close, confirm }: { kind: 'completion' |
     <button disabled={busy} onClick={close}>Cancelar</button><button disabled={busy} onClick={confirm}>{kind === 'completion' ? 'Enviar solicitud' : 'Enviar reclamo'}</button>
   </dialog>;
 }
-export function SecondChat({ controller, connectionId, matchId, onHome, navigation }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation }) {
+export function SecondChat({ controller, connectionId, matchId, onHome, navigation, entryIntent }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation; entryIntent?: SecondChatEntryIntent | undefined }) {
   const identity = useSyncExternalStore(controller.subscribe,controller.getSnapshot);
   const [owner] = useState(() => ({ id: identity.account?.id, controller }));
   if (identity.phase !== 'ready' || identity.account?.id !== owner.id || controller !== owner.controller) return null;
-  return <SecondChatView controller={controller} connectionId={connectionId} matchId={matchId} onHome={onHome} {...(navigation ? { navigation } : {})}/>;
+  return <SecondChatView controller={controller} connectionId={connectionId} matchId={matchId} onHome={onHome} entryIntent={entryIntent} {...(navigation ? { navigation } : {})}/>;
 }
-function SecondChatView({ controller, connectionId, matchId, onHome, navigation }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation }) {
+function SecondChatView({ controller, connectionId, matchId, onHome, navigation, entryIntent }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation; entryIntent?: SecondChatEntryIntent | undefined }) {
   const [session] = useState(() => new SecondChatSession(controller,connectionId,matchId,controller.snapshot.account?.id ?? ''));
   const state = useSyncExternalStore(session.subscribe,session.getSnapshot);
   const [,tick] = useState(0), [draft,setDraft] = useState(''), [reply,setReply] = useState<NonNullable<Message['replyTo']> | null>(null);
@@ -40,12 +40,16 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation 
   const coach = useRef<{ previous: boolean | null; shown: boolean }>({ previous: null, shown: false });
   const timeline = useRef<HTMLOListElement>(null), atBottom = useRef(true), input = useRef<HTMLTextAreaElement>(null), heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    session.start(); void session.refresh(); heading.current?.focus();
+    session.start();
+    // Defer until setup survives StrictMode cleanup, before consuming the one-shot intent.
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) { if (entryIntent) void session.openFromUserAction(entryIntent); else void session.refresh(); } });
+    heading.current?.focus();
     const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void session.refresh(false,true); },2500);
     const clock = window.setInterval(() => tick(v => v+1),500);
     const resume = () => { if (document.visibilityState === 'visible') void session.resume(); };
     window.addEventListener('online',resume); document.addEventListener('visibilitychange',resume);
-    return () => { clearInterval(timer); clearInterval(clock); window.removeEventListener('online',resume); document.removeEventListener('visibilitychange',resume); session.dispose(); };
+    return () => { cancelled = true; clearInterval(timer); clearInterval(clock); window.removeEventListener('online',resume); document.removeEventListener('visibilitychange',resume); session.dispose(); };
   },[session]);
   const s = state.status, p = session.rules, now = session.now;
   const presentation = secondPresentation(s,now);

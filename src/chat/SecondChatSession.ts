@@ -3,6 +3,21 @@ import type { SessionController } from '../auth/session';
 import { mergeMessages, parseMessage, plainText, reactable, reactionCursor, str, type Message, type Reply } from './contracts';
 import { messageRequest, type Outgoing } from './messageRequest';
 import { parseSecondStatus, secondPolicy, type SecondStatus } from './secondContracts';
+/** Memory-only capability created by a successful explicit navigation; never persisted in history. */
+export class SecondChatEntryIntent {
+  private consumed = false;
+  private readonly owner;
+  constructor(private controller: SessionController, private connectionId: string, private matchId: string) {
+    const snapshot = controller.getSnapshot();
+    this.owner = { id: snapshot.account?.id, version: snapshot.authContextVersion };
+  }
+  consume(controller: unknown, connectionId: string, matchId: string, me: string) {
+    const current = this.controller.getSnapshot();
+    if (this.consumed || controller !== this.controller || connectionId !== this.connectionId || matchId !== this.matchId || current.phase !== 'ready' || current.account?.id !== me || current.account?.id !== this.owner.id || current.authContextVersion !== this.owner.version) return false;
+    this.consumed = true;
+    return true;
+  }
+}
 interface State {
   returnHome: string | null; status: SecondStatus | null; receivedAt: number; messages: Message[]; partnerId: string; partnerName: string;
   retryBlocked: boolean; busy: boolean; blocked: boolean; error: string; outgoing: Outgoing | null; confirmed: Outgoing | null; confirmationVersion: number; historyLimited: boolean;
@@ -86,7 +101,7 @@ export class SecondChatSession {
     catch { if (this.current(g,signal)) this.install({ blocked: true, error: 'No pudimos actualizar el chat. Revisá tu conexión y reintentá.' }); }
     finally { if (g === this.generation) { this.read = null; this.readTask = null; } }
   };
-  resume = () => { if (this.writing) return; this.read?.abort(); this.read = null; return this.refresh(); };
+  resume = () => { if (this.writing || this.entering) return; this.read?.abort(); this.read = null; return this.refresh(); };
   private async write(path: string, method: string, body?: unknown, outgoing?: Outgoing) {
     if (this.writing || this.lifetime.signal.aborted) return;
     this.writing = true; this.read?.abort(); this.read = null;
@@ -141,19 +156,25 @@ export class SecondChatSession {
     return this.allowed && this.rules.active && !this.rules.expired;
   };
   private get allowed() { return !this.retired && this.identityCurrent() && !this.entering && !this.writing && !this.state.blocked && !this.lifetime.signal.aborted; }
-  join = async () => {
-    if (!this.allowed || this.state.outgoing) return;
-    const lifetime = this.lifetime;
+  openFromUserAction = (intent: SecondChatEntryIntent) => {
+    if (this.retired || !this.identityCurrent() || this.lifetime.signal.aborted) return;
+    if (!intent.consume(this.controller,this.connectionId,this.matchId,this.me)) return this.refresh();
+    return this.enter(true);
+  };
+  join = () => this.enter(false);
+  private async enter(initial: boolean) {
+    if (this.entering || this.writing || this.retired || !this.identityCurrent() || this.lifetime.signal.aborted || (!initial && !this.allowed) || this.state.outgoing) return;
+    const lifetime = this.lifetime, ownershipVersion = this.controller.getSnapshot?.().authContextVersion;
     this.entering = true; this.read?.abort(); this.read = null; this.install({ busy: true });
     try {
       await this.refresh();
-      if (lifetime !== this.lifetime || lifetime.signal.aborted) return;
+      if (lifetime !== this.lifetime || lifetime.signal.aborted || ownershipVersion !== this.controller.getSnapshot?.().authContextVersion) return;
       this.entering = false;
-      if (this.allowed && this.rules.canJoin) await this.write(`/connections/${this.connectionId}/second-chat/join`,'POST');
+      if (this.allowed && this.rules.canJoin && this.state.status?.myAttendanceStatus === 'PENDING') await this.write(`/connections/${this.connectionId}/second-chat/join`,'POST');
     } finally {
-      if (lifetime === this.lifetime && !lifetime.signal.aborted) { this.entering = false; if (!this.writing) this.install({ busy: false }); }
+      if (lifetime === this.lifetime && !lifetime.signal.aborted && this.identityCurrent()) { this.entering = false; if (!this.writing) this.install({ busy: false }); }
     }
-  };
+  }
   send(content: string, replyTo: Reply | null, file: Blob | null = null) {
     const a = this.state.status?.audioPolicy;
     if (!this.allowed || !this.rules.writable || this.state.outgoing || (file ? !a?.enabled || a.remainingMessages === 0 || file.type !== 'audio/mp4' || file.size > a.maxFileSizeBytes : !plainText(content))) return;

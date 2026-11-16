@@ -18,6 +18,7 @@ controller.request = async (path, signal, method = 'GET', body) => {
 };
 Object.assign(window, { fixture: {
   setTime: (time: number) => { Date.now = () => time; document.dispatchEvent(new Event('visibilitychange')); },
+  notifyAuth: () => { controller.snapshot = { ...controller.snapshot, authContextVersion: (controller.snapshot.authContextVersion ?? 0) + 1 }; listeners.forEach(fn => fn()); },
   invalidate: () => { controller.snapshot = { ...controller.snapshot, phase: 'signingOut', account: null, authContextVersion: 10 }; listeners.forEach(fn => fn()); },
   replace: () => { controller.snapshot = { ...controller.snapshot, account: { id: 'replacement', status: 'ACTIVE' }, authContextVersion: 11 }; listeners.forEach(fn => fn()); },
 } });

@@ -42,12 +42,12 @@ try{
   if(process.argv.includes('--home-only'))continue;
   await run('available-and-scheduled',width,{joined:new Set(),status:'AVAILABLE'},async({a,b,s})=>{
    await open(a);await open(b);await assert(a,"!document.querySelector('.second-chat').innerText.match(/ya no está activo|no está disponible para lectura/)");
-   s.scheduled=s.now+60000;await refresh(a);await assert(a,"document.querySelector('.second-chat').innerText.includes('Todavía no está disponible')");await assert(a,"!document.querySelector('.second-chat').innerText.match(/ya no está activo|no está disponible para lectura/)");
-   await refresh(b);await assert(b,"!document.querySelector('.second-chat').innerText.includes('ya no está activo')");
+   await wait(a,"!!document.querySelector('#second-draft')");await wait(b,"!!document.querySelector('#second-draft')");if(s.writes.filter(w=>w.path.endsWith('/join')).length!==2)throw Error('Explicit entries must JOIN once each');checks++;
+
   });
   await run('no-show-concurrent-join',width,{joined:new Set(['a'])},async({a,b,s})=>{
-   await open(a);await open(b);const gate={path:'/connections/connection/second-chat/no-show-claims'};s.gate=gate;
-   await click(a,'Bruno no se presentó');while(!gate.started)await new Promise(r=>setTimeout(r,10));await click(b,'Entrar al segundo chat');await wait(b,"!!document.querySelector('#second-draft')");gate.release();await refresh(a);await assert(a,"!document.querySelector('.second-chat').innerText.includes('Reclamo por ausencia pendiente') && !document.querySelector('.second-chat').innerText.includes('Esperando a')");
+   await open(a);const gate={path:'/connections/connection/second-chat/no-show-claims'};s.gate=gate;
+   await click(a,'Bruno no se presentó');while(!gate.started)await new Promise(r=>setTimeout(r,10));await open(b);await wait(b,"!!document.querySelector('#second-draft')");gate.release();await refresh(a);await assert(a,"!document.querySelector('.second-chat').innerText.includes('Reclamo por ausencia pendiente') && !document.querySelector('.second-chat').innerText.includes('Esperando a')");
    if(s.claim||s.status!=='ACTIVE'||s.joined.size!==2)throw Error('Join/claim race');checks++;
   });
   await run('no-show-countdown-hard-cutoff',width,{joined:new Set(['a'])},async({a,b,s})=>{
@@ -64,7 +64,7 @@ try{
   });
   await run('block-home-with-inaccessible-chat',width,{},async({a,b})=>{await open(a);await open(b);await safety(a,'block');await history(a,-1);await history(a,1);await assert(a,"!document.querySelector('.second-chat')");});
   await run('active-back-cutoff-forward',width,{joined:new Set(['a'])},async({a,b,s})=>{
-   await open(a);await open(b);const length=await a.evaluate('history.length');await history(a,-1);await assert(a,"!!document.querySelector('.second-chat') && history.state.trail.at(-1)==='second-chat'");if(await a.evaluate('history.length')!==length)throw Error('History grew');checks++;
+   await open(a);const length=await a.evaluate('history.length');await history(a,-1);await assert(a,"!!document.querySelector('.second-chat') && history.state.trail.at(-1)==='second-chat'");if(await a.evaluate('history.length')!==length)throw Error('History grew');checks++;
    s.now=s.scheduled+15*60000;await refresh(a);await assert(a,"!![...document.querySelectorAll('.second-chat button')].find(b=>b.textContent==='Volver a Inicio')");await history(a,-1);await assert(a,"!document.querySelector('.second-chat')");await history(a,1);await assert(a,"!document.querySelector('.second-chat')");
   });
   await run('absolute-expiry-home',width,{},async({a,b,s})=>{await open(a);await open(b);s.now=s.scheduled+120*60000;await refresh(a);await assert(a,"!document.querySelector('.second-chat') && document.body.innerText.includes('El segundo chat venció.')");});
