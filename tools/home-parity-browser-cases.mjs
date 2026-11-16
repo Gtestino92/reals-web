@@ -1,0 +1,30 @@
+﻿// Home presentation uses frozen client time; server metadata stays unchanged unless
+// explicitly replaced. No production services or real accounts are involved.
+export async function runHomeCases(width,{run,click,assert,refresh,history,pageTime}) {
+  const visiblePriority="[...document.querySelectorAll('[aria-label=\"Prioridad ahora\"]')].find(n=>!n.closest('[hidden]'))";
+  const ready=async p=>assert(p,"!!document.querySelector('.home:not([hidden]) button[aria-label=\"Ver Actividad\"]:not(:disabled)')");
+  const setTime=async(p,s,time)=>{s.now=time;for(let i=0;i<100;i++){if(await p.evaluate('!!window.fixture')){await pageTime(p,time);return;}await new Promise(r=>setTimeout(r,50));}throw Error('Fixture initialization timeout');};
+  await run('home-starting-soon-and-stale-scheduled',width,{joined:new Set(),status:'AVAILABLE',homeType:'SECOND_CHAT_SCHEDULED'},async({a,b,s})=>{
+    s.scheduled=s.now+16*60000;await refresh(a);await refresh(b);await ready(a);await ready(b);await setTime(a,s,s.scheduled-15*60000-1);await assert(a,`!${visiblePriority}`);
+    await setTime(a,s,s.scheduled-15*60000);await assert(a,`!!${visiblePriority}`);await click(a,'Ver en Actividad');await assert(a,"!![...document.querySelectorAll('h2')].find(n=>n.textContent==='Actividad'&&!n.closest('[hidden]'))");await assert(a,"!![...document.querySelectorAll('button')].find(n=>n.textContent.startsWith('Disponible a las')&&n.disabled)");await click(a,'Volver a Inicio');await ready(a);
+    await setTime(a,s,s.scheduled-1);await assert(a,`!!${visiblePriority}?.innerText.includes('Ver en Actividad')`);await setTime(a,s,s.scheduled);await assert(a,`!!${visiblePriority}?.innerText.includes('Entrar al chat')`);
+    const length=await a.evaluate('history.length');await a.evaluate(`(()=>{const b=${visiblePriority}.querySelector('button');b.click();b.click();})()`);await assert(a,"!!document.querySelector('.second-chat')");await assert(a,"!!document.querySelector('.second-chat button') && history.state.trail.at(-1)==='second-chat'");if(await a.evaluate('history.length')>length+1)throw Error('Repeated priority click grew history');if(s.writes.length)throw Error('Home priority issued JOIN');
+    await history(a,-1);await assert(a,"!document.querySelector('.second-chat')");await history(a,1);await assert(a,"!document.querySelector('.second-chat')");
+  });
+  await run('home-unjoined-exact-entry-cutoff',width,{joined:new Set(),status:'AVAILABLE',homeType:'SECOND_CHAT_AVAILABLE'},async({a,b,s})=>{
+    const cutoff=s.scheduled+15*60000;await setTime(a,s,cutoff-1);await ready(a);await assert(a,`!!${visiblePriority}?.innerText.includes('Entrar al chat')`);
+    // Freeze while backgrounded, then resume: the timer must not preserve a stale CTA.
+    await b.call('Page.bringToFront');await setTime(a,s,cutoff);await a.call('Page.bringToFront');await assert(a,`!${visiblePriority}`);await click(a,'Ver Actividad');await assert(a,"document.body.innerText.includes('La ventana para entrar terminó.')");await assert(a,"![...document.querySelectorAll('button')].some(b=>b.textContent==='Entrar al segundo chat'&&!b.closest('[hidden]'))");if(s.status!=='AVAILABLE'||s.joined.size||s.writes.length)throw Error('Presentation synthesized attendance/lifecycle');
+  });
+  for(const attendance of ['ON_TIME','LATE']) await run(`home-${attendance}-cutoff-and-absolute`,width,{status:'ACTIVE',attendance:{a:attendance}},async({a,b,s})=>{
+    const cutoff=s.scheduled+15*60000,expiry=s.scheduled+120*60000;await setTime(a,s,cutoff);await ready(a);await assert(a,`!!${visiblePriority}?.innerText.includes('Entrar al chat')`);await click(a,'Ver Actividad');await assert(a,"!document.body.innerText.includes('Llegaste')");await assert(a,"!![...document.querySelectorAll('button')].find(b=>b.textContent==='Entrar al segundo chat'&&!b.disabled)");await assert(a,"!document.body.innerText.includes('Entrada permitida hasta')");await click(a,'Volver a Inicio');await ready(a);
+    await setTime(a,s,expiry-1);await assert(a,`!!${visiblePriority}?.innerText.includes('Entrar al chat')`);await setTime(a,s,expiry);await assert(a,`!${visiblePriority}`);await click(a,'Ver Actividad');await assert(a,"document.body.innerText.includes('Terminó el tiempo máximo del segundo chat.')");if(s.status!=='ACTIVE'||s.writes.length)throw Error('Home synthesized terminal state');await ready(b);
+  });
+  await run('home-retention-cutoff-copy',width,{status:'FINISHED'},async({a,b,s})=>{
+    s.retention=s.now+60000;await refresh(a);await ready(a);await click(a,'Ver Actividad');await setTime(a,s,s.retention-1);await assert(a,"!![...document.querySelectorAll('button')].find(b=>b.textContent==='Ver segundo chat'&&!b.disabled)");await setTime(a,s,s.retention);await assert(a,"document.body.innerText.includes('El período de solo lectura terminó.')");await assert(a,"![...document.querySelectorAll('button')].some(b=>b.textContent==='Ver segundo chat'&&!b.closest('[hidden]'))");if(s.status!=='FINISHED'||s.writes.length)throw Error('Retention timer changed domain');await ready(b);
+  });
+  await run('home-scheduling-label-contract',width,{scheduling:true,requiresAction:true},async({a,b,s})=>{
+    await ready(a);await ready(b);await click(a,'Ver Actividad');await assert(a,"!![...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Elegir horarios'&&!b.disabled)");s.requiresAction=false;await refresh(b);await click(b,'Ver Actividad');await assert(b,"!![...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Ver coordinación'&&!b.disabled)");await assert(b,"!document.body.innerText.includes('Esperando respuesta.')");if(s.writes.length)throw Error('Scheduling Home mutated');
+  });
+  await run('home-priority-large-font',width,{status:'ACTIVE'},async({a,b})=>{for(const p of[a,b]){await ready(p);await p.evaluate("document.documentElement.style.fontSize='200%'");await assert(p,'document.documentElement.scrollWidth<=innerWidth');await assert(p,`!!${visiblePriority}?.innerText.includes('Entrar al chat')`);}});
+}

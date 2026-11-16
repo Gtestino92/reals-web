@@ -22,8 +22,8 @@ try {
   await mkdir('artifacts/scheduling',{recursive:true});
   const screenshot=async name=>writeFile('artifacts/scheduling/'+name+'.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
   await evaluate(`(async()=>{
-    const React=await import('/node_modules/.vite/deps/react.js'),ReactDOM=await import('/node_modules/.vite/deps/react-dom_client.js');const {Home}=await import('/src/home/Home.tsx');const {ApiError}=await import('/src/auth/api.ts');await import('/src/styles/tokens.css');await import('/src/styles/global.css');
-    document.body.innerHTML='<main class="login-page"><div class="login-panel"><div id="probe"></div></div></main>';
+    const React=await import('/node_modules/.vite/deps/react.js'),ReactDOM=await import('/node_modules/.vite/deps/react-dom_client.js');const {Home}=await import('/src/home/Home.tsx');const {ApiError}=await import('/src/auth/api.ts');await import('/src/styles/tokens.css');await import('/src/styles/global.css');await import('/src/auth/login.css');
+    document.body.innerHTML='<main class="login-page"><div class="login-panel"><header class="login-header session-header"><div class="login-brand"><img class="login-seal" src="/src/assets/reals-seal.png" alt="" width="54" height="54"><h1>Reals</h1><div class="brand-divider"><span></span></div></div></header><div id="probe"></div></div></main>';
     const snapshot={phase:'ready',authContextVersion:1,account:{id:'me'},profile:{id:'profile',userId:'me',status:'ACTIVE',displayName:'Lucia'}};
     window.reads=[];window.holdPoll=false;window.holdWrite=false;window.writes=[];window.rev=1;window.uncertain=false;window.fail=false;
     const stamp=new Date().toISOString(),end=new Date(Date.now()+86400000).toISOString();
@@ -50,12 +50,16 @@ try {
     await waitFor("!!document.querySelector('[aria-label=\"Ver Actividad\"]')",'Home');
     await evaluate("document.querySelector('.home-activity-entry[aria-label]').click()");await delay(200);await clickText('Elegir horarios');await waitFor("!!document.querySelector('select')",'picker');
     check(await evaluate("document.querySelector('select').options.length===7&&document.documentElement.scrollWidth<=innerWidth"),'seven days and no overflow '+width);
+    check(await evaluate("(()=>{const lines=[...document.querySelector('.scheduling-meta').children].filter(e=>e.tagName==='P'||e.tagName==='SPAN').map(e=>e.getBoundingClientRect());return lines.length===3&&lines.slice(1).every((r,i)=>r.top-lines[i].bottom>=3&&r.top-lines[i].bottom<=5);})()"),'partner round and deadline use compact spacing '+width);
+    check(await evaluate("document.querySelector('.scheduling').getBoundingClientRect().top-document.querySelector('.session-header').getBoundingClientRect().bottom>=24"),'scheduling title separated from brand header '+width);
+    await evaluate('scrollTo(0,0)');await screenshot('heading-'+width);
+    check(await evaluate("(()=>{const picker=document.querySelector('.scheduling fieldset'),heading=picker.nextElementSibling;return heading.tagName==='H4'&&heading.getBoundingClientRect().top-picker.getBoundingClientRect().bottom>=24;})()"),'selected options separated from picker '+width);
     await clickText('Agregar opci'+String.fromCharCode(243)+'n');check(await evaluate("!!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Enviar horarios'&&!b.disabled)"),'draft enables submission '+width);
     await evaluate("holdPoll=true;releasePoll=null;dispatchEvent(new Event('online'))");await waitFor("typeof releasePoll==='function'",'slow poll started');
     check(await evaluate("!document.querySelector('select').disabled&&!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Enviar horarios').disabled&&!document.body.innerText.includes('Actualizando')"),'slow poll keeps actions enabled without flicker '+width);
     await clickText('Ver perfil');await waitFor("document.body.innerText.includes('Synthetic profile')",'browse profile');check(await evaluate("!Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Aprobar')"),'Browse has no decisions '+width);
     await evaluate('history.back()');await waitFor("!!document.querySelector('select')",'profile Back');check(await evaluate("!!Array.from(document.querySelectorAll('button')).find(b=>b.textContent.startsWith('Quitar'))"),'draft preserved '+width);
-    await evaluate("document.documentElement.style.fontSize='32px'");check(await evaluate('document.documentElement.scrollWidth<=innerWidth'),'large font no overflow '+width);await evaluate("document.documentElement.style.fontSize=''");await screenshot('selector-'+width);
+    await evaluate("document.documentElement.style.fontSize='32px'");check(await evaluate('document.documentElement.scrollWidth<=innerWidth'),'large font no overflow '+width);check(await evaluate("(()=>{const picker=document.querySelector('.scheduling fieldset');return picker.nextElementSibling.getBoundingClientRect().top-picker.getBoundingClientRect().bottom>=48;})()"),'selected options spacing scales with text '+width);await evaluate("document.documentElement.style.fontSize='';document.querySelector('.scheduling fieldset').nextElementSibling.scrollIntoView({block:'center'})");await screenshot('selector-'+width);
     await evaluate("uncertain=true;holdWrite=true;releaseWrite=null;(()=>{const b=Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Enviar horarios');b.click();b.click()})()");await waitFor("typeof releaseWrite==='function'",'prioritized mutation started');
     check(await evaluate("pollSignal.aborted&&writes.filter(w=>w.path.endsWith('/proposals')).length===1"),'poll aborted and one POST '+width);
     await evaluate("releasePoll();history.back()");await delay(150);

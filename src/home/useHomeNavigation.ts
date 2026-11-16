@@ -1,8 +1,8 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { QuestionContext } from '../profile/affinities/presentation';
 import { object } from '../auth/api';
 
-const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection', 'admin', 'visual-review', 'scheduling', 'partner-profile'] as const;
+const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection', 'admin', 'visual-review', 'scheduling', 'partner-profile', 'second-chat'] as const;
 export type HomeDestination = typeof destinations[number];
 interface Entry { owner: string; trail: HomeDestination[]; question?: QuestionContext; profileQuestionId?: string; matchId?: string; connectionId?: string; partnerName?: string | null }
 function destination(value: unknown): value is HomeDestination {
@@ -12,7 +12,7 @@ function entry(value: unknown): Entry | null {
   if (!object(value) || typeof value.owner !== 'string' || !Array.isArray(value.trail) || !value.trail.length || value.trail[0] !== 'home' || !value.trail.every(destination)) return null;
   if (value.matchId !== undefined && (typeof value.matchId !== 'string' || !value.matchId.trim())) return null;
   if (value.trail.at(-1) === 'visual-review' && typeof value.matchId !== 'string') return null;
-  if (value.trail.some(v => v === 'scheduling' || v === 'partner-profile') && (typeof value.connectionId !== 'string' || !value.connectionId.trim() || typeof value.matchId !== 'string')) return null;
+  if (value.trail.some(v => v === 'scheduling' || v === 'partner-profile' || v === 'second-chat') && (typeof value.connectionId !== 'string' || !value.connectionId.trim() || typeof value.matchId !== 'string')) return null;
   if (value.partnerName != null && typeof value.partnerName !== 'string') return null;
   const q = value.question;
   if (value.profileQuestionId !== undefined && typeof value.profileQuestionId !== 'string') return null;
@@ -26,13 +26,72 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
   const [state, setState] = useState(initial);
   const current = useRef(initial), guard = useRef(canLeave), moving = useRef(false);
   guard.current = canLeave;
+  const secondChat = useRef<{ canLeave: () => boolean; leave: () => void } | null>(null);
+  const registerSecondChat = useCallback((policy: { canLeave: () => boolean; leave: () => void }) => {
+    secondChat.current = policy;
+    return () => { if (secondChat.current === policy) secondChat.current = null; };
+  }, []);
+  const visualReview = useRef<((proceed: () => void) => boolean) | null>(null);
+  // A confirmed empty Activity must not flash when traversing its older entries.
+  // An explicit Activity open resets this after new engagement appears.
+  const retiredActivity = useRef(false);
+  const afterMove = useRef<(() => void) | null>(null), approvedVisualPop = useRef(false), alive = useRef(false);
+  const registerVisualReview = useCallback((policy: (proceed: () => void) => boolean) => {
+    visualReview.current=policy;
+    return()=>{if(visualReview.current===policy){visualReview.current=null;afterMove.current=null;}};
+  },[]);
+  const afterRestoration = (action: () => void) => { if(moving.current)afterMove.current=action;else if(alive.current)action(); };
   const path = (value: Entry) => value.trail.at(-1) === 'admin' ? '/admin' : '/';
   useLayoutEffect(() => {
     if (!enabled) return;
+    alive.current=true;
     window.history.replaceState(current.current, '', path(current.current));
     const pop = (event: PopStateEvent) => {
-      const previous = current.current, incoming = entry(event.state);
+      const previous = current.current;
+      let incoming = entry(event.state);
+      if(retiredActivity.current&&incoming?.owner===previous.owner&&incoming.trail.at(-1)==='activity'){
+        incoming={owner:previous.owner,trail:['home']};window.history.replaceState(incoming,'','/');
+      }
       moving.current = false;
+      try {
+      const leavingVisual=previous.trail.at(-1)==='visual-review'&&(incoming?.trail.join('/')!==previous.trail.join('/')||incoming.matchId!==previous.matchId);
+      if(leavingVisual&&visualReview.current&&!approvedVisualPop.current){
+        const delta=previous.trail.length-(incoming?.trail.length??1),owned=incoming?.owner===previous.owner;
+        const proceed=()=>afterRestoration(()=>{
+          if(!visualReview.current||!guard.current(incoming?.trail.at(-1)))return;
+          approvedVisualPop.current=true;
+          if(owned&&delta)window.history.go(-delta);
+          else { const next:Entry={owner:previous.owner,trail:['home']};window.history.replaceState(next,'','/');current.current=next;setState(next);approvedVisualPop.current=false; }
+        });
+        if(!visualReview.current(proceed)){
+          // Restore the owned entry while the component asks about its draft.
+          // Confirmation waits for this traversal before replaying the Back.
+          if(owned&&delta){moving.current=true;window.history.go(delta);}else window.history.replaceState(previous,'',path(previous));
+          return;
+        }
+      }
+      if(leavingVisual)approvedVisualPop.current=false;
+      if (previous.trail.at(-1) === 'second-chat' && incoming?.trail.at(-1) !== 'second-chat' && secondChat.current) {
+        if (!secondChat.current.canLeave()) {
+          const delta = previous.trail.length - (incoming?.trail.length ?? 1);
+          if (incoming?.owner === previous.owner && delta) { moving.current = true; window.history.go(delta); }
+          else window.history.replaceState(previous, '', path(previous));
+          return;
+        }
+        const policy = secondChat.current; secondChat.current = null;
+        const next: Entry = { owner: previous.owner, trail: ['home'] };
+        window.history.replaceState(next, '', path(next)); current.current = next; setState(next); policy.leave(); return;
+      }
+      if (incoming?.trail.at(-1) === 'second-chat' && !secondChat.current) {
+        if (!guard.current('home') && previous.trail.at(-1) !== 'home') {
+          const delta = previous.trail.length - incoming.trail.length;
+          if (incoming.owner === previous.owner && delta) { moving.current = true; window.history.go(delta); }
+          else window.history.replaceState(previous, '', path(previous));
+          return;
+        }
+        const next: Entry = { owner: previous.owner, trail: ['home'] };
+        window.history.replaceState(next, '', path(next)); current.current = next; setState(next); return;
+      }
       if (incoming?.owner === previous.owner) {
         if (!guard.current(incoming.trail.at(-1)) && incoming.trail.join('/') !== previous.trail.join('/')) {
           const delta = previous.trail.length - incoming.trail.length;
@@ -46,17 +105,20 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
         const next: Entry = guard.current() ? { owner: previous.owner, trail: ['home'] } : previous;
         window.history.replaceState(next, '', path(next)); current.current = next; setState(next);
       }
+    } finally { if(!moving.current&&afterMove.current){const next=afterMove.current;afterMove.current=null;queueMicrotask(()=>{if(alive.current)next();});} }
     };
     window.addEventListener('popstate', pop);
-    return () => window.removeEventListener('popstate', pop);
+    return () => {alive.current=false;afterMove.current=null;window.removeEventListener('popstate', pop);};
   }, [enabled]);
   const open = (next: HomeDestination, question?: QuestionContext, replace = false) => {
     if (moving.current || !guard.current(next) || (current.current.trail.at(-1) === next && !replace)) return;
+    if(next==='activity')retiredActivity.current=false;
     const value: Entry = { owner: initial.owner, trail: replace ? [...current.current.trail.slice(0, -1), next] : [...current.current.trail, next], ...(question ? { question } : {}) };
     if (replace) window.history.replaceState(value, '', path(value)); else window.history.pushState(value, '', path(value)); current.current = value; setState(value);
   };
-  const backTo = (target: HomeDestination, replace = false) => {
+  const backTo = (target: HomeDestination, replace = false, confirmed = false) => {
     if (moving.current || !guard.current(target)) return;
+    if(!confirmed&&current.current.trail.at(-1)==='visual-review'&&visualReview.current&&!visualReview.current(()=>afterRestoration(()=>backTo(target,replace,true))))return;
     const value = current.current, index = value.trail.lastIndexOf(target);
     const installed = entry(window.history.state);
     if (!replace && index >= 0 && index < value.trail.length - 1 && installed?.owner === value.owner) {
@@ -86,6 +148,22 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const value: Entry = { ...current.current, trail: [...current.current.trail, 'partner-profile'] };
     window.history.pushState(value, '', path(value)); current.current = value; setState(value);
   };
-  return { trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
+  const openSecondChat = (connectionId: string, matchId: string) => {
+    if (moving.current || current.current.trail.at(-1) === 'second-chat' || !connectionId.trim() || !matchId.trim() || !guard.current('second-chat')) return false;
+    const value: Entry = { owner: initial.owner, trail: [...current.current.trail, 'second-chat'], connectionId, matchId };
+    window.history.pushState(value, '', '/'); current.current = value; setState(value); return true;
+  };
+  const closeSecondChat = () => {
+    secondChat.current = null; moving.current = false;
+    const value: Entry = { owner: initial.owner, trail: ['home'] };
+    window.history.replaceState(value, '', '/'); current.current = value; setState(value);
+  };
+  const finishVisualReview = (target: 'home' | 'activity') => {
+    retiredActivity.current=target==='home';
+    visualReview.current=null;afterMove.current=null;approvedVisualPop.current=false;moving.current=false;
+    const value:Entry={owner:initial.owner,trail:target==='home'?['home']:['home','activity']};
+    window.history.replaceState(value,'','/');current.current=value;setState(value);
+  };
+  return { registerVisualReview, finishVisualReview, registerSecondChat, openSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
 }
 export type HomeNavigation = ReturnType<typeof useHomeNavigation>;

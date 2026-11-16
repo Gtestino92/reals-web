@@ -2,6 +2,8 @@
 html:has(.home) { scrollbar-gutter: stable; }
 .login-page:has(.home) > .login-panel { width: min(100%, 960px); max-width: 960px; margin: 0 auto; }
 .home { text-align: left; display: grid; gap: 24px; min-width: 0; }
+.second-chat-card-actions { display:grid; gap:12px; margin-top:16px; }
+.second-chat-card-actions > button { width:100%; }
 .home[hidden] { display: none; }
 .home h2, .home h3, .home h4 { font-family: var(--font-display); font-weight: var(--font-weight-display); margin: 0 0 12px; }
 .home h2 { font-size: var(--type-screen-title-size); line-height: var(--type-screen-title-line-height); }
@@ -70,3 +72,11 @@ html:has(.home) { scrollbar-gutter: stable; }
 
 .management-placeholder .placeholder-field { margin-block: 24px; }
 .management-placeholder .placeholder-field span:last-child { height: 44px; max-width: 100%; }
+.home-priority { border:1px solid var(--color-secondary); padding:18px; display:grid; gap:10px; }
+.home-priority h3 { margin:0; }
+.home-priority-row { position:relative; display:grid; gap:3px; width:100%; min-width:0; min-height:64px; text-align:left; font:inherit; color:var(--color-on-surface); background:var(--color-surface); border:1px solid var(--color-outline-variant); border-radius:var(--radius-button); padding:12px 36px 12px 12px; cursor:pointer; }
+.home-priority-row > span { overflow-wrap:anywhere; }
+.home-priority-title { font-weight:600; }
+.home-priority-action { color:var(--color-primary); font-size:.875rem; }
+.home-priority-chevron { position:absolute; right:12px; top:50%; transform:translateY(-50%); }
+.home-priority-row:disabled { opacity:.5; cursor:default; }

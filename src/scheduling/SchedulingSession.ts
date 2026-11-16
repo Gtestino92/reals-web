@@ -42,10 +42,11 @@ export class SchedulingSession {
     if(c.state==='SCHEDULING_PENDING')return {connection:c,negotiation:null,proposals:[],availability:null,offset:0};
     if(!['SCHEDULING_PHASE','SECOND_CHAT_SCHEDULED','SECOND_CHAT_AVAILABLE','SECOND_CHAT','CLOSED'].includes(c.state))throw new ApiError('invalid');
     const n=parseNegotiation(await read('/negotiation'),this.connectionId);
-    const p=parseProposals(await read('/proposals'),this.connectionId,[c.userAId,c.userBId]);
-    const a=parseAvailability(await read('/scheduling-availability'));
-    const after=parseNegotiation(await read('/negotiation'),this.connectionId);
-    const end=parseConnection(await read(''),this.connectionId,this.matchId,me);
+    // Independent reads share a phase, still bracketed by both authority checks.
+    const [rawProposals,rawAvailability]=await Promise.all([read('/proposals'),read('/scheduling-availability')]);
+    const p=parseProposals(rawProposals,this.connectionId,[c.userAId,c.userBId]),a=parseAvailability(rawAvailability);
+    const [rawAfter,rawEnd]=await Promise.all([read('/negotiation'),read('')]);
+    const after=parseNegotiation(rawAfter,this.connectionId),end=parseConnection(rawEnd,this.connectionId,this.matchId,me);
     if(JSON.stringify(n)!==JSON.stringify(after)||c.updatedAt!==end.updatedAt||c.state!==end.state||p.some(v=>v.roundNumber>n.roundNumber)||n.schedulingExpiresAt!==c.schedulingExpiresAt)throw new ApiError('invalid');
     if(c.state!=='CLOSED'&&((n.status==='PENDING'&&c.state!=='SCHEDULING_PHASE')||(n.status==='CONFIRMED'&&!c.state.startsWith('SECOND_CHAT'))||(n.status==='FAILED'&&c.state!=='CLOSED')))throw new ApiError('invalid');
     return {connection:c,negotiation:n,proposals:p,availability:a,offset:Date.parse(a.serverTime)-Date.now()};
@@ -62,6 +63,7 @@ export class SchedulingSession {
   // Only healthy background reads are preemptible. Recovery of an uncertain
   // write retains the blocking reconciliation gate and cannot be bypassed.
   poll=()=>this.refresh(true);
+  pause=()=>{if(this.background){this.cancelBackground();this.install({activity:'idle'});}};
   refresh=async(background = false)=>{
     if(this.gate||!this.current()||document.visibilityState==='hidden')return;
     const silent=background&&this.state.verified&&!this.state.uncertain;
@@ -77,7 +79,7 @@ export class SchedulingSession {
     } catch(error) {
       if(ticket===this.generation&&!signal.aborted)this.failure(error);
     } finally {
-      if(ticket===this.generation){this.background=null;this.gate=false;this.install({activity:'idle',busy:false});}
+      if(ticket===this.generation){owned?.abort();this.background=null;this.gate=false;this.install({activity:'idle',busy:false});}
     }
   };
   private cancelBackground() {

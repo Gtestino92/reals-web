@@ -37,31 +37,55 @@ export function useHome(controller: SessionController, active = true) {
       r.version = status.version; r.reconcile = false; latest.current = model;
       setState(s => ({ ...s, model, blocked: r.uncertain, locationFailure: home.matchmaking.inQueue ? null : s.locationFailure,
         error: r.uncertain || (s.locationFailure && !home.matchmaking.inQueue) ? s.error : '' }));
+      return home;
     }
+    return null;
   };
-  const refresh = async (poll = false) => {
+  const refresh = async (poll = false): Promise<HomeData | null> => {
     const r = owner.current;
-    if (!r || r.mutation || r.lifetime.signal.aborted) return;
-    if (r.read) return;
+    if (!r || r.mutation || r.lifetime.signal.aborted) return null;
+    if (r.read) return null;
     const read = new AbortController(); r.read = read;
     const signal = AbortSignal.any([read.signal, r.lifetime.signal]), serial = ++r.serial;
     if (!poll) { r.uncertain = false; r.reconcile = true; setState(s => ({ ...s, busy: true, blocked: true, error: '', locationFailure: null })); }
     try {
       if (poll) {
         const status = parseStatus(await controller.request('/me/home/status', signal));
-        if (!valid(r, serial)) return;
-        if (!r.reconcile && !r.uncertain && status.version === r.version && !status.dirty && !(status.nextRefreshAt && Date.parse(status.serverTime) >= Date.parse(status.nextRefreshAt))) return;
+        if (!valid(r, serial)) return null;
+        if (!r.reconcile && !r.uncertain && status.version === r.version && !status.dirty && !(status.nextRefreshAt && Date.parse(status.serverTime) >= Date.parse(status.nextRefreshAt))) return latest.current?.home ?? null;
       }
       r.reconcile = true;
-      await load(r, serial, signal, !poll && r.cancelRequested);
+      return await load(r, serial, signal, !poll && r.cancelRequested);
     } catch {
       if (valid(r, serial) && !signal.aborted) { r.reconcile = true; setState(s => ({ ...s, blocked: true, locationFailure: null, error: 'No pudimos actualizar Inicio. Revisá tu conexión y usá Reintentar.' })); }
+      return null;
     } finally {
       if (valid(r, serial)) {
         r.read = null;
         setState(s => ({ ...s, busy: false, searchPhase: s.blocked && s.searchPhase !== 'idle' ? 'failed' : latest.current?.home.matchmaking.inQueue ? 'queued' : s.searchPhase === 'failed' && poll ? 'failed' : 'idle' }));
       }
     }
+  };
+  const reconcileHome = async () => {
+    const r=owner.current;
+    if(!r||r.mutation||r.lifetime.signal.aborted)return null;
+    r.read?.abort();r.read=null;r.reconcile=true;
+    return refresh();
+  };
+  const dismissSecondChat = async (connectionId: string) => {
+    const r = owner.current;
+    if (!r || r.mutation || state.busy || state.blocked || r.lifetime.signal.aborted) return;
+    r.mutation = true; r.read?.abort(); r.read = null;
+    const serial = ++r.serial, signal = r.lifetime.signal;
+    setState(s => ({ ...s, busy: true, error: '' }));
+    let failure = '';
+    try {
+      const value = await controller.request(`/connections/${connectionId}/second-chat-dismissal`,signal,'POST');
+      if (!object(value) || value.dismissed !== true) throw new ApiError('invalid');
+    } catch { failure = 'No pudimos confirmar la acci\u00f3n. Actualizamos Inicio antes de permitir otro intento.'; }
+    try { r.reconcile = true; await load(r,serial,signal); }
+    catch { r.uncertain = true; failure = 'No pudimos actualizar Inicio. Revis\u00e1 tu conexi\u00f3n y us\u00e1 Reintentar.'; }
+    finally { if (valid(r,serial)) { r.mutation = false; setState(s => ({ ...s, busy: false, blocked: r.uncertain, error: failure })); } }
   };
   const mutate = async (cancel: boolean) => {
     const r = owner.current, model = latest.current;
@@ -162,5 +186,5 @@ export function useHome(controller: SessionController, active = true) {
   }, [active]);
   const canRetryLocation = state.searchPhase === 'failed' && state.locationFailure !== null && !state.busy && !state.blocked &&
     state.model?.home.profileStatus === 'ACTIVE' && state.model.home.matchmaking.canSearch && !state.model.home.matchmaking.inQueue;
-  return { ...state, canRetryLocation, retryLocation: () => { if (canRetryLocation) void mutate(false); }, refresh: () => void refresh(), search: () => void mutate(false), cancel: () => void mutate(true), backFromSearch: () => { if (!state.busy && !state.blocked && !latest.current?.home.matchmaking.inQueue) setState(s => ({ ...s, searchPhase: 'idle', error: '', locationFailure: null })); } };
+  return { ...state, reconcileHome, dismissSecondChat, canRetryLocation, retryLocation: () => { if (canRetryLocation) void mutate(false); }, refresh: () => void refresh(), search: () => void mutate(false), cancel: () => void mutate(true), backFromSearch: () => { if (!state.busy && !state.blocked && !latest.current?.home.matchmaking.inQueue) setState(s => ({ ...s, searchPhase: 'idle', error: '', locationFailure: null })); } };
 }

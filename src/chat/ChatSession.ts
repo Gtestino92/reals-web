@@ -2,7 +2,8 @@ import { ApiError, object } from '../auth/api';
 import type { SessionController } from '../auth/session';
 import { mergeMessages, parseChat, parseGuidance, parseExits, parseMessage, plainText, policy, reactable, reactionCursor, str } from './contracts';
 import type { Chat, Exit, Message, Reply } from './contracts';
-export interface Outgoing { clientMessageId: string; content: string | null; file: Blob | null; replyTo: Reply | null; phase: 'pending' | 'failed' | 'uncertain' }
+import { messageRequest, type Outgoing } from './messageRequest';
+export type { Outgoing } from './messageRequest';
 interface State { decisionPending: 'approve' | 'reject' | null; guidancePending: boolean; messageError: boolean; messagePending: boolean; confirmedReply: Reply | null; confirmedFile: Blob | null; reactionFeedback: 'pending' | 'error' | null; chat: Chat | null; messages: Message[]; exits: Exit[]; busy: boolean; error: string; blocked: boolean; outgoing: Outgoing | null; confirmed: string | null; confirmationVersion: number; offset: number; historyLimited: boolean }
 export class ChatSession {
   private state: State = { decisionPending: null, guidancePending: false, messageError: false, messagePending: false, confirmedReply: null, confirmedFile: null, reactionFeedback: null, chat: null, messages: [], exits: [], busy: false, error: '', blocked: true, outgoing: null, confirmed: null, confirmationVersion: 0, offset: 0, historyLimited: false };
@@ -144,12 +145,8 @@ export class ChatSession {
     return this.sendOutgoing({ content: file ? null : content, file, replyTo, clientMessageId: crypto.randomUUID(), phase: 'pending' });
   }
   private sendOutgoing(o: Outgoing) {
-    if (o.file) {
-      const body = new FormData(); body.append('file', o.file, 'recording.m4a'); body.append('clientMessageId', o.clientMessageId);
-      if (o.replyTo) { body.append('replyToType', o.replyTo.type); body.append('replyToTargetId', o.replyTo.targetId); }
-      return this.write(`/chats/${this.chatId}/audio-messages`, 'POST', body, o);
-    }
-    return this.write(`/chats/${this.chatId}/messages`, 'POST', { content: o.content, clientMessageId: o.clientMessageId, ...(o.replyTo ? { replyTo: o.replyTo } : {}) }, o);
+    const request = messageRequest(this.chatId, o);
+    return this.write(request.path, 'POST', request.body, o);
   }
   retry = async () => {
     const o = this.state.outgoing;

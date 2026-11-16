@@ -1,0 +1,6 @@
+﻿import { expect, it } from 'vitest';
+import { secondHomePresentation } from './secondHomePresentation';
+import type { Activity } from './contracts';
+const item = (): Activity => ({type:'SECOND_CHAT_SCHEDULED',connectionId:'n',matchId:'m',chatId:null,partnerName:'Ana',requiresAction:false,createdAt:null,schedulingExpiresAt:null,visualStartedAt:null,visualExpiresAt:null,secondChat:{availableAt:'2026-11-13T12:00:00Z',entryClosesAt:'2026-11-13T12:15:00Z',expiresAt:'2026-11-13T14:00:00Z',readOnlyUntil:null,chatId:null,chatType:'SECOND_CHAT',chatStatus:null,myAttendanceStatus:'PENDING',durationMinutes:120}});
+it.each([['11:59:59','Waiting',false,false],['12:00:00','Open',true,false],['14:00:00','Expired',false,true]] as const)('presents scheduled boundary %s', (time,state,canOpen,canDismiss)=>{expect(secondHomePresentation(item(),Date.parse(`2026-11-13T${time}Z`))).toMatchObject({state,canOpen,canDismiss});});
+it.each(['13:59:59','14:00:00'])('retention at %s controls CTA and profile',time=>{const i=item();i.type='SECOND_CHAT_READ_ONLY';i.secondChat={...i.secondChat!,chatId:'c',chatStatus:'FINISHED',readOnlyUntil:'2026-11-13T14:00:00Z'};expect(secondHomePresentation(i,Date.parse(`2026-11-13T${time}Z`))).toMatchObject({canOpen:time==='13:59:59',canProfile:false,canDismiss:true});});

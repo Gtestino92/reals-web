@@ -7,7 +7,8 @@ export function normalizeMessage(value: string) {
   return value.replace(/\r\n?/g,'\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g,'').split('\n').map(line => line.replace(/[ \t]+/g,' ').trim()).join('\n').replace(/\n{3,}/g,'\n\n').trim().slice(0,280);
 }
 export const validMessage = (value: string) => !!normalizeMessage(value) && !/<\s*\/?\s*[a-zA-Z][^>]*>/.test(normalizeMessage(value));
-export function sessionContext(c: SessionController) { const s = c.getSnapshot(); return `${s.phase}/${s.account?.id}/${s.profile?.id}/${s.authContextVersion}`; }
+export function sessionContext(c: SessionController) { const s = c.getSnapshot(); return `${s.phase}/${s.account?.id}/${s.profile?.id}`; }
+export type VisualOutcome = 'completed' | 'expired' | 'unavailable' | 'security';
 type Operation = 'read' | 'save' | 'APPROVED' | 'REJECTED' | 'block';
 interface State { imageRetry: number; profile: VisualProfile | null; busy: boolean; concealed: boolean; error: string; terminal: boolean; pending: Operation | null; message: string | null; messageLoaded: boolean; messageError: boolean; uncertain: boolean; notice: string }
 export class VisualSession {
@@ -20,22 +21,22 @@ export class VisualSession {
   private reconcile: Operation | null = null;
   private autoMessageAttempted = false;
   readonly context: string;
-  constructor(private controller: SessionController, readonly matchId: string, private finish: () => void) { this.context=sessionContext(controller); }
+  constructor(private controller: SessionController, readonly matchId: string, private finish: (reason: VisualOutcome) => void) { this.context=sessionContext(controller); }
   subscribe = (fn:()=>void) => { this.listeners.add(fn);return()=>{this.listeners.delete(fn);}; };
   getSnapshot = () => this.state;
   private current() { return !this.lifetime.signal.aborted && sessionContext(this.controller)===this.context && this.controller.getSnapshot().phase==='ready'; }
   private install(patch: Partial<State>) { if(this.current()){this.state={...this.state,...patch};this.listeners.forEach(fn=>fn());} }
   start() { if(this.lifetime.signal.aborted) { this.lifetime=new AbortController(); this.read=null; this.writing=false; this.serial++; } }
-  dispose() {this.serial++;this.lifetime.abort();this.read?.abort();}
-  private end() {this.install({profile:null,message:null,terminal:true,pending:null,busy:false});this.finish();}
+  dispose() {this.serial++;this.lifetime.abort();this.read?.abort();this.state={...this.state,profile:null,message:null,messageLoaded:false};}
+  private end(reason: VisualOutcome = 'completed') {if(!this.current()||this.state.terminal)return;this.install({profile:null,message:null,messageLoaded:false,terminal:true,pending:null,busy:false,concealed:true});this.finish(reason);}
   private denied(error: unknown) { return error instanceof ApiError && ([401,403,404].includes(error.status) || ['VISUAL_CONTENT_NOT_AVAILABLE','VISUAL_REVIEW_EXPIRED'].includes(error.code)); }
   private request(path: string, signal: AbortSignal, method='GET', body?: unknown) {return this.controller.request(`/matches/${encodeURIComponent(this.matchId)}${path}`,signal,method,body);}
-  conceal = () => {if(!this.writing){this.read?.abort();this.read=null;this.serial++;}this.install({concealed:true});};
+  conceal = () => {if(!this.writing){this.read?.abort();this.read=null;this.serial++;}this.install({busy:this.writing?this.state.busy:false,concealed:!!this.state.profile?.visualExpiresAt&&Date.parse(this.state.profile.visualExpiresAt)<=Date.now()});};
   resume = () => {
     const expiry=this.state.profile?.visualExpiresAt;
     // Same-session snapshot may remain visible during ordinary revalidation,
     // just as during polling. Locally expired content waits for authority.
-    if(this.current() && this.state.profile && (!expiry || Date.parse(expiry)>Date.now())) this.install({concealed:false});
+    if(this.current()) this.install({concealed:!!expiry&&Date.parse(expiry)<=Date.now()});
     return this.refresh();
   };
   refresh = async (retryImages = false) => {
@@ -43,14 +44,14 @@ export class VisualSession {
     const read=new AbortController(), ticket=++this.serial;this.read=read;
     const signal=AbortSignal.any([read.signal,this.lifetime.signal]);
     const current=()=>this.current()&&ticket===this.serial&&!signal.aborted;
-    this.install({busy:true,error:''});
+    this.install({busy:true,error:'',concealed:!!this.state.profile?.visualExpiresAt&&Date.parse(this.state.profile.visualExpiresAt)<=Date.now()});
     let autoRead=false;
     try {
       const match=await this.request('',signal);
       if(!current())return;
       const me=this.controller.getSnapshot().account?.id;
       if(!object(match)||match.id!==this.matchId||(match.userAId!==me&&match.userBId!==me))throw new ApiError('invalid');
-      if(match.state!=='VISUAL_PHASE'){this.end();return;}
+      if(match.state!=='VISUAL_PHASE'){this.end(match.state==='EXPIRED'?'expired':'completed');return;}
       let profile=parseVisualProfile(await this.request('/visual-profile',signal));
       if(!current())return;
       if(!profile.visualExpiresAt && typeof match.visualExpiresAt==='string' && Number.isFinite(Date.parse(match.visualExpiresAt)))profile={...profile,visualExpiresAt:match.visualExpiresAt};
@@ -62,15 +63,19 @@ export class VisualSession {
       }
       this.reconcile=null;
       autoRead=profile.partnerPersonalMessageSubmitted&&profile.partnerPersonalMessageRead&&!this.state.messageLoaded&&!this.autoMessageAttempted;
-      this.install({imageRetry:this.state.imageRetry+(retryImages?1:0),profile,busy:false,concealed:false,uncertain:false,error:'',...(!profile.partnerPersonalMessageSubmitted?{message:null,messageLoaded:false}: {})});
+      this.install({imageRetry:this.state.imageRetry+(retryImages?1:0),profile,busy:false,concealed:!!profile.visualExpiresAt&&Date.parse(profile.visualExpiresAt)<=Date.now(),uncertain:false,error:'',...(!profile.partnerPersonalMessageSubmitted?{message:null,messageLoaded:false}: {})});
     } catch(error) {
-      if(current())this.install({profile:null,message:null,messageLoaded:false,busy:false,concealed:false,terminal:this.denied(error),error:this.denied(error)?'El contenido visual ya no está disponible. Volvé a Actividad.':'No pudimos actualizar el descubrimiento. Revisá tu conexión y usá Reintentar.'});
+      if(current()) {
+        const denied=this.denied(error);
+        if(denied) { this.install({error:'El contenido visual ya no est\u00e1 disponible.'}); this.end(error instanceof ApiError&&error.code==='VISUAL_REVIEW_EXPIRED'?'expired':'unavailable'); }
+        else this.install({busy:false,uncertain:true,...(error instanceof ApiError&&error.kind==='invalid'?{profile:null,message:null,messageLoaded:false}:{}),error:'No pudimos actualizar el descubrimiento. Revis\u00e1 tu conexi\u00f3n y us\u00e1 Reintentar.'});
+      }
     } finally { if(ticket===this.serial)this.read=null; }
     if(autoRead&&current()){this.autoMessageAttempted=true;void this.act('read');}
   };
   act = async (operation: Operation, draft='') => {
     const p=this.state.profile;
-    if(!this.current()||this.writing||this.read||this.state.terminal||this.state.uncertain||!p||this.state.concealed|| (p.visualExpiresAt&&Date.parse(p.visualExpiresAt)<=Date.now()))return;
+    if(document.visibilityState!=='visible'||!this.current()||this.writing||this.read||this.state.terminal||this.state.uncertain||!p||this.state.concealed|| (p.visualExpiresAt&&Date.parse(p.visualExpiresAt)<=Date.now()))return;
     if(operation==='save'&&(p.myPersonalMessageSubmitted||!validMessage(draft)))return;
     if(operation==='read'&&(!p.partnerPersonalMessageSubmitted||this.state.messageLoaded))return;
     this.writing=true;this.install({pending:operation,error:'',messageError:false,notice:''});
@@ -86,11 +91,11 @@ export class VisualSession {
       } else if(operation==='save') {if(result!==undefined)throw new ApiError('invalid');this.install({profile:{...p,myPersonalMessageSubmitted:true},notice:'Guardamos tu mensaje personal.'});reconcile=true;}
       else {
         if(!object(result)||typeof result.id!=='string'||(operation!=='block'&&(result.id!==this.matchId||!['VISUAL_PHASE','VISUAL_APPROVED','VISUAL_REJECTED','EXPIRED'].includes(String(result.state)))))throw new ApiError('invalid');
-        this.end();
+        this.end(operation==='block'?'security':'completed');
       }
     } catch(error) {
       if(!current())return;
-      if(this.denied(error)){this.install({profile:null,message:null,messageLoaded:false,terminal:true,error:'El contenido visual ya no está disponible. Volvé a Actividad.'});}
+      if(this.denied(error)){this.install({error:'El contenido visual ya no está disponible.'});this.end(error instanceof ApiError&&error.code==='VISUAL_REVIEW_EXPIRED'?'expired':'unavailable');}
       else if(operation==='read')this.install({messageError:true});
       else if(error instanceof ApiError && error.kind==='backend' && error.status>=400 && error.status<500 && error.status!==409) { this.install({error:'No se pudo completar la acción. Revisá los requisitos de tu cuenta o intentá más tarde.'}); }
       else {

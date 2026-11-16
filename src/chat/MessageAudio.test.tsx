@@ -69,3 +69,7 @@ it('a cancelled pending play promise cannot restart media and a refresh failure 
   expect(screen.queryByRole('alert')).toBeNull();play.mockResolvedValue();await start();const a=audio();Object.defineProperty(a,'error',{value:{code:4}});fireEvent.error(a);
   await screen.findByRole('alert');fireEvent.click(screen.getByRole('button',{name:'Renovar enlace'}));expect(await screen.findByRole('alert')).toHaveTextContent('renovar');
 });
+
+it('preserves renewal intent when Chrome pauses loading media before reporting an expired URL',async()=>{
+ const refresh=vi.fn(async()=>'https://media.test/renewed');mount(refresh);const a=await start();fireEvent.pause(a);Object.defineProperty(a,'error',{value:{code:4}});fireEvent.error(a);await waitFor(()=>expect(audio()).not.toBe(a));expect(refresh).toHaveBeenCalledOnce();expect(audio().src).toBe('https://media.test/renewed');
+});

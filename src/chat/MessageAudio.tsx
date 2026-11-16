@@ -46,7 +46,7 @@ export function MessageAudio({ source, durationMillis, refresh }: {
     const metadata=()=>{if(owns() && Number.isFinite(audio.duration) && audio.duration>0){update({duration:audio.duration});if(position>0 && !positioned){positioned=true;audio.currentTime=Math.min(position,audio.duration);}}};
     const playing=()=>{if(owns() && r.intent)update({phase:'playing',error:''});else audio.pause();};
     const waiting=()=>{if(owns() && r.intent)update({phase:'loading'});};
-    const paused=()=>{if(owns() && !audio.ended && r.phase!=='failed'){r.intent=false;update({phase:'paused',position:audio.currentTime});}};
+    const paused=()=>{if(r.phase==='loading' && r.intent)return;if(owns() && !audio.ended && r.phase!=='failed'){r.intent=false;update({phase:'paused',position:audio.currentTime});}};
     const ended=()=>{if(owns()){r.intent=false;update({phase:'ended',position:Number.isFinite(audio.duration) && audio.duration>0?audio.duration:audio.currentTime});}};
     const tick=()=>{if(owns())update({position:audio.currentTime});};
     const error=()=>{void failure();};
