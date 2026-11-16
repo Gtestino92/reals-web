@@ -1,6 +1,6 @@
 ﻿// Home presentation uses frozen client time; server metadata stays unchanged unless
 // explicitly replaced. No production services or real accounts are involved.
-export async function runHomeCases(width,{run,click,assert,refresh,history,pageTime}) {
+export async function runHomeCases(width,{run,click,assert,refresh,history,reload,pageTime}) {
   const visiblePriority="[...document.querySelectorAll('[aria-label=\"Prioridad ahora\"]')].find(n=>!n.closest('[hidden]'))";
   const ready=async p=>assert(p,"!!document.querySelector('.home:not([hidden]) button[aria-label=\"Ver Actividad\"]:not(:disabled)')");
   const setTime=async(p,s,time)=>{s.now=time;for(let i=0;i<100;i++){if(await p.evaluate('!!window.fixture')){await pageTime(p,time);return;}await new Promise(r=>setTimeout(r,50));}throw Error('Fixture initialization timeout');};
@@ -15,14 +15,14 @@ export async function runHomeCases(width,{run,click,assert,refresh,history,pageT
     await ready(a);await ready(b);await refresh(a);if(s.writes.length)throw Error('Read initiated JOIN');
     await click(a,'Ver Actividad');await click(a,'Entrar al segundo chat');await assert(a,"!!document.querySelector('#second-draft')");
     await refresh(a);await refresh(b);if(s.writes.filter(w=>w.path.endsWith('/join')).length!==1)throw Error('Activity must issue one JOIN');
-    await a.evaluate('window.fixture.notifyAuth()');await ready(a);await a.call('Page.reload');await assert(a,"!![...document.querySelectorAll('button')].find(b=>b.textContent==='Ingresar')");if(s.writes.filter(w=>w.path.endsWith('/join')).length!==1)throw Error('Auth/reload replayed JOIN');
+    await a.evaluate('window.fixture.notifyAuth()');await assert(a,"!!document.querySelector('.second-chat')");await reload(a);await assert(a,"!!document.querySelector('.second-chat')");if(s.writes.filter(w=>w.path.endsWith('/join')).length!==1)throw Error('Auth/reload replayed JOIN');
   });
   await run('home-unjoined-exact-entry-cutoff',width,{joined:new Set(),status:'AVAILABLE',homeType:'SECOND_CHAT_AVAILABLE'},async({a,b,s})=>{
     const cutoff=s.scheduled+15*60000;await setTime(a,s,cutoff-1);await ready(a);await assert(a,`!!${visiblePriority}?.innerText.includes('Entrar al chat')`);
     // Freeze while backgrounded, then resume: the timer must not preserve a stale CTA.
     await b.call('Page.bringToFront');await setTime(a,s,cutoff);await a.call('Page.bringToFront');await assert(a,`!${visiblePriority}`);await click(a,'Ver Actividad');await assert(a,"document.body.innerText.includes('La ventana para entrar terminó.')");await assert(a,"![...document.querySelectorAll('button')].some(b=>b.textContent==='Entrar al segundo chat'&&!b.closest('[hidden]'))");if(s.status!=='AVAILABLE'||s.joined.size||s.writes.length)throw Error('Presentation synthesized attendance/lifecycle');
   });
-  for(const attendance of ['ON_TIME','LATE']) await run(`home-${attendance}-cutoff-and-absolute`,width,{status:'ACTIVE',attendance:{a:attendance}},async({a,b,s})=>{
+  for(const attendance of ['ON_TIME','LATE']) await run(`home-${attendance}-cutoff-and-absolute`,width,{status:'ACTIVE',joined:new Set(['a']),scheduled:Date.now()-16*60000,attendance:{a:attendance}},async({a,b,s})=>{
     const cutoff=s.scheduled+15*60000,expiry=s.scheduled+120*60000;await setTime(a,s,cutoff);await ready(a);await assert(a,`!!${visiblePriority}?.innerText.includes('Entrar al chat')`);await click(a,'Ver Actividad');await assert(a,"!document.body.innerText.includes('Llegaste')");await assert(a,"!![...document.querySelectorAll('button')].find(b=>b.textContent==='Entrar al segundo chat'&&!b.disabled)");await assert(a,"!document.body.innerText.includes('Entrada permitida hasta')");await click(a,'Volver a Inicio');await ready(a);
     await setTime(a,s,expiry-1);await assert(a,`!!${visiblePriority}?.innerText.includes('Entrar al chat')`);await setTime(a,s,expiry);await assert(a,`!${visiblePriority}`);await click(a,'Ver Actividad');await assert(a,"document.body.innerText.includes('Terminó el tiempo máximo del segundo chat.')");if(s.status!=='ACTIVE'||s.writes.length)throw Error('Home synthesized terminal state');await ready(b);
   });
@@ -32,5 +32,5 @@ export async function runHomeCases(width,{run,click,assert,refresh,history,pageT
   await run('home-scheduling-label-contract',width,{scheduling:true,requiresAction:true},async({a,b,s})=>{
     await ready(a);await ready(b);await click(a,'Ver Actividad');await assert(a,"!![...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Elegir horarios'&&!b.disabled)");s.requiresAction=false;await refresh(b);await click(b,'Ver Actividad');await assert(b,"!![...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Ver coordinación'&&!b.disabled)");await assert(b,"!document.body.innerText.includes('Esperando respuesta.')");if(s.writes.length)throw Error('Scheduling Home mutated');
   });
-  await run('home-priority-large-font',width,{status:'ACTIVE'},async({a,b})=>{for(const p of[a,b]){await ready(p);await p.evaluate("document.documentElement.style.fontSize='200%'");await assert(p,'document.documentElement.scrollWidth<=innerWidth');await assert(p,`!!${visiblePriority}?.innerText.includes('Entrar al chat')`);}});
+  await run('home-priority-large-font',width,{status:'AVAILABLE',joined:new Set()},async({a,b})=>{for(const p of[a,b]){await ready(p);await p.evaluate("document.documentElement.style.fontSize='200%'");await assert(p,'document.documentElement.scrollWidth<=innerWidth');await assert(p,`!!${visiblePriority}?.innerText.includes('Entrar al chat')`);}});
 }

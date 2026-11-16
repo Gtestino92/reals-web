@@ -22,6 +22,7 @@ interface State {
   returnHome: string | null; status: SecondStatus | null; receivedAt: number; messages: Message[]; partnerId: string; partnerName: string;
   retryBlocked: boolean; busy: boolean; blocked: boolean; error: string; outgoing: Outgoing | null; confirmed: Outgoing | null; confirmationVersion: number; historyLimited: boolean;
   diagnostic: ReadDiagnostic | null;
+  notice: string;
 }
 type ReadStage = 'match' | 'status' | 'chat' | 'messages' | 'action';
 interface ReadDiagnostic { stage: ReadStage; kind: ApiError['kind'] | 'unexpected'; httpStatus: number }
@@ -34,9 +35,11 @@ class ReadFailure extends Error {
   }
 }
 const diagnostic = (error: unknown): ReadDiagnostic => error instanceof ReadFailure ? error.diagnostic : new ReadFailure('action',error).diagnostic;
+const terminal = (status: SecondStatus | null) => !!status && ['FINISHED','ABANDONED','EXPIRED','CANCELLED','CLOSED'].includes(status.chatStatus ?? '');
+const audioConflictCodes = new Set(['CHAT_AUDIO_FEATURE_DISABLED','CHAT_AUDIO_GUIDANCE_REQUIRED','CHAT_AUDIO_GUIDANCE_NOT_AVAILABLE','CHAT_AUDIO_LIMIT_REACHED','CHAT_AUDIO_WAITING_FOR_BOTH','CHAT_AUDIO_NOT_AVAILABLE_YET','CHAT_NOT_AVAILABLE','SECOND_CHAT_EXPIRED','SECOND_CHAT_ALREADY_RESOLVED','SECOND_CHAT_CONVERSATION_ALREADY_RESOLVED','SECOND_CHAT_JOIN_REQUIRED','CHAT_MUTUAL_CANCELLATION_PENDING']);
 /** Owns one connection and one authenticated lifetime. Reads never release mutation ownership. */
 export class SecondChatSession {
-  private state: State = { returnHome: null, status: null, receivedAt: 0, messages: [], partnerId: '', partnerName: '', retryBlocked: false, busy: false, blocked: true, error: '', diagnostic: null, outgoing: null, confirmed: null, confirmationVersion: 0, historyLimited: false };
+  private state: State = { returnHome: null, status: null, receivedAt: 0, messages: [], partnerId: '', partnerName: '', retryBlocked: false, busy: false, blocked: true, error: '', diagnostic: null, notice: '', outgoing: null, confirmed: null, confirmationVersion: 0, historyLimited: false };
   private listeners = new Set<() => void>();
   private lifetime = new AbortController();
   private read: AbortController | null = null;
@@ -48,6 +51,8 @@ export class SecondChatSession {
   private retired = false;
   private expiryPending = false;
   private readonly homePartnerName: string;
+  private audioLifecycleConflict = false;
+  private attendanceUncertain = false;
   private identityCurrent() { const s = this.controller.getSnapshot?.(); return !s || s.phase === 'ready' && s.account?.id === this.me; }
   constructor(private controller: Pick<SessionController,'request'> & Partial<Pick<SessionController,'getSnapshot'>>, readonly connectionId: string, readonly matchId: string, readonly me: string, partnerName?: string | null) { this.homePartnerName = partnerName?.trim() ?? ''; this.state = { ...this.state, partnerName: this.homePartnerName }; }
   subscribe = (f: () => void) => { this.listeners.add(f); return () => { this.listeners.delete(f); }; };
@@ -57,6 +62,7 @@ export class SecondChatSession {
   dispose() { this.lifetime.abort(); this.read?.abort(); this.generation++; this.state = { ...this.state, returnHome: null, status: null, partnerId: '', partnerName: '', outgoing: null, confirmed: null, messages: [], busy: false, blocked: true }; this.listeners.forEach(f => f()); }
   get now() { return this.state.status ? Date.parse(this.state.status.serverTime) + Math.max(0, Date.now() - this.state.receivedAt) : Date.now(); }
   get rules() { return secondPolicy(this.state.status,this.now); }
+  get canReturnHome() { return !this.state.busy && !this.attendanceUncertain && (this.state.status ? this.rules.canReturn : !!this.state.diagnostic && [403,404].includes(this.state.diagnostic.httpStatus)); }
   private current(g: number, signal: AbortSignal) { return this.identityCurrent() && !this.retired && g === this.generation && !signal.aborted && !this.lifetime.signal.aborted; }
   private request(path: string, signal: AbortSignal, method = 'GET', body?: unknown) { return this.controller.request(path,signal,method,body); }
   private async load(signal: AbortSignal, g: number, full = false) {
@@ -74,6 +80,7 @@ export class SecondChatSession {
       const receivedAt = Date.now();
       if (!this.current(g,signal)) return;
       // Install lifecycle immediately: slow message reads cannot extend write/retention windows.
+      this.attendanceUncertain = false;
       this.install({ status, receivedAt, partnerId });
       const rules = secondPolicy(status,Date.parse(status.serverTime));
       if (!rules.readable) { this.install({ messages: [], blocked: false }); return; }
@@ -82,8 +89,9 @@ export class SecondChatSession {
       if (!object(raw) || raw.id !== status.chatId || raw.matchId !== this.matchId || raw.connectionId !== this.connectionId || raw.chatType !== 'SECOND_CHAT') throw new ApiError('invalid');
       if (!this.current(g,signal)) return;
       stage = 'messages';
+      const terminalAudio = terminal(status) && !!(this.state.outgoing?.file || this.state.confirmed?.file);
       this.alternate = !this.alternate;
-      let cursor = full ? undefined : this.alternate ? reactionCursor(this.state.messages) : this.state.messages.at(-1)?.id;
+      let cursor = full || terminalAudio ? undefined : this.alternate ? reactionCursor(this.state.messages) : this.state.messages.at(-1)?.id;
       let incoming: Message[] = [], limited = false;
       const seen = new Set<string>();
       for (let page = 0; page < 20; page++) {
@@ -93,7 +101,12 @@ export class SecondChatSession {
         if (!rows) throw new ApiError('invalid');
         const parsed = rows.map(v => parseMessage(v,status.chatId ?? '',[this.me,partnerId]));
         incoming = mergeMessages(incoming,parsed);
-        if (!object(value) || !value.hasMore) { limited = !cursor && rows.length >= 500; break; }
+        if (!object(value) || !value.hasMore) {
+          limited = !cursor && rows.length >= 500;
+          // The initial backend list has no hasMore. Resolve a terminal audio's
+          // UUID beyond that first page before deciding that it was not committed.
+          if (!(terminalAudio && Array.isArray(value) && rows.length === 500)) break;
+        }
         const next = parsed.at(-1)?.id;
         if (!next || next === cursor || seen.has(next)) throw new ApiError('invalid');
         seen.add(next); cursor = next; limited = true;
@@ -103,7 +116,10 @@ export class SecondChatSession {
       const messages = mergeMessages(this.state.messages,incoming), outgoing = this.state.outgoing;
       const confirmed = outgoing && messages.some(m => m.senderId === this.me && m.clientMessageId === outgoing.clientMessageId);
       this.install({ messages, blocked: false, historyLimited: limited,
-        ...(confirmed ? { outgoing: null, confirmed: outgoing, confirmationVersion: this.state.confirmationVersion + 1 } : {}) });
+        ...(confirmed ? { outgoing: null, confirmed: outgoing, confirmationVersion: this.state.confirmationVersion + 1 } : {}),
+        ...(terminalAudio ? { error: '', diagnostic: null,
+          notice: confirmed || this.state.confirmed?.file ? 'El segundo chat terminó. Tu audio quedó guardado en la conversación.' : limited ? 'El segundo chat terminó. No pudimos verificar todo el historial del audio pendiente.' : this.audioLifecycleConflict ? 'El segundo chat terminó y ya no admite audios. El audio pendiente no se envió.' : 'El segundo chat terminó. El audio pendiente no se envió.',
+          ...(!limited || confirmed || this.state.confirmed?.file ? { outgoing: null, confirmed: null, retryBlocked: false } : {}) } : {}) });
     } catch (error) { throw new ReadFailure(stage,error); }
   }
   refresh = async (full = false, silent = false): Promise<void> => {
@@ -124,8 +140,9 @@ export class SecondChatSession {
   private async write(path: string, method: string, body?: unknown, outgoing?: Outgoing) {
     if (this.writing || this.lifetime.signal.aborted) return;
     this.writing = true; this.read?.abort(); this.read = null;
+    if (path.endsWith('/join')) this.attendanceUncertain = true;
     const g = ++this.generation, signal = this.lifetime.signal;
-    this.install({ busy: true, error: '', diagnostic: null, ...(outgoing ? { outgoing: { ...outgoing, phase: 'pending' } } : {}) });
+    this.install({ busy: true, error: '', diagnostic: null, notice: '', ...(outgoing ? { confirmed: null, outgoing: { ...outgoing, phase: 'pending' } } : {}) });
     let errorText = '';
     const safety = path.endsWith('/safety-cancellations') || path.endsWith('/block');
     try {
@@ -133,7 +150,9 @@ export class SecondChatSession {
       if (!this.current(g,signal)) return;
       if (path.startsWith(`/connections/${this.connectionId}/second-chat/`)) {
         const status = parseSecondStatus(result,this.connectionId,[this.me,this.state.partnerId]);
+        if (path.endsWith('/join') && !['ON_TIME','LATE'].includes(status.myAttendanceStatus)) throw new ApiError('invalid');
         // Preserve confirmed attendance even if the following chat/message read fails.
+        this.attendanceUncertain = false;
         this.install({ status, receivedAt: Date.now() });
       }
       if (safety) {
@@ -152,6 +171,7 @@ export class SecondChatSession {
     } catch (e) {
       if (!this.current(g,signal)) return;
       this.install({ diagnostic: diagnostic(e) });
+      if (outgoing?.file) this.audioLifecycleConflict = e instanceof ApiError && e.status === 409 && audioConflictCodes.has(e.code);
       const ambiguous = !(e instanceof ApiError) || e.status === 0 || e.status >= 500 || e.kind === 'invalid';
       errorText = 'No pudimos confirmar la acción. Actualizamos el estado antes de permitir otro intento.';
       if (outgoing && this.state.outgoing) this.install({ retryBlocked: e instanceof ApiError && e.code.includes('IDEMPOTENCY'), outgoing: { ...outgoing, phase: ambiguous ? 'uncertain' : 'failed' } });
@@ -161,7 +181,7 @@ export class SecondChatSession {
       if (safety && this.current(g,signal) && ['CANCELLED','CLOSED'].includes(this.state.status?.chatStatus ?? '')) this.returnToHome('La interacci\u00f3n ya no est\u00e1 disponible. Actualizamos Inicio.');
     }
     catch (error) { const failure = diagnostic(error); if (safety && this.current(g,signal) && [403,404].includes(failure.httpStatus)) { this.returnToHome('La interacci\u00f3n no est\u00e1 accesible. Consult\u00e1 Inicio para actualizar el estado.'); return; } if (this.current(g,signal)) this.install({ blocked: true, diagnostic: failure }); errorText = 'No pudimos reconciliar la acción. Reintentá la conexión antes de continuar.'; }
-    finally { if (this.current(g,signal)) { this.writing = false; this.install({ busy: false, error: errorText }); } }
+    finally { if (this.current(g,signal)) { this.writing = false; this.install({ busy: false, error: terminal(this.state.status) && this.state.notice ? '' : errorText }); } }
   }
   private returnToHome(message: string) {
     this.install({ returnHome: message, busy: false, blocked: true, messages: [], outgoing: null, confirmed: null });

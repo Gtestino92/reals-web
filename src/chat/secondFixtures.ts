@@ -41,6 +41,11 @@ export function secondHarness() {
       if (!body || typeof body !== 'object' || !('clientMessageId' in body)) throw Error();
       const message = {...messageFixture('3','me'),clientMessageId:String(body.clientMessageId)}; messages.push(message); return message;
     }
+    if (method === 'POST' && path.endsWith('/audio-messages')) {
+      if (!(body instanceof FormData) || typeof body.get('clientMessageId') !== 'string') throw Error('Invalid audio request');
+      const message = {...messageFixture(String(messages.length+1),'me'),clientMessageId:String(body.get('clientMessageId')),messageType:'AUDIO',content:null,audio:{url:'https://example.test/audio.m4a',durationMillis:1000,sizeBytes:100,contentType:'audio/mp4'}};
+      messages.push(message);return message;
+    }
     if (path.includes('/messages?')) return path.includes('&after=') ? {messages:structuredClone(messages),hasMore:false,serverTime:status.serverTime} : structuredClone(messages);
     return {};
   });

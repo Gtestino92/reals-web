@@ -25,44 +25,48 @@ function ResolutionDialog({ kind, busy, close, confirm }: { kind: 'completion' |
     <button disabled={busy} onClick={close}>Cancelar</button><button disabled={busy} onClick={confirm}>{kind === 'completion' ? 'Enviar solicitud' : 'Enviar reclamo'}</button>
   </dialog>;
 }
-export function SecondChat({ controller, connectionId, matchId, onHome, navigation, entryIntent, partnerName }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation; entryIntent?: SecondChatEntryIntent | undefined; partnerName?: string | null | undefined }) {
+export function SecondChat({ controller, connectionId, matchId, onHome, navigation, entryIntent, partnerName, restoredSession }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation; entryIntent?: SecondChatEntryIntent | undefined; partnerName?: string | null | undefined; restoredSession?: SecondChatSession | undefined }) {
   const identity = useSyncExternalStore(controller.subscribe,controller.getSnapshot);
   const [owner] = useState(() => ({ id: identity.account?.id, controller }));
   if (identity.phase !== 'ready' || identity.account?.id !== owner.id || controller !== owner.controller) return null;
-  return <SecondChatView controller={controller} connectionId={connectionId} matchId={matchId} onHome={onHome} entryIntent={entryIntent} partnerName={partnerName} {...(navigation ? { navigation } : {})}/>;
+  return <SecondChatView controller={controller} connectionId={connectionId} matchId={matchId} onHome={onHome} entryIntent={entryIntent} partnerName={partnerName} restoredSession={restoredSession} {...(navigation ? { navigation } : {})}/>;
 }
-function SecondChatView({ controller, connectionId, matchId, onHome, navigation, entryIntent, partnerName }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation; entryIntent?: SecondChatEntryIntent | undefined; partnerName?: string | null | undefined }) {
-  const [session] = useState(() => new SecondChatSession(controller,connectionId,matchId,controller.snapshot.account?.id ?? '',partnerName));
+function SecondChatView({ controller, connectionId, matchId, onHome, navigation, entryIntent, partnerName, restoredSession }: { controller: SessionController; connectionId: string; matchId: string; onHome: (message?: string) => void; navigation?: HomeNavigation; entryIntent?: SecondChatEntryIntent | undefined; partnerName?: string | null | undefined; restoredSession?: SecondChatSession | undefined }) {
+  const [session] = useState(() => restoredSession ?? new SecondChatSession(controller,connectionId,matchId,controller.snapshot.account?.id ?? '',partnerName));
   const state = useSyncExternalStore(session.subscribe,session.getSnapshot);
   const [,tick] = useState(0), [draft,setDraft] = useState(''), [reply,setReply] = useState<NonNullable<Message['replyTo']> | null>(null);
   const [audioDirty,setAudioDirty] = useState(false), [audioEpoch,setAudioEpoch] = useState(0), [dialog,setDialog] = useState<'completion' | 'inactivity' | 'safety' | 'block' | null>(null);
   const [unseen,setUnseen] = useState(false), [coachmark,setCoachmark] = useState(false);
   const coach = useRef<{ previous: boolean | null; shown: boolean }>({ previous: null, shown: false });
   const timeline = useRef<HTMLOListElement>(null), atBottom = useRef(true), input = useRef<HTMLTextAreaElement>(null), heading = useRef<HTMLHeadingElement>(null);
+  const lease = useRef(0);
+  // StrictMode replay must not dispose the freshly verified restoration snapshot.
+  // A real unmount retires the session in the next microtask; listeners/timers stop now.
   useEffect(() => {
+    const epoch = ++lease.current;
     session.start();
     // Defer until setup survives StrictMode cleanup, before consuming the one-shot intent.
     let cancelled = false;
-    queueMicrotask(() => { if (!cancelled) { if (entryIntent) void session.openFromUserAction(entryIntent); else void session.refresh(); } });
+    queueMicrotask(() => { if (!cancelled) { if (entryIntent) void session.openFromUserAction(entryIntent); else if (!restoredSession || !session.getSnapshot().status) void session.refresh(); } });
     heading.current?.focus();
     const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void session.refresh(false,true); },2500);
     const clock = window.setInterval(() => tick(v => v+1),500);
     const resume = () => { if (document.visibilityState === 'visible') void session.resume(); };
     window.addEventListener('online',resume); document.addEventListener('visibilitychange',resume);
-    return () => { cancelled = true; clearInterval(timer); clearInterval(clock); window.removeEventListener('online',resume); document.removeEventListener('visibilitychange',resume); session.dispose(); };
+    return () => { cancelled = true; clearInterval(timer); clearInterval(clock); window.removeEventListener('online',resume); document.removeEventListener('visibilitychange',resume); queueMicrotask(() => { if (lease.current === epoch) session.dispose(); }); };
   },[session]);
   const s = state.status, p = session.rules, now = session.now;
   const presentation = secondPresentation(s,now);
   const writable = p.writable && !state.blocked, ordinary = writable && !state.busy && !state.outgoing && !audioDirty;
-  const canHome = p.canReturn && !state.busy;
-  const home = () => { if (!session.rules.canReturn || session.getSnapshot().busy) return; if ((draft || audioDirty || state.outgoing) && !window.confirm('Hay un borrador o envío pendiente. ¿Querés salir y descartarlo?')) return; onHome(); };
+  const canHome = session.canReturnHome;
+  const home = () => { if (!session.canReturnHome) return; if ((draft || audioDirty || state.outgoing) && !window.confirm('Hay un borrador o envío pendiente. ¿Querés salir y descartarlo?')) return; onHome(); };
   useEffect(() => {
-    const unload = (e: BeforeUnloadEvent) => { if (!session.rules.canReturn || draft || audioDirty || state.outgoing || state.busy) e.preventDefault(); };
+    const unload = (e: BeforeUnloadEvent) => { if (!session.canReturnHome || draft || audioDirty || state.outgoing || state.busy) e.preventDefault(); };
     window.addEventListener('beforeunload',unload);
     return () => { window.removeEventListener('beforeunload',unload); };
   });
   const exitPolicy = useRef<{ canLeave: () => boolean; leave: () => void }>({ canLeave: () => false, leave: () => {} });
-  exitPolicy.current = { canLeave: () => session.rules.canReturn && !session.getSnapshot().busy && (!(draft || audioDirty || state.outgoing) || window.confirm('Hay un borrador o env\u00edo pendiente. \u00bfQuer\u00e9s salir y descartarlo?')), leave: () => onHome() };
+  exitPolicy.current = { canLeave: () => session.canReturnHome && (!(draft || audioDirty || state.outgoing) || window.confirm('Hay un borrador o env\u00edo pendiente. \u00bfQuer\u00e9s salir y descartarlo?')), leave: () => onHome() };
   const register = navigation?.registerSecondChat;
   useLayoutEffect(() => register?.({ canLeave: () => exitPolicy.current.canLeave(), leave: () => exitPolicy.current.leave() }),[register]);
   const returned = useRef(false);
@@ -96,6 +100,7 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation,
     ]}/></header>
     {canHome && <button onClick={home}>Volver a Inicio</button>}
     {!s && <p role="status">Cargando el segundo chat…</p>}
+    {state.notice && <p role="status">{state.notice}</p>}
     {state.busy && <p role="status">Procesando…</p>}
     {state.error && <p role="alert">{state.error} {state.diagnostic && <small>Referencia: second-chat/{state.diagnostic.stage}/{state.diagnostic.kind}/{state.diagnostic.httpStatus}</small>} <button disabled={state.busy} onClick={() => void session.refresh(true)}>Reintentar conexión</button></p>}
     {coachmark && <aside className="chat-panel">Ya podés proponer finalizar de común acuerdo desde las opciones del chat. <button onClick={() => setCoachmark(false)}>Entendido</button></aside>}
@@ -112,7 +117,7 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation,
       {m.replyTo && <blockquote className="chat-quote"><ReplyQuote {...replyPreview(m.replyTo,me,state.partnerId,state.partnerName)}/></blockquote>}
       {m.messageType === 'AUDIO' && m.audio ? <MessageAudio source={m.audio.url} durationMillis={m.audio.durationMillis} refresh={async () => { await session.refresh(true); return session.rules.readable && !session.getSnapshot().blocked && !session.getSnapshot().busy ? session.getSnapshot().messages.find(v => v.id === m.id)?.audio?.url ?? null : null; }}/> : <p>{m.content ?? 'Mensaje no compatible.'}</p>}<time dateTime={m.sentAt}>{new Date(m.sentAt).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</time></article></ReplySwipe>
       {m.senderId === me ? m.reactionType && <span role="img" aria-label="La otra persona reaccionó con corazón">♥</span> : <ReactionLane confirmed={m.reactionType === 'HEART'} eligible={eligible.has(m.id)} disabled={!ordinary} react={() => session.react(m.id)}/>}</li>)}
-      {state.outgoing && <li className="chat-message outgoing"><p>{state.outgoing.content ?? 'Audio pendiente'}</p><p role="status">{state.outgoing.phase === 'pending' ? 'Enviando…' : state.outgoing.phase === 'uncertain' ? 'Sin confirmar' : 'Falló el envío'}</p>{state.outgoing.phase !== 'pending' && <button disabled={state.busy || !p.writable || state.retryBlocked} onClick={() => void session.retry()}>Reconciliar y reintentar el mismo envío</button>}{state.outgoing.phase === 'failed' && <button disabled={state.busy} onClick={() => { session.discardFailed(); setAudioEpoch(v => v+1); setAudioDirty(false); }}>Descartar envío fallido</button>}</li>}
+      {state.outgoing && p.active && !p.expired && <li className="chat-message outgoing"><p>{state.outgoing.content ?? 'Audio pendiente'}</p><p role="status">{state.outgoing.phase === 'pending' ? 'Enviando…' : state.outgoing.phase === 'uncertain' ? 'Sin confirmar' : 'Falló el envío'}</p>{state.outgoing.phase !== 'pending' && <button disabled={state.busy || !p.writable || state.retryBlocked} onClick={() => void session.retry()}>Reconciliar y reintentar el mismo envío</button>}{state.outgoing.phase === 'failed' && <button disabled={state.busy} onClick={() => { session.discardFailed(); setAudioEpoch(v => v+1); setAudioDirty(false); }}>Descartar envío fallido</button>}</li>}
     </ol>{unseen && <button onClick={() => { const l = timeline.current; if (l) l.scrollTop=l.scrollHeight; atBottom.current=true; setUnseen(false); }}>Ver mensajes nuevos</button>}</>}
     {p.writable && <form className="chat-composer" onSubmit={e => { e.preventDefault(); if (ordinary) void session.send(draft,reply ? {type:'MESSAGE',targetId:reply.targetId} : null); }}>
       {reply && <aside className="chat-reply-preview"><ReplyQuote {...replyPreview(reply,me,state.partnerId,state.partnerName)}/><button type="button" disabled={!!state.outgoing} onClick={() => setReply(null)}>Quitar respuesta</button></aside>}
