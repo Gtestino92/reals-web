@@ -29,9 +29,12 @@ export function activityPresentation(home: HomeData, now = Date.now()) {
     .filter(candidate => candidate.kind !== null)
     .sort((a,b) => priorityEvent(a.item,now)-priorityEvent(b.item,now) || a.sourceIndex-b.sourceIndex || (a.kind === 'visual' ? 0 : a.kind === 'open' ? 1 : 2)-(b.kind === 'visual' ? 0 : b.kind === 'open' ? 1 : 2));
   const priorities = candidates.slice(0,2).map(candidate => candidate.item);
-  const hasActivity = items.length > 0 || home.passiveNotices.length > 0 || home.summary.hasPendingSchedulingConnection || home.summary.activeInitialCount > 0 || home.summary.activeConnectionCount > 0 || home.summary.actionableConnectionCount > 0;
+  // Internal scheduling preparation reveals mutual approval. It is neither
+  // visible engagement nor a reason to retain the Activity destination.
+  const notices = home.passiveNotices.filter(notice=>notice!=='SCHEDULING_PREPARING');
+  const hasActivity = items.length > 0 || notices.length > 0 || home.summary.activeInitialCount > 0 || home.summary.activeConnectionCount > 0 || home.summary.actionableConnectionCount > 0;
   const required = items.filter(item => item.type === 'VISUAL_REVIEW' || item.requiresAction).length;
-  return { groups, priorities, priorityOverflow: Math.max(0,candidates.length-2), hasActivity, required };
+  return { groups, notices, priorities, priorityOverflow: Math.max(0,candidates.length-2), hasActivity, required };
 }
 
 export function priorityKind(item: Activity, now: number): 'visual' | 'open' | 'soon' | null {

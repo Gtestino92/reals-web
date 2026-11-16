@@ -8,6 +8,15 @@ async function ready() {vi.useFakeTimers();vi.setSystemTime(time);const f=setup(
 it('preserves draft during polling and resets only on round change',async()=>{
  const {model,state}=await ready();model.setDraft([slot]);await model.refresh();expect(model.getSnapshot().draft).toEqual([slot]);state.n={...state.n,roundNumber:2};await model.refresh();expect(model.getSnapshot().draft).toEqual([]);
 });
+it('overlaps independent reads while preserving both final authority checks',async()=>{
+ const {model,request,state}=await ready();const base=request.getMockImplementation()!;let proposals!:(value:unknown)=>void,availability!:(value:unknown)=>void;
+ request.mockClear();request.mockImplementation((path,...args)=>path.endsWith('/proposals')?new Promise(r=>{proposals=r;}):path.endsWith('/scheduling-availability')?new Promise(r=>{availability=r;}):base(path,...args));
+ const refresh=model.poll();await vi.waitFor(()=>expect(availability).toBeTypeOf('function'));expect(proposals).toBeTypeOf('function');expect(request.mock.calls.filter(c=>c[0].endsWith('/negotiation'))).toHaveLength(1);proposals(state.p);await Promise.resolve();expect(request.mock.calls.filter(c=>c[0].endsWith('/negotiation'))).toHaveLength(1);availability(state.a);await refresh;expect(request.mock.calls.filter(c=>c[0].endsWith('/negotiation'))).toHaveLength(2);expect(request.mock.calls.filter(c=>c[0]==='/connections/c')).toHaveLength(2);expect(model.getSnapshot().verified).toBe(true);
+});
+it('abandons only background reads on hide and preserves snapshot/draft across a fresh resume',async()=>{
+ const {model,request}=await ready();model.setDraft([slot]);const base=request.getMockImplementation()!;let reject!:(error:unknown)=>void;
+ request.mockReturnValueOnce(new Promise((_,r)=>{reject=r;}));const old=model.poll();const signal=request.mock.calls.at(-1)![1];model.pause();expect(signal.aborted).toBe(true);expect(model.getSnapshot()).toMatchObject({verified:true,busy:false,pending:false,draft:[slot]});request.mockImplementation(base);await model.poll();reject(new ApiError('network'));await old;expect(model.getSnapshot()).toMatchObject({verified:true,busy:false,error:'',draft:[slot]});
+});
 it('serializes submit, refresh, accept, rejection and block synchronously',async()=>{
  const {model,request,state}=await ready();model.setDraft([slot]);const read=request.getMockImplementation()!;let resolve!:()=>void;
  request.mockImplementation(async(path,signal,method,body)=>{if(method==='POST'){await new Promise<void>(r=>{resolve=r;});state.p=[proposal({userId:'me'})];return state.p;}return read(path,signal,method,body);});

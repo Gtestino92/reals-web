@@ -35,15 +35,18 @@ async function openVisualReturnFixture() {
 it.each(['Aprobar','Rechazar'])('returns directly Home after %s and suppresses an obsolete completed visual snapshot',async action=>{
  await openVisualReturnFixture();fireEvent.click(screen.getByRole('button',{name:action}));await screen.findByRole('heading',{name:'Inicio'});expect(screen.queryByRole('button',{name:'Ver Actividad'})).toBeNull();expect(screen.queryByText('No tenés pendientes por ahora.')).toBeNull();act(()=>history.back());await screen.findByRole('heading',{name:'Inicio'});act(()=>history.forward());await screen.findByRole('heading',{name:'Inicio'});expect(screen.queryByRole('heading',{name:'María'})).toBeNull();
 });
-it.each(['visual','scheduling','second','notice','preparation','summary'])('returns to Activity when authoritative Home retains %s',async remaining=>{
+it('does not disclose internal preparation or offer Activity for preparation alone',async()=>{
+ home.activeInteractionsSummary.hasPendingSchedulingConnection=true;home.passiveNotices=[{type:'SCHEDULING_PREPARING'}];mount();await ready();expect(screen.queryByRole('button',{name:'Ver Actividad'})).toBeNull();expect(screen.queryByText(/Estamos preparando/)).toBeNull();expect(screen.getByRole('heading',{name:'Inicio'})).toBeVisible();expect(search()).toBeEnabled();
+});
+it.each(['visual','scheduling','second','notice','preparation','summary'])('chooses the return destination from visible authoritative engagement: %s',async remaining=>{
  await openVisualReturnFixture();
  if(remaining==='visual')home.pendingActions.push({type:'VISUAL_REVIEW',matchId:'other'});
  if(remaining==='scheduling')home.nextSteps=[{type:'SCHEDULING',matchId:'other',connectionId:'c',requiresAction:false}];
  if(remaining==='second')home.nextSteps=[{type:'SECOND_CHAT_EXPIRED',matchId:'other',connectionId:'c',requiresAction:false}];
- if(remaining==='notice')home.passiveNotices=[{type:'SCHEDULING_PREPARING'}];
- if(remaining==='preparation')home.activeInteractionsSummary.hasPendingSchedulingConnection=true;
+ if(remaining==='notice')home.passiveNotices=[{type:'OTHER_NOTICE'}];
+ if(remaining==='preparation'){home.activeInteractionsSummary.hasPendingSchedulingConnection=true;home.passiveNotices=[{type:'SCHEDULING_PREPARING'}];}
  if(remaining==='summary')home.activeInteractionsSummary.activeConnectionCount=1;
- fireEvent.click(screen.getByRole('button',{name:'Aprobar'}));await screen.findByRole('heading',{name:'Actividad'});expect(screen.queryByRole('heading',{name:'María'})).toBeNull();expect(screen.queryByText('No tenés pendientes por ahora.')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Aprobar'}));await screen.findByRole('heading',{name:remaining==='preparation'?'Inicio':'Actividad'});expect(screen.queryByRole('heading',{name:'María'})).toBeNull();expect(screen.queryByText('No tenés pendientes por ahora.')).toBeNull();
 });
 it('waits for authoritative Home without flashing empty Activity; failure offers retry and safe Home',async()=>{
  await openVisualReturnFixture();const base=fetcher.getMockImplementation()!;let release!:(r:Response)=>void;
@@ -517,13 +520,13 @@ it.each(['CHAT_ABANDONED','CHAT_EXPIRED'])('hides terminal %s from every Home su
 it.each(['CHAT_ABANDONED','CHAT_EXPIRED'])('retires terminal %s copy on Search without losing backend notices or stale-chat suppression',async code=>{
   installFirstChatBackend();const base=fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url,options)=>url==='/api/matches/m/chat'?Promise.resolve(json({code},409)):base(url,options));
-  home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];home.passiveNotices=[{type:'SCHEDULING_PREPARING'}];mount();
+  home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];home.passiveNotices=[{type:'OTHER_NOTICE'}];mount();
   const message=code==='CHAT_ABANDONED'?'El chat se cerró por inactividad.':'El chat venció.';await screen.findByText(message);await ready();
   const chatReads=fetcher.mock.calls.filter(([url])=>url==='/api/matches/m/chat').length;
   fireEvent.click(search());await confirmed();expect(screen.queryByText(message)).toBeNull();status.version++;
   await act(async()=>document.dispatchEvent(new Event('visibilitychange')));expect(screen.queryByText(message)).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'Cancelar búsqueda'}));await waitFor(()=>expect(search()).toBeEnabled());
-  expect(screen.queryByText(message)).toBeNull();expect(screen.getByText('Estamos preparando tus próximos pasos para coordinar horarios.')).toBeVisible();
+  expect(screen.queryByText(message)).toBeNull();expect(screen.getByText('Hay novedades sobre tus interacciones. Consultalas desde Android.')).toBeVisible();
   expect(fetcher.mock.calls.filter(([url])=>url==='/api/matches/m/chat')).toHaveLength(chatReads);
 });
 it.each(['dismiss','management','activity'])('retires completion copy on %s navigation',async action=>{

@@ -1,6 +1,7 @@
-.scheduling { width: 100%; max-width: 42rem; margin-inline: auto; display: grid; gap: 1rem; overflow-wrap: anywhere; }
+.scheduling { width: 100%; min-width:0; max-width: 42rem; margin-inline: auto; display: grid; gap: 1rem; overflow-wrap: anywhere; }
+.scheduling > .visual-review { width:100%; min-width:0; }
 .scheduling .home-heading { flex-wrap: wrap; align-items: start; }
-.scheduling h2 { flex: 1 1 12rem; }
+.scheduling h2 { flex: 1 1 12rem; min-width:0; }
 .scheduling fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 1rem; }
 .scheduling label { display: grid; gap: .5rem; min-width: 0; }
 .scheduling select { color: var(--color-on-surface); background: var(--color-surface); font: inherit; width: 100%; min-height: 48px; padding: .5rem; border: 1px solid currentColor; border-radius: 8px; }
@@ -9,7 +10,7 @@
 .scheduling li button { margin-block: .5rem; }
 .scheduling button { min-height: 48px; white-space: normal; }
 .scheduling dialog { max-width: min(32rem,90vw); }
-.scheduling-thumbnails { display: flex; gap: .625rem; overflow-x: auto; padding: .25rem; }
+.scheduling-thumbnails { display: flex; min-width:0; max-width:100%; gap: .625rem; overflow-x: auto; padding: .25rem; }
 .scheduling-thumbnails button { flex: 0 0 6rem; padding: .25rem; border: 1px solid var(--color-outline); border-radius: var(--radius-row); background: var(--color-surface); color: var(--color-on-surface); }
 .scheduling-thumbnails button[aria-pressed=true] { border: 2px solid var(--color-primary); }
 .scheduling-thumbnails img { width: 100%; height: 7rem; object-fit: cover; border-radius: var(--radius-extra-small); }
@@ -23,3 +24,10 @@
 .scheduling-entry .home-entry-title { font-weight: 600; }
 .scheduling-entry .visual-chevron { position: absolute; right: .5rem; top: 1rem; }
 .scheduling-entry:disabled { opacity: .5; cursor: default; }
+.scheduling-options { padding:0; margin-block:1.5rem; list-style:none; display:grid; gap:1rem; }
+.scheduling-options > li { display:grid; grid-template-columns:minmax(0,1fr) 11rem; gap:1.5rem; align-items:center; padding:1rem 0; border-top:1px solid var(--color-outline-variant); }
+.scheduling-options > li > button { margin:0; width:100%; }
+.scheduling-option-content { min-width:0; }
+.scheduling-placeholder { min-height:22rem; }
+.placeholder-control { height:3rem; margin-block:1rem; border:1px solid var(--color-outline-variant); border-radius:var(--radius-button); background:var(--color-surface-variant); }
+@media (max-width:36rem) { .scheduling-options > li { grid-template-columns:minmax(0,1fr); gap:1rem; } }

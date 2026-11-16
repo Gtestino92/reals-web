@@ -5,6 +5,7 @@ import { useLayoutEffect, useCallback, useEffect, useMemo, useRef, useState, use
 import type { SessionController } from '../auth/session';
 import { VisualSession, sessionContext, validMessage } from './VisualSession';
 import { deadline, useVisualNow } from './deadline';
+import { ProfilePlaceholder } from './ProfilePlaceholder';
 import './visual.css';
 
 export function VisualReview({ controller, matchId, onBack, onFinished = onBack, onBlocked, navigation }: { controller: SessionController; matchId: string; onBack: () => void; onFinished?: (reason: VisualOutcome) => void; onBlocked?: (value: boolean) => void; navigation?: HomeNavigation }) {
@@ -58,7 +59,7 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
     </div></div></header>
     <p>Conocé su perfil antes de decidir si querés continuar.</p>
     {expiry&&<p>{deadline(expiry,now,true)}</p>}
-    {!profile&&state.busy&&<p role="status">Cargando descubrimiento…</p>}
+    {!profile&&state.busy&&<ProfilePlaceholder label="Cargando descubrimiento…"/>}
     {state.error&&<p role="alert" className="home-error">{state.error}</p>}
     {state.error&&!state.terminal&&<button className="login-button login-outlined" disabled={state.busy||!!state.pending} onClick={()=>void model.refresh()}>Reintentar</button>}
     {expired?<p role="status">El descubrimiento venció. Actualizando estado...</p>:expiry&&Date.parse(expiry)-now<=600000&&<aside className="home-notice">Descubrimiento por vencer. El descubrimiento vence pronto. Completá tu decisión para no perder esta oportunidad.</aside>}
@@ -72,11 +73,11 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
         {!!profile.affinityIndicators.length&&<section className="visual-insert"><h4>Afinidades compartidas</h4><p>Temas en los que encontraron afinidad.</p><ul className="visual-affinities">{profile.affinityIndicators.map(a=><li key={a.categoryId}>{a.title}</li>)}</ul></section>}
         {photo(2)}{!!profile.profileQuestions.length&&<section className="visual-insert"><h4>Preguntas del perfil</h4>{profile.profileQuestions.map((q,i)=><div key={`${q.questionId}/${i}`}><h5>{q.prompt}</h5><p>{q.answer}</p></div>)}</section>}{profile.photos.slice(3).map((_,i)=>photo(i+3))}
       </article>
-      <section className={`home-card visual-section ${profile.partnerPersonalMessageSubmitted&&!profile.partnerPersonalMessageRead?'visual-unread':''}`}><h3>Mensaje personal de la otra persona</h3>
+      {profile.partnerPersonalMessageSubmitted&&<section className={`home-card visual-section ${!profile.partnerPersonalMessageRead?'visual-unread':''}`}><h3>Mensaje personal de la otra persona</h3>
         <div className="visual-message-badge">{profile.partnerPersonalMessageSubmitted&&!profile.partnerPersonalMessageRead&&<strong>Mensaje nuevo</strong>}</div>
         <p className={`visual-message-body${state.messageLoaded ? ' visual-message-loaded' : ''}`} aria-live="polite">{!profile.partnerPersonalMessageSubmitted?'No dejó un mensaje personal.':state.pending==='read'?'Leyendo mensaje...':state.messageError?'No pudimos cargar el mensaje personal. Intentá nuevamente.':state.messageLoaded?state.message||'No dejó un mensaje personal.':'La otra persona dejó un mensaje personal para vos.'}</p>
         <div className="visual-message-action">{profile.partnerPersonalMessageSubmitted&&!state.messageLoaded&&<button className="login-button login-outlined" disabled={disabled} onClick={()=>void model.act('read')}>{state.messageError?'Reintentar lectura':'Leer mensaje'}</button>}</div>
-      </section>
+      </section>}
       <section className="home-card visual-section"><h3>Mi mensaje personal</h3>
         {profile.myPersonalMessageSubmitted?<p>Ya guardaste tu mensaje personal. No se puede modificar.</p>:<><label>Mensaje personal<textarea value={draft} maxLength={280} rows={3} disabled={disabled} onChange={e=>setDraft(e.target.value.slice(0,280))}/></label><p>{draft.length}/280</p>{draft&&!validMessage(draft)&&<p>El mensaje personal no es válido.</p>}<button className="login-button login-outlined" disabled={disabled||!validMessage(draft)} onClick={()=>void model.act('save',draft)}>{state.pending==='save'?'Guardando...':'Guardar mensaje'}</button></>}
         {state.notice&&<p role="status">{state.notice}</p>}

@@ -2,6 +2,8 @@
 html:has(.home) { scrollbar-gutter: stable; }
 .login-page:has(.home) > .login-panel { width: min(100%, 960px); max-width: 960px; margin: 0 auto; }
 .home { text-align: left; display: grid; gap: 24px; min-width: 0; }
+.second-chat-card-actions { display:grid; gap:12px; margin-top:16px; }
+.second-chat-card-actions > button { width:100%; }
 .home[hidden] { display: none; }
 .home h2, .home h3, .home h4 { font-family: var(--font-display); font-weight: var(--font-weight-display); margin: 0 0 12px; }
 .home h2 { font-size: var(--type-screen-title-size); line-height: var(--type-screen-title-line-height); }

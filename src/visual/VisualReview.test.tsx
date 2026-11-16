@@ -179,7 +179,7 @@ it('keeps concealed images mounted when the expiry timer fires in a hidden tab',
 });
 
 it('places defer after decisions with resume copy and keeps the title and overflow in the toolbar',async()=>{
- const {controller}=setup();const {container}=render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const back=screen.getByRole('button',{name:'Decidir más tarde'}),title=screen.getByRole('heading',{name:'Descubrimiento'});expect(back.closest('header')).toBeNull();expect(container.querySelector('.visual-toolbar')).toContainElement(title);expect(screen.getByRole('button',{name:'Rechazar'}).compareDocumentPosition(back)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(screen.getByText(/Podés retomar este descubrimiento desde Actividad antes/)).toBeVisible();expect(container.querySelector('.visual-message-body')).toHaveAttribute('aria-live','polite');
+ const {controller}=setup();const {container}=render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const back=screen.getByRole('button',{name:'Decidir más tarde'}),title=screen.getByRole('heading',{name:'Descubrimiento'});expect(back.closest('header')).toBeNull();expect(container.querySelector('.visual-toolbar')).toContainElement(title);expect(screen.getByRole('button',{name:'Rechazar'}).compareDocumentPosition(back)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(screen.getByText(/Podés retomar este descubrimiento desde Actividad antes/)).toBeVisible();expect(container.querySelector('.visual-message-body')).toBeNull();
 });
 
 it('reveals the same authorized snapshot immediately while a slow foreground check remains pending',async()=>{
@@ -188,6 +188,13 @@ it('reveals the same authorized snapshot immediately while a slow foreground che
 
 it('offers an immediate accessible exit after initial loading failure',async()=>{
  const {controller,request}=setup(),back=vi.fn();request.mockRejectedValueOnce(new ApiError('network'));render(<VisualReview controller={controller} matchId="m" onBack={back}/>);await screen.findByRole('alert');fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));expect(back).toHaveBeenCalledOnce();expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('omits unsent partner message and reveals it only after an authoritative submitted flag',async()=>{
+ const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');expect(screen.queryByRole('heading',{name:'Mensaje personal de la otra persona'})).toBeNull();expect(screen.queryByText('No dejó un mensaje personal.')).toBeNull();expect(screen.getByRole('button',{name:'Aprobar'})).toBeEnabled();
+ request.mockResolvedValueOnce({id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'}).mockResolvedValueOnce(visualProfile({partnerPersonalMessageSubmitted:true}));act(()=>window.dispatchEvent(new Event('online')));await screen.findByRole('heading',{name:'Mensaje personal de la otra persona'});expect(screen.getByRole('button',{name:'Leer mensaje'})).toBeEnabled();expect(request.mock.calls.some(c=>c[0].endsWith('/partner'))).toBe(false);
+});
+it('uses a noninteractive structural placeholder only during initial loading',async()=>{
+ const {controller,request}=setup(),pending=deferred();request.mockReturnValueOnce(pending.promise);const view=render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);expect(screen.getByRole('status')).toHaveTextContent('Cargando descubrimiento…');expect(view.container.querySelector('.placeholder-photo')).toHaveAttribute('class','placeholder-photo');expect(screen.queryByRole('button',{name:'Aprobar'})).toBeNull();await act(async()=>pending.resolve({id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'}));await screen.findByText('María');expect(view.container.querySelector('.profile-placeholder')).toBeNull();
 });
 it('keeps the same profile, photo and unsaved draft across same-account credential notifications',async()=>{
  const {controller,notify}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const image=screen.getAllByRole('img')[0],input=screen.getByLabelText('Mensaje personal');fireEvent.change(input,{target:{value:'Borrador'}});act(notify);await waitFor(()=>expect(screen.getByRole('button',{name:'Aprobar'})).toBeEnabled());expect(screen.getAllByRole('img')[0]).toBe(image);expect(input).toHaveValue('Borrador');

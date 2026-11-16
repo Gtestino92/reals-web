@@ -12,7 +12,9 @@ it('limits advisory priority to two items without changing lifecycle or hiding a
 });
 it('shows no entry for empty Home and retains notices and summary-only activity', () => {
   const raw = emptyHome(); expect(activityPresentation(parseHome(raw)).hasActivity).toBe(false);
-  raw.activeInteractionsSummary.hasPendingSchedulingConnection = true; expect(activityPresentation(parseHome(raw)).hasActivity).toBe(true);
+  raw.activeInteractionsSummary.hasPendingSchedulingConnection = true;raw.passiveNotices=[{type:'SCHEDULING_PREPARING'}];
+  const parsed=parseHome(raw),before=JSON.stringify(parsed);expect(activityPresentation(parsed)).toMatchObject({hasActivity:false,notices:[]});expect(JSON.stringify(parsed)).toBe(before);
+  raw.passiveNotices.push({type:'OTHER_NOTICE'});expect(activityPresentation(parseHome(raw))).toMatchObject({hasActivity:true,notices:['OTHER_NOTICE']});
 });
 
 it('classifies actionable Scheduling as required and waiting Scheduling as Others', () => {

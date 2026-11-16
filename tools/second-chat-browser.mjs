@@ -18,7 +18,7 @@ async function page(group,user,width){
  const evaluate=async(expression)=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
  await call('Page.enable');await call('Page.addScriptToEvaluateOnNewDocument',{source:recorderStub});await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width<500});
  await call('Page.navigate',{url:`http://127.0.0.1:5175/tools/second-chat-fixture.html?user=${user}&backend=${encodeURIComponent(origin+'/'+group)}`});
- return {call,evaluate,close:()=>call('Page.close')};
+ return {call,evaluate,close:()=>Promise.race([new Promise(r=>ws.addEventListener('close',r,{once:true})),call('Page.close')])};
 }
 async function wait(p,expression){await p.call('Page.bringToFront');for(let i=0;i<120;i++){if(await p.evaluate(expression)){checks++;return;}await new Promise(r=>setTimeout(r,100));}throw Error('Timeout '+expression+' '+await p.evaluate('document.body.innerText+JSON.stringify([...document.querySelectorAll(\"audio\")].map(a=>({src:a.src,error:a.error?.code,paused:a.paused})))'));}
 async function refresh(p){await p.call('Page.bringToFront');await p.evaluate("document.dispatchEvent(new Event('visibilitychange'))");}
