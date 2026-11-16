@@ -1,8 +1,11 @@
-.scheduling { width: 100%; min-width:0; max-width: 42rem; margin-inline: auto; display: grid; gap: 1rem; overflow-wrap: anywhere; }
-.scheduling > .visual-review { width:100%; min-width:0; }
+.scheduling { width: 100%; min-width:0; max-width: 42rem; margin-inline: auto; margin-block-start:24px; display: grid; gap: 1rem; overflow-wrap: anywhere; }
+.scheduling > .visual-review { width:100%; min-width:0; margin-block-start:0; }
+.scheduling-meta { display:grid; gap:4px; }
+.scheduling .scheduling-meta p { margin:0; }
 .scheduling .home-heading { flex-wrap: wrap; align-items: start; }
 .scheduling h2 { flex: 1 1 12rem; min-width:0; }
 .scheduling fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 1rem; }
+.scheduling fieldset + h4 { margin-top:1.5rem; }
 .scheduling label { display: grid; gap: .5rem; min-width: 0; }
 .scheduling select { color: var(--color-on-surface); background: var(--color-surface); font: inherit; width: 100%; min-height: 48px; padding: .5rem; border: 1px solid currentColor; border-radius: 8px; }
 .scheduling-time { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap: 1rem; }

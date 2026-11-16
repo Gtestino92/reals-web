@@ -29,7 +29,7 @@ try {
     await call('Fetch.fulfillRequest',{requestId:m.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'image/svg+xml'},{name:'Cache-Control',value:'no-store'}],body:Buffer.from(svg).toString('base64')});
   }});
   await evaluate(`(async()=>{
-    const React=await import('/node_modules/.vite/deps/react.js'),ReactDOM=await import('/node_modules/.vite/deps/react-dom_client.js');const {Home}=await import('/src/home/Home.tsx');const {TabGate}=await import('/src/tabs/TabGate.tsx');const {TabOwnershipManager}=await import('/src/tabs/TabOwnershipManager.ts');const {ApiError}=await import('/src/auth/api.ts');await import('/src/styles/tokens.css');await import('/src/styles/global.css');
+    const React=await import('/node_modules/.vite/deps/react.js'),ReactDOM=await import('/node_modules/.vite/deps/react-dom_client.js');const {Home}=await import('/src/home/Home.tsx');const {TabGate}=await import('/src/tabs/TabGate.tsx');const {TabOwnershipManager}=await import('/src/tabs/TabOwnershipManager.ts');const {ApiError}=await import('/src/auth/api.ts');await import('/src/styles/tokens.css');await import('/src/styles/global.css');await import('/src/auth/login.css');
     document.body.innerHTML='<main class="login-page"><section class="login-panel"><div id="probe"></div></section></main>';
     window.decided=false;window.writes=[];window.signature=0;window.reads=[];window.mode='ok';window.lag=0;window.rev=1;
     const snapshot={phase:'ready',authContextVersion:1,account:{id:'me'},profile:{id:'p',userId:'me',status:'ACTIVE',displayName:'Lucía'}};
@@ -66,7 +66,11 @@ try {
     check(await evaluate("firstImage===document.querySelector('.visual-profile img')"),'foreground keeps same image '+width);
     check(await evaluate("Math.abs(scrollY-readingScroll)<2&&document.documentElement.scrollHeight===readingHeight"),'foreground retains reading position and document height '+width);
     check(mediaRequests.filter(url=>url.includes('/one?')).length===before,'foreground no image download '+width);
+    check(await evaluate("(()=>{const text=document.querySelector('.visual-message-body'),button=document.querySelector('.visual-message-action button'),range=document.createRange();range.selectNodeContents(text);const gap=button.getBoundingClientRect().top-text.getBoundingClientRect().bottom;return text.getBoundingClientRect().height<=range.getBoundingClientRect().height+8&&gap>=8&&gap<=16&&button.getBoundingClientRect().height>=48;})()"),'unread message uses natural height and normal action gap '+width);
+    await evaluate("document.querySelector('.visual-message-body').closest('section').scrollIntoView({block:'center'})");await screenshot('message-unread-'+width);
     await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Leer mensaje').click()");await waitFor("document.body.textContent.includes('Hola, este es un mensaje')",'explicit message read');
+    check(await evaluate("(()=>{const text=document.querySelector('.visual-message-body'),card=text.closest('section');return getComputedStyle(card.querySelector('.visual-message-badge')).display==='none'&&getComputedStyle(card.querySelector('.visual-message-action')).display==='none'&&card.getBoundingClientRect().bottom-text.getBoundingClientRect().bottom<=26;})()"),'read message has no empty badge or action reservation '+width);
+    await evaluate("document.querySelector('.visual-message-body').closest('section').scrollIntoView({block:'center'})");await screenshot('message-read-'+width);
     await evaluate("var input=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Hola desde Web');input.dispatchEvent(new Event('input',{bubbles:true}));");await delay(50);
     await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Guardar mensaje').click()");await waitFor("document.body.textContent.includes('Ya guardaste tu mensaje personal')",'save message');
     await evaluate("document.querySelector('.visual-decisions').scrollIntoView({block:'center'})");

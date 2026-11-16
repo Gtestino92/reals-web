@@ -30,9 +30,8 @@
 .visual-header h2 { margin: 0; }
 .visual-toolbar h2 { min-width:0; overflow-wrap:anywhere; }
 .visual-concealed { display:none; visibility:hidden; pointer-events:none; }
-.visual-message-badge { min-block-size: 1.5em; }
-.visual-message-body { min-block-size: 6em; white-space: pre-wrap; overflow-wrap: anywhere; }
-.visual-message-action { min-block-size: 48px; }
+.visual-section > .visual-message-body { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.visual-message-badge:empty, .visual-message-action:empty { display:none; }
 .visual-message-loaded { animation: visual-message-appear 180ms ease-out; }
 @keyframes visual-message-appear { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .visual-message-loaded { animation: none; } }

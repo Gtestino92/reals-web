@@ -37,9 +37,9 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onBack,o
   return <section className="scheduling" aria-busy={s.busy&&!s.connection}>
     {browse?<PartnerProfile controller={controller} matchId={matchId} onBack={onCloseBrowse} disabled={s.pending} menu={blockMenu}/>:<>
       <header className="home-heading"><h2>Coordinar horarios</h2><button className="login-button login-outlined" disabled={s.pending} onClick={onBack}>Volver a Actividad</button>{blockMenu}</header>
-      <p>{partnerName?`Con ${partnerName}`:'Con la otra persona'}</p>
+      <div className="scheduling-meta"><p>{partnerName?`Con ${partnerName}`:'Con la otra persona'}</p>
       {s.negotiation&&<p>Ronda {s.negotiation.roundNumber}{s.busy?' · Actualizando…':''}</p>}
-      {s.negotiation?.status==='PENDING'&&<VisualDeadline start={s.negotiation.createdAt} end={expires??null} now={now}/>}
+      {s.negotiation?.status==='PENDING'&&<VisualDeadline start={s.negotiation.createdAt} end={expires??null} now={now}/>}</div>
       {s.errorContext==='screen'&&error}{s.message&&<p role="status">{s.message}</p>}
       {s.error&&<button className="login-button login-outlined" disabled={s.busy} onClick={()=>void model.refresh()}>Reintentar</button>}
       {s.negotiation?.status==='PENDING'&&(expired?<aside className="home-notice">La coordinación venció. Actualizando estado…</aside>:expires&&Date.parse(expires)-now<=3600000&&<aside className="home-notice">Coordinación por vencer. Confirmá o enviá opciones para no perder la conexión.</aside>)}
