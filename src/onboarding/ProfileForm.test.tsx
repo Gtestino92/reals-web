@@ -17,6 +17,9 @@ function mount(patch: Partial<Props> = {}) {
   return { submit,retryCountries,update: (next: Partial<Props>) => { props = { ...props,...next }; view.rerender(tree()); } };
 }
 function fillRequired() {
+  fireEvent.change(screen.getByLabelText('Género'),{ target:{ value:'MALE' } });
+  fireEvent.change(screen.getByLabelText('Intención'),{ target:{ value:'DATE' } });
+  fireEvent.click(screen.getByRole('checkbox',{ name:'Mujeres' }));
   fireEvent.change(screen.getByLabelText('Nombre visible'),{ target:{ value:'Ana' } });
   fireEvent.change(screen.getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } });
   fireEvent.change(screen.getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } });
@@ -127,4 +130,26 @@ it.each(['create','filters'] as const)('submits synchronized numeric ages throug
   fireEvent.change(to,{ target:{ value:'34' } }); fireEvent.blur(to);
   expect(screen.getByText('Edad: 33–34 años')).toBeInTheDocument(); submitForm();
   expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ preferredMinAge:33,preferredMaxAge:34 }),mode);
+});
+
+it('requires explicit sensitive choices and focuses the first invalid field without writing', () => {
+  const { submit, update } = mount();
+  expect(screen.getByLabelText('Género')).toHaveValue('');
+  expect(screen.getByLabelText('Intención')).toHaveValue('');
+  for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).not.toBeChecked();
+  submitForm();
+  expect(screen.getByLabelText('Nombre visible')).toHaveFocus();
+  expect(screen.getByLabelText('Nombre visible')).toHaveAttribute('aria-invalid','true');
+  expect(submit).not.toHaveBeenCalled();
+  fillRequired(); update({ busy:true }); submitForm(); expect(submit).not.toHaveBeenCalled();
+  update({ busy:false }); submitForm(); expect(submit).toHaveBeenCalledOnce();
+});
+it('keeps sensitive choices empty after filling other fields and links the first error', () => {
+  const { submit } = mount();
+  fireEvent.change(screen.getByLabelText('Nombre visible'),{ target:{ value:'Ana' } });
+  fireEvent.change(screen.getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } });
+  fireEvent.change(screen.getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } });
+  submitForm();
+  expect(submit).not.toHaveBeenCalled(); expect(screen.getByLabelText('Género')).toHaveFocus();
+  expect(screen.getByLabelText('Género')).toHaveAccessibleDescription(/Seleccioná un género/);
 });

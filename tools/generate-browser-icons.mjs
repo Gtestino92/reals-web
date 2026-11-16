@@ -44,9 +44,16 @@ await mkdir('public/icons',{recursive:true});
 await withIdentityChrome(async({evaluate})=>{
   const images=await evaluate(`(async()=>{
     const inputs=${JSON.stringify(inputs)},images={};for(const key of Object.keys(inputs)){const image=new Image();image.src=inputs[key];await image.decode();images[key]=image;}
-    const specs=[['favicon-16.png',16,'favicon'],['favicon-32.png',32,'favicon'],['apple-touch-icon.png',180,'seal'],['icon-192.png',192,'launcher'],['icon-512.png',512,'seal'],['icon-maskable-512.png',512,'maskable']];
+    const specs=[['favicon-16.png',16,'favicon'],['favicon-32.png',32,'favicon'],['apple-touch-icon.png',180,'seal'],['icon-192.png',192,'launcher'],['icon-512.png',512,'seal'],['icon-maskable-512.png',512,'maskable']].filter(([name]) => !${process.argv.includes('--favicons-only')} || name.startsWith('favicon'));
     return specs.map(([name,size,kind])=>{const c=document.createElement('canvas');c.width=size;c.height=size;const x=c.getContext('2d');x.imageSmoothingQuality='high';
-      if(kind==='favicon')x.drawImage(images.seal,40,40,432,432,0,0,size,size);
+      if(kind==='favicon') {
+        // Remove the square surround, retaining the original ivory inside the
+        // seal for contrast on dark tabs. Clip before resampling for soft edges.
+        const seal=document.createElement('canvas');seal.width=seal.height=424;
+        const ink=seal.getContext('2d');ink.beginPath();ink.arc(212,212,211,0,Math.PI*2);ink.clip();
+        ink.drawImage(images.seal,42,48,424,424,0,0,424,424);
+        x.drawImage(seal,0,0,size,size);
+      }
       else if(kind==='maskable'){
         // Edge-extend only the source background, then inset its original image.
         const inset=32,side=448,im=images.seal;

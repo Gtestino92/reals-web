@@ -16,7 +16,9 @@ The monochrome notification status icon is not used.
 | `src/assets/reals-seal.png` | `2841bc1901f065359db15cc5e6225a77738c400116d316dcc221953f57084f43` |
 | Android `app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp` (192 square) | `b80bf01560fc5d73cf51a89b3e2ad2de0ef7275a3762449c0e56884d68af490d` |
 
-Run `node tools/generate-browser-icons.mjs` from the Web repository root with
+For tab icons only, run `node tools/generate-browser-icons.mjs --favicons-only`.
+This preserves all existing installation assets byte-for-byte. Run the full
+`node tools/generate-browser-icons.mjs` from the Web repository root with
 the Android sibling available. The tool uses native Chrome canvas for decoding
 and high-quality resampling, Node zlib for PNG compression, and no npm/runtime
 dependencies. Set `CHROME_PATH` if Chrome is not at the default Windows path.
@@ -26,7 +28,7 @@ fails if Web and Android's seal diverge.
 
 | Public URL | Source / transform | Encoding |
 | --- | --- | --- |
-| `/favicon-16.png`, `/favicon-32.png` | Seal crop `(40,40,432,432)` to keep the ring and enlarge the R at tab sizes; resize to 16/32 | Lossless RGBA PNG, opaque |
+| `/favicon-16.png`, `/favicon-32.png` | Seal crop `(42,48,424,424)`, centered circular clip (radius 211), then resize to 16/32; retain ivory inside the seal for contrast | Lossless RGBA PNG, transparent corners with antialiased edges |
 | `/favicon.ico` | The same two PNGs embedded as explicit 16/32 ICO frames | ICO fallback; no extra unused sizes |
 | `/apple-touch-icon.png` | Seal resized to 180 | Opaque 256-color PNG; no baked corner mask |
 | `/icons/icon-192.png` | Decode native Android launcher at its original 192 size | Lossless RGBA PNG, original transparent corners/shadow |
@@ -59,6 +61,15 @@ ignored `artifacts/identity/` were visually inspected; the ring and R remain
 intact and recognizable on light and dark backgrounds.
 
 ## Verification and limits
+
+2026-11-16 tab-only refinement: favicon PNGs are 811/2193 bytes and ICO 3042.
+`check-browser-identity.mjs --url=http://127.0.0.1:5174` passed dimensions,
+transparent corners, opaque centers, identical ICO frames, metadata and manifest
+checks. The actual-size canvas sheet was visually inspected on light and dark
+backgrounds. Installation assets and HTML/manifest remain identical to HEAD.
+Production preview check at `http://127.0.0.1:5186` with `--scale=2` also passed.
+Native browser-chrome screenshots and physical-device installation remain
+unverified. The results below describe the original generation.
 
 - `node tools/generate-browser-icons.mjs`: PASS. Source hashes above; favicon
   756/2081 bytes, ICO 2875, Apple Touch 10145, launcher 25974, large app icon

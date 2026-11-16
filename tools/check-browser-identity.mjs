@@ -25,7 +25,7 @@ await withIdentityChrome(async({call,evaluate})=>{
   }
   const app=await call('Page.getAppManifest');assert.equal(app.url,base+'/manifest.webmanifest');assert.deepEqual(app.errors,[]);assert.equal(JSON.parse(app.data).id,'/');
   const pixelReport=await evaluate(`(async()=>{const specs=${JSON.stringify(specs)},out=[];for(const [path,size] of specs){const image=new Image();image.src=path;await image.decode();const c=document.createElement('canvas');c.width=c.height=size;const x=c.getContext('2d');x.drawImage(image,0,0);const p=x.getImageData(0,0,size,size).data;let min=255,max=0,radius=0,artPixels=0;for(let y=0;y<size;y++)for(let z=0;z<size;z++){const i=(y*size+z)*4;min=Math.min(min,p[i+3]);max=Math.max(max,p[i+3]);if(path.includes('maskable')&&p[i]<210&&p[i+1]<190&&p[i+2]<170){radius=Math.max(radius,Math.hypot(z+.5-size/2,y+.5-size/2));artPixels++;}}out.push({path,size,alpha:[min,max],radius,artPixels});}return out;})()`);
-  for(const item of pixelReport){if(!item.path.includes('192'))assert.deepEqual(item.alpha,[255,255]);if(item.path.includes('maskable')){assert.ok(item.artPixels>1000);assert.ok(item.radius<512*.4,JSON.stringify(item));}}
+  for(const item of pixelReport){if(item.path.includes('favicon'))assert.deepEqual(item.alpha,[0,255]);else if(!item.path.includes('192'))assert.deepEqual(item.alpha,[255,255]);if(item.path.includes('maskable')){assert.ok(item.artPixels>1000);assert.ok(item.radius<512*.4,JSON.stringify(item));}}
   const installability=await call('Page.getInstallabilityErrors');
   console.log(JSON.stringify({base,scale,manifest:'PASS',pixels:pixelReport,installability:installability.installabilityErrors}));
   // Separate review sheet: actual 16/32 px samples and common launcher masks.

@@ -59,7 +59,7 @@ function ActivityCard({ item, onOpen, disabled = false, onDismiss }: { disabled?
   };
   return <article className="home-card"><h4>{labels[item.type] ?? 'Actividad pendiente'}</h4>
     {item.partnerName && <p>Con {item.partnerName}</p>}
-    {item.type === 'FIRST_CHAT' && item.chatId && <button className="login-button login-primary" onClick={() => onOpen(item)}>Abrir primer chat</button>}
+    {item.type === 'FIRST_CHAT' && item.chatId && <button className="login-button login-primary" disabled={disabled} onClick={() => onOpen(item)}>Abrir primer chat</button>}
     <p>{body[item.type] ?? 'Consultá esta actividad desde Android.'}</p>
     {typeof when === 'string' && <p>{item.type === 'SCHEDULING' ? 'Hasta: ' : 'Fecha: '}<time dateTime={when}>{new Date(when).toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' })}</time></p>}
   </article>;
@@ -215,7 +215,7 @@ function HomeOverview({ onRestoreSecond, homeReconciler, returnScroll, actedVisu
     {error && <button className="login-button login-outlined" disabled={busy} onClick={refresh}>Reintentar</button>}
     {presentation.groups.map(section => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3><div className="home-grid">{section.items.map((item, index) => <ActivityCard key={`${item.matchId}-${item.connectionId}-${item.type}-${index}`} item={item} disabled={busy || blocked} onOpen={onOpenChat} onDismiss={dismissSecondChat}/>)}</div></section>)}
     {presentation.groups.length === 0 && <p>{presentation.hasActivity ? 'Hay actividad en curso. Los detalles aparecerán cuando el servidor los informe.' : 'No tenés pendientes por ahora.'}</p>}
-    {presentation.notices.map((notice, index) => <aside className="home-notice" key={`${notice}-${index}`}>Hay novedades sobre tus interacciones. Consultalas desde Android.</aside>)}
+    {presentation.notices.map((notice, index) => <aside className="home-notice" key={`${notice}-${index}`}>Hay novedades sobre tus interacciones. Revisá las opciones disponibles en Actividad.</aside>)}
   </div>;
   return <div ref={root} className={`home ${busy && model ? 'home-reconciling' : ''}`} aria-busy={busy}>
     <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><div className="home-header-actions">{onAdmin && <AdminEntry pending={adminPending} disabled={busy || searchPhase !== 'idle'} onClick={onAdmin} />}</div></header>
@@ -237,7 +237,7 @@ function HomeOverview({ onRestoreSecond, homeReconciler, returnScroll, actedVisu
       {home.profileStatus === 'ACTIVE' && <nav aria-label="Administrar tu perfil y cuenta" className="home-grid home-management">
         {managementEntries.map(([target, title, description]) => <button type="button" className={`home-card home-activity-entry ${target === 'affinities' ? 'affinity-home-card' : ''}`} key={target} aria-label={title} disabled={busy || blocked} onClick={() => onManage(target)}><span className="home-entry-title">{target === 'affinities' ? affinity?.complete ? 'Tus afinidades' : affinity?.answered ? 'Seguí construyendo tus afinidades' : 'Descubrí tus afinidades' : title}</span><span>{target === 'affinities' ? 'Tus respuestas son opcionales y privadas. Ayudan a Reals a encontrar afinidades compartidas y contexto para conversar sin mostrar tus respuestas exactas.' : description}</span>{target === 'affinities' && affinity && <span>{affinity.answered} de {affinity.total} respondidas</span>}{target === 'affinities' && affinities.busy && !affinities.catalog && <span>Cargando afinidades…</span>}<span aria-hidden="true">{target === 'affinities' ? affinity?.action ?? 'Empezar' : 'Abrir'} →</span></button>)}
       </nav>}
-      {presentation?.notices.map((notice, i) => <aside className="home-notice" key={`${notice}-${i}`}>Hay novedades sobre tus interacciones. Consultalas desde Android.</aside>)}
+      {presentation?.notices.map((notice, i) => <aside className="home-notice" key={`${notice}-${i}`}>Hay novedades sobre tus interacciones. Revisá las opciones disponibles en Actividad.</aside>)}
     </>}
   </div>;
 }

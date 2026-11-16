@@ -1,3 +1,4 @@
+import { captureDiagnostics } from './browser-diagnostics.mjs';
 import { runReloadCases } from './second-chat-reload-browser-cases.mjs';
 import { runHomeCases } from './home-parity-browser-cases.mjs';
 // Real Home + useHomeNavigation + SecondChat, driven by two synthetic participants.
@@ -17,8 +18,12 @@ async function page(group,user,width,ownership=false){
  ws.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.method==='Page.javascriptDialogOpening'){void call('Page.handleJavaScriptDialog',{accept:true}).catch(error=>{if(!closing)throw error;});}if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result);}});
  const call=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});ws.send(JSON.stringify({id:key,method,params}));});
  const evaluate=async(expression)=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
+ await captureDiagnostics(ws, call, `second-chat-${group}-${user}-${width}`);
  await call('Page.enable');await call('Page.addScriptToEvaluateOnNewDocument',{source:recorderStub+`;if(location.pathname==='/'){const saved=sessionStorage.getItem('second-fixture-session');if(saved)location.replace(saved);}`});await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width<500});
  await call('Page.navigate',{url:`http://127.0.0.1:5175/tools/second-chat-fixture.html?user=${user}&backend=${encodeURIComponent(origin+'/'+group)}&ownership=${ownership?'1':'0'}`});
+ // Ownership order depends on mounted managers, not Page.navigate acknowledgement.
+ // Finish mounting the first participant before creating its competing tab.
+ if(ownership){let mounted=false;for(let i=0;i<120;i++){try{mounted=await evaluate("!!window.fixture && !!document.querySelector('.second-chat')");}catch(error){if(!/Execution context was destroyed|Cannot find context/.test(error.message))throw error;}if(mounted)break;await new Promise(r=>setTimeout(r,100));}if(!mounted)throw Error('Ownership fixture did not mount');}
  return {call,evaluate,close:()=>{closing=true;return Promise.race([new Promise(r=>ws.addEventListener('close',r,{once:true})),call('Page.close').catch(error=>{if(!/Not attached to an active page|Target closed/.test(error.message))throw error;})]);}};
 }
 async function wait(p,expression){await p.call('Page.bringToFront');for(let i=0;i<120;i++){try{if(await p.evaluate(expression)){checks++;return;}}catch(error){if(!/Execution context was destroyed|Inspected target navigated|Cannot find context|Not attached to an active page/.test(error.message))throw error;}await new Promise(r=>setTimeout(r,100));}throw Error('Timeout '+expression+' '+await p.evaluate('document.body.innerText+JSON.stringify([...document.querySelectorAll(\"audio\")].map(a=>({src:a.src,error:a.error?.code,paused:a.paused})))'));}

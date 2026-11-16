@@ -21,6 +21,19 @@ const confirmed = async () => { await waitFor(() => { expect(document.querySelec
 const search = () => screen.getByRole('button', { name: 'Buscar chat' });
 const ready = async () => { await waitFor(() => { expect(document.querySelector('.home')).toHaveAttribute('aria-busy', 'false'); expect(screen.queryByText('Hola, Lucía') ?? screen.queryByRole('heading', { name: 'Buscando chat' })).toBeTruthy(); }); };
 const writes = () => fetcher.mock.calls.filter(([url, o]) => String(url).endsWith('/queue') && o?.method !== 'GET');
+it('disables the first chat Activity action after failed reconciliation and restores it on retry', async () => {
+  home.nextSteps = [{ type:'FIRST_CHAT', matchId:'m', chatId:'c', connectionId:'connection', requiresAction:true }];
+  mount(); await ready(); fireEvent.click(screen.getByRole('button',{ name:'Ver Actividad' }));
+  const open = screen.getByRole('button',{ name:'Abrir primer chat' });
+  expect(open).toBeEnabled();
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => url === '/api/me/home/status' ? Promise.reject(new TypeError('offline')) : original(url, options));
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  await screen.findByRole('alert'); expect(open).toBeDisabled();
+  fireEvent.click(open); expect(fetcher.mock.calls.some(([url]) => url === '/api/matches/m/chat')).toBe(false);
+  fetcher.mockImplementation(original); fireEvent.click(screen.getByRole('button',{ name:'Reintentar' }));
+  await waitFor(() => expect(open).toBeEnabled());
+});
 async function openVisualReturnFixture() {
  home.pendingActions=[{type:'VISUAL_REVIEW',matchId:'visual'}];home.activeInteractionsSummary.activeInitialCount=1;
  const base=fetcher.getMockImplementation()!;
@@ -526,7 +539,7 @@ it.each(['CHAT_ABANDONED','CHAT_EXPIRED'])('retires terminal %s copy on Search w
   fireEvent.click(search());await confirmed();expect(screen.queryByText(message)).toBeNull();status.version++;
   await act(async()=>document.dispatchEvent(new Event('visibilitychange')));expect(screen.queryByText(message)).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'Cancelar búsqueda'}));await waitFor(()=>expect(search()).toBeEnabled());
-  expect(screen.queryByText(message)).toBeNull();expect(screen.getByText('Hay novedades sobre tus interacciones. Consultalas desde Android.')).toBeVisible();
+  expect(screen.queryByText(message)).toBeNull();expect(screen.getByText('Hay novedades sobre tus interacciones. Revisá las opciones disponibles en Actividad.')).toBeVisible();
   expect(fetcher.mock.calls.filter(([url])=>url==='/api/matches/m/chat')).toHaveLength(chatReads);
 });
 it.each(['dismiss','management','activity'])('retires completion copy on %s navigation',async action=>{

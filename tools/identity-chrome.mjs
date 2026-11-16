@@ -1,3 +1,4 @@
+import { captureDiagnostics } from './browser-diagnostics.mjs';
 // Development tooling only: native Chrome decodes/resamples the existing artwork.
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -26,6 +27,7 @@ export async function withIdentityChrome(run, { visible = false, scale = 1 } = {
     socket.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result);}});
     const call=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});socket.send(JSON.stringify({id:key,method,params}));});
     const evaluate=async expression=>{const result=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);return result.result.value;};
+    await captureDiagnostics(socket, call, 'identity/ux');
     await run({call,evaluate});
   } finally { socket?.close();chrome.kill(); }
 }
