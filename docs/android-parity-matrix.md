@@ -1410,3 +1410,74 @@ Scope audit: static branding only; interactions, navigation, async state, timers
 keyboard, accessibility, layouts and backend behavior are unchanged. No mutation
 paths or lifecycle invariants added. Installation images remain unchanged.
 Commands and limits: [browser identity](browser-identity.md#current-circle-restoration-2026-11-16).
+
+
+### Profile editing and questions review (2026-11-16)
+
+Base HEAD `e92ceeb`; branch `fix/profile-editing-experience` from current HEAD
+(no development ref available). Existing favicon/onboarding edits preserved.
+Android read-only references: `ui/profile/ProfileDetailsSection.kt`,
+`CreateProfileScreen.kt`, `ProfilePhotosSection.kt`, `ProfileStatusScreen.kt`,
+`ProfileQuestionScreen.kt`, `ProfileQuestionPresentation.kt`,
+`ui/root/ProfileQuestionOperationHandler.kt` and presentation tests.
+Backend contracts: `docs/commons/api.md` profile answers/selections.
+
+| Area | Before / expected within this task |
+| --- | --- |
+| Details form | PARTIAL: Save precedes fields; restore below existing-profile fields. User requests country before city and Bio (opcional), deliberate copy/order differences from Android. |
+| Foreground refresh | PARTIAL: profile GET looks like saving, questions disables editor. Retain drafts, focus and scroll; quietly reconcile authoritative data; never POST/PUT/PATCH because of visibility. |
+| Photos disclosure | PARTIAL: native instant details. Add reversible expansion/collapse animation and reduced-motion handling, retain photo/crop/reorder behavior. |
+| Question overview | PARTIAL per user request: Android overview has two navigation buttons. Show public selection and answered cards directly; separate unanswered list, retain edit/delete, stale answers, maximum three, ordering and clear. |
+| Answer feedback | PARTIAL: empty editor immediately shows validation error. Suppress pristine error and remove generic helper, retain actual validation and safe React text. |
+| Navigation/accessibility/errors | Existing Back/History, identity-owned drafts, semantic versions, explicit uncertain-write recovery retained; validate changed routes and keyboard on mobile/desktop Chromium. Physical devices remain unverified. |
+
+Pre-edit mutation/invariant matrix:
+
+| Path | Ownership / installation rule |
+| --- | --- |
+| Initial/explicit reads | Keep loading and uncertain recovery; atomically install complete parsed snapshots. |
+| Visibility reads | Quiet only with confirmed data; preserve drafts/focus/feedback. One read per owner, aborted/obsolete results rejected. Failures remain explicit and block unsafe writes. |
+| Profile/photo/legal writes | Exclusive mutation; supersede quiet read before writing, reconcile afterwards. No automatic mutation retries or domain transitions. |
+| Answer upsert/delete/selection | Exclusive writes and authoritative response arrays; cancel quiet read before mutation. Preserve newer drafts and reject stale serial/account/profile results. |
+| Unmount/sign-out/background | Lifetime abort, listener cleanup, generation/account checks; visibility never mutates. |
+
+
+Implementation and final scoped parity:
+
+| Area / Web files | Result / evidence / differences |
+| --- | --- |
+| `onboarding/ProfileForm.tsx` | COMPLETE for requested Web behavior: exactly one Save after existing-profile fields (details and filters); country before city; Bio (opcional). New-profile creation placement retained. Copy/order explicitly diverge from Android at user request. RTL order and payload regressions, Chromium profile screenshot. |
+| `onboarding/Onboarding.tsx`, `profile/questions/useProfileQuestions.ts` | COMPLETE for simulated resume: confirmed question reads and retained-profile refreshes do not advertise saving or disable/focus-reset editors. Background reads abort before writes; stale responses cannot install. Question read errors mark uncertain and require recovery. Successful profile reconciliation installs the complete validated model/profile after all reads. Quiet ownership is excluded from setup navigation locks, including Account callbacks. |
+| `onboarding/onboarding.css`, PhotoSection | COMPLETE for Web expand/collapse: 240 ms grid/opacity transition, reversible and no timer, controls inert while collapsed, retained photo DOM, reduced-motion disables animation. Native Android expansion/layout behavior is adapted to browser controls. PhotoGrid gestures, crop and upload tests retained. |
+| `profile/questions/ProfileQuestions.tsx`, CSS | COMPLETE for requested Web flow: main overview has answered cards, current public selection first with positions and accent, up to three, add/remove/reorder/clear/save, stale answers can be updated. Extra list contains unanswered questions only; editors return to their actual parent using Back and History. Existing legacy selection destination remains renderable. This intentionally differs from Android's two-action overview. |
+| Entry, editor and feedback | Profile question entry uses gold border/background and primary action. Editor removes generic helper and pristine validation error; actual invalid edits still show associated errors and disable saving. Existing semantic-version, immutable identity-owned drafts and explicit ambiguous-write recovery retained. |
+| Browser/platform limits | COMPLETE for assertions in synthetic Chromium at 390x844 and 1440x900 for ACTIVE and DRAFT; screenshots of profile, overview, selection and boundary answers inspected. PARTIAL for physical-device/browser-window behavior: visibility events are simulated, not native window switching or live Firebase/backend. Native Android pixel equivalence is not claimed for the authorized redesign. |
+
+Validation:
+
+- `npm run test:focused -- src/onboarding/ProfileForm.test.tsx src/onboarding/Onboarding.test.tsx src/profile/questions/useProfileQuestions.test.tsx --maxWorkers=1`:
+  incremental run exposed test readiness/selector adjustments for changed routes and
+  disclosure. Focused failures corrected without relaxing timeouts or assertions.
+  Hook/field tests passed (40 tests); onboarding passed 108/109 before the final
+  disclosure test's document-shadowing correction. `npm run test:focused -- src/onboarding/Onboarding.test.tsx -t 'keeps photo disclosure' --maxWorkers=1`:
+  PASS, 1 test. Final full suite below covers every file and the added setup-navigation regression.
+- `node tools/profile-questions-smoke.mjs`: exit 0, four viewport/status
+  combinations. Exercises draft/focus retention after delayed visibility reads,
+  one Save below fields, inert disclosure/reduced motion, answered overview,
+  invalid pasted text and 160/161 boundaries, save/delete, public maximum/order,
+  clear, unanswered-only extra screen, pristine errors, keyboard Tab, Back/Forward,
+  late mutation completion, parent DOM/draft preservation, reopening and no overflow.
+  Results/screenshots in ignored `artifacts/profile-questions/`.
+- `npm run build`: exit 0 including typecheck; existing >500 kB chunk advisory.
+  `npm run check:architecture`: exit 0, 83 modules / zero runtime cycles.
+- Initial full validation `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/profile-questions/full-tests.json`:
+  PASS, 1664 tests. Chromium then revealed the setup navigation lock on quiet
+  refresh; fixed it and added its regression, requiring the final suite below.
+
+Diff summary for this task: details form/copy/order; onboarding quiet read ownership
+and photos disclosure; profile question layout/routing/validation/quiet read
+ownership; focused regressions and updated existing Chromium smoke; this matrix.
+Earlier favicon, onboarding validation and UX-audit edits remain preserved.
+No Android/backend/environment/deployment changes, commit, push or mutation retry.
+
+Final validation: `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/profile-questions/full-tests-final.json`: exit 0, 1665 tests passed / zero failures (complete suite after the final ownership fix). `git diff --check`: PASS. Changed text decoded as UTF-8 and scanned for mojibake; Spanish copy inspected. Remaining validation is physical-device/native-window switching and live backend, as noted above.

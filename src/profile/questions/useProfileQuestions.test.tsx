@@ -7,6 +7,32 @@ import { parseQuestionAnswers } from './contracts';
 import { questionCatalog, savedAnswer } from './fixtures';
 import { useProfileQuestions } from './useProfileQuestions';
 
+it.each(['upsert', 'delete', 'selection'] as const)('keeps resume quiet and rejects late background reads after %s', async kind => {
+  const { hook, request } = setup(); const { result } = renderHook(hook);
+  await waitFor(() => expect(result.current.catalog).not.toBeNull());
+  const read = deferred<unknown>(); request.mockReturnValueOnce(read.promise);
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  const signal = request.mock.calls.at(-2)![1];
+  expect(result.current.busy).toBe(false); expect(result.current.uncertain).toBe(false);
+  request.mockResolvedValueOnce({ answers: [savedAnswer('B')] });
+  await act(async () => { await result.current.mutate(kind === 'upsert' ? { kind, questionId: 'A', answer: 'Nueva' } : kind === 'delete' ? { kind, questionId: 'A' } : { kind, questionIds: ['A'] }); });
+  expect(signal.aborted).toBe(true);
+  await act(async () => { read.resolve(questionCatalog()); });
+  expect(result.current.answers).toEqual([savedAnswer('B')]); expect(result.current.busy).toBe(false);
+});
+it('fails closed on a quiet read failure and requires explicit recovery before writing', async () => {
+  const { hook, request } = setup(); const { result } = renderHook(hook);
+  await waitFor(() => expect(result.current.catalog).not.toBeNull());
+  request.mockRejectedValueOnce(new ApiError('network'));
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(result.current.uncertain).toBe(true));
+  expect(result.current.answers).toEqual([savedAnswer()]);
+  const count = request.mock.calls.length;
+  await act(async () => { expect(await result.current.mutate({ kind: 'delete', questionId: 'A' })).toBeNull(); });
+  expect(request).toHaveBeenCalledTimes(count);
+  await act(async () => { await result.current.refresh(); }); expect(result.current.uncertain).toBe(false);
+});
+
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 function setup(answers = [savedAnswer()]) {
   const user = { uid: 'f', emailVerified: true, getIdToken: async () => 'test', reload: async () => {} };

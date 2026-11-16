@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../auth/api';
 import { errorCode, terminalCodes } from '../auth/errors';
 import type { SessionController } from '../auth/session';
@@ -51,7 +51,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
   const [photoError,setPhotoError] = useState('');
   const closeCrop = () => { cropOwned.current = false; setCrop(null); };
   const [sendAt,setSendAt] = useState(0), [checkAt,setCheckAt] = useState(0), [now,setNow] = useState(Date.now());
-  const owner = useRef<{ abort: AbortController; locked: boolean } | null>(null);
+  const owner = useRef<{ abort: AbortController; locked: boolean; background: boolean; operation: AbortController | null } | null>(null);
   const accountLocked = useRef(false);
   const [dirtyForms, setDirtyForms] = useState({ create: false, details: false, filters: false });
   const formDirty = Object.values(dirtyForms).some(Boolean);
@@ -63,9 +63,9 @@ export function Onboarding({ Home, active = true, controller, management, naviga
   const [accountBusy, setAccountBusy] = useState(false);
   const nestedHomeLock = useRef(false);
   const [nestedHomeBlocked, setNestedHomeBlocked] = useState(false), [nestedManagement, setNestedManagement] = useState(false);
-  const reportNestedHomeLock = useCallback((value: boolean) => { nestedHomeLock.current = value; setNestedHomeBlocked(value); onNavigationBlockedChange?.(value || !!owner.current?.locked || cropOwned.current || accountLocked.current); }, [onNavigationBlockedChange]);
+  const reportNestedHomeLock = useCallback((value: boolean) => { nestedHomeLock.current = value; setNestedHomeBlocked(value); onNavigationBlockedChange?.(value || (!!owner.current?.locked && !owner.current.background) || cropOwned.current || accountLocked.current); }, [onNavigationBlockedChange]);
   const setupNavigationEnabled = !management && model?.profile?.status !== 'ACTIVE';
-  const setupNavigation = useHomeNavigation(() => !owner.current?.locked && !cropOwned.current && !accountLocked.current && !nestedHomeLock.current, setupNavigationEnabled && !providedNavigation);
+  const setupNavigation = useHomeNavigation(() => (!owner.current?.locked || owner.current.background) && !cropOwned.current && !accountLocked.current && !nestedHomeLock.current, setupNavigationEnabled && !providedNavigation);
   const navigation = providedNavigation ?? setupNavigation;
   const questionsActive = isProfileQuestions(navigation.destination);
   const questions = useProfileQuestions(controller, active && questionsActive);
@@ -81,7 +81,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     wasQuestions.current = questionsActive;
   }, [questionsActive]);
   const openQuestions = () => {
-    if (!owner.current || owner.current.locked || cropOwned.current || accountLocked.current || nestedHomeLock.current || nestedManagement || busy || blocked || !model?.legal.satisfied || !['DRAFT', 'ACTIVE'].includes(model.profile?.status ?? '')) return;
+    if (!owner.current || (owner.current.locked && !owner.current.background) || cropOwned.current || accountLocked.current || nestedHomeLock.current || nestedManagement || busy || blocked || !model?.legal.satisfied || !['DRAFT', 'ACTIVE'].includes(model.profile?.status ?? '')) return;
     parentScroll.current = window.scrollY;
     navigation.open('profile-questions');
   };
@@ -96,7 +96,6 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     try { profile = fullProfile(await controller.request('/me/profile',signal),account.id); }
     catch (e) { if (!(e instanceof ApiError) || e.code !== 'PROFILE_NOT_FOUND' || e.status !== 404) throw e; }
     signal.throwIfAborted();
-    controller.installProfile(profile);
     if (management && parseQueue(await controller.request('/matchmaking/queue', signal), account.id)) { signal.throwIfAborted(); onNavigationBlockedChange?.(false); onBack?.(); throw new DOMException('Búsqueda activa', 'AbortError'); }
     let status = await controller.request('/me/legal-status',signal);
     let current = await controller.request('/legal/documents/current',signal);
@@ -119,18 +118,26 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     }
     signal.throwIfAborted();
     const result = { profile, photos: list, legal: requirements, interactions };
+    controller.installProfile(profile);
     setModel(result); setBlocked(false); setVerified(controller.emailVerified);
     return result;
   };
-  const run = async (task?: (signal: AbortSignal) => Promise<void>, activation = false) => {
+  const run = async (task?: (signal: AbortSignal) => Promise<void>, activation = false, background = false) => {
     const resource = owner.current;
-    if (!resource || resource.locked || accountLocked.current) return false;
-    resource.locked = true; onNavigationBlockedChange?.(true); setBusy(true); setError(''); setMessage(''); setPhotoError('');
-    const signal = resource.abort.signal;
+    if (!resource || resource.abort.signal.aborted || accountLocked.current) return false;
+    if (resource.locked) {
+      if (!task || !resource.background) return false;
+      resource.operation?.abort();
+    }
+    const operation = new AbortController();
+    resource.operation = operation; resource.locked = true; resource.background = background;
+    if (!background) { onNavigationBlockedChange?.(true); setBusy(true); setError(''); setMessage(''); setPhotoError(''); }
+    const signal = AbortSignal.any([resource.abort.signal, operation.signal]);
     let failure: unknown;
     try { if (task) await task(signal); }
     catch (e) { failure = e; }
     try {
+      signal.throwIfAborted();
       const result = await reconcile(signal);
       if (management && task && !failure && !signal.aborted) setMessage('Cambios guardados.');
       if (activation && !failure && result.profile?.status === 'ACTIVE') setSuccess(true);
@@ -141,7 +148,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
         if (failure instanceof ApiError && (failure.kind === 'network' || failure.kind === 'invalid')) setBlocked(true);
       }
     } catch (e) { if (!signal.aborted) { setBlocked(true); setError(onboardingError(failure ?? e)); } }
-    finally { if (owner.current === resource && !signal.aborted) { resource.locked = false; setBusy(false); } }
+    finally { if (owner.current === resource && !signal.aborted) { if (resource.operation === operation) { resource.locked = false; resource.background = false; resource.operation = null; setBusy(false); } } }
     return true;
   };
   const foreground = useRef(active); foreground.current = active;
@@ -151,9 +158,9 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     wasActive.current = active;
   }, [active]);
   useEffect(() => {
-    const resource = { abort: new AbortController(), locked: false }; owner.current = resource;
+    const resource = { abort: new AbortController(), locked: false, background: false, operation: null as AbortController | null }; owner.current = resource;
     queueMicrotask(() => { if (!resource.abort.signal.aborted) { void loadCountries(resource.abort.signal); void run(); } });
-    const resume = () => { if (foreground.current && document.visibilityState === 'visible') void run(); };
+    const resume = () => { if (foreground.current && document.visibilityState === 'visible') void run(undefined, false, true); };
     document.addEventListener('visibilitychange',resume);
     return () => { resource.abort.abort(); document.removeEventListener('visibilitychange',resume); if (owner.current === resource) owner.current = null; };
     // Controller identity owns this component for its entire mounted lifetime.
@@ -172,13 +179,13 @@ export function Onboarding({ Home, active = true, controller, management, naviga
   const mutatePhoto = (path: string, method: string, body?: unknown) => { if (!blocked) void run(async signal => { await controller.request(`/me/profile/photos${path}`,signal,method,body); }); };
   const reorderPhoto = (photoId: string, target: number) => {
     const resource = owner.current;
-    if (!resource || resource.abort.signal.aborted || resource.locked || accountLocked.current || busy || blocked || cropOwned.current || controller.snapshot.phase !== 'ready' || controller.snapshot.profile?.id !== model?.profile?.id) return;
+    if (!resource || resource.abort.signal.aborted || (resource.locked && !resource.background) || accountLocked.current || busy || blocked || cropOwned.current || controller.snapshot.phase !== 'ready' || controller.snapshot.profile?.id !== model?.profile?.id) return;
     const placements = photoPlacements(model?.photos ?? [],photoId,target);
     if (placements) mutatePhoto('/reorder','PUT',{ placements });
   };
   const selectFiles = (files: File[], position: number, photo?: Photo) => {
     const resource = owner.current;
-    if (!resource || resource.abort.signal.aborted || resource.locked || accountLocked.current || busy || blocked || !verified || !controller.emailVerified || cropOwned.current || controller.snapshot.phase !== 'ready' || controller.snapshot.profile?.id !== model?.profile?.id) return;
+    if (!resource || resource.abort.signal.aborted || (resource.locked && !resource.background) || accountLocked.current || busy || blocked || !verified || !controller.emailVerified || cropOwned.current || controller.snapshot.phase !== 'ready' || controller.snapshot.profile?.id !== model?.profile?.id) return;
     if (files.length !== 1) { setPhotoError('Elegí o soltá una sola foto JPEG o PNG por vez. No se admiten carpetas.'); return; }
     const file = files[0];
     if (!file) return;
@@ -214,23 +221,32 @@ export function Onboarding({ Home, active = true, controller, management, naviga
       {model.interactions === null && <aside><h3>Inicio no disponible</h3><p>No pudimos consultar tus interacciones. Su estado es desconocido. Podés seguir completando el perfil o reintentar la consulta de Inicio.</p><button disabled={disabled || !!crop} onClick={() => void run()}>Reintentar Inicio</button></aside>}
       {!verified && <section id="email-verification" tabIndex={-1}><h3>Verificá tu email</h3><p>Abrí el link del correo de verificación y volvé para continuar.</p><button disabled={disabled || sendAt > now} onClick={() => { if (Date.now() < sendAt) return; void run(async () => { await controller.verifyEmail(true); setSendAt(Date.now()+60000); setMessage('Te enviamos un nuevo correo de verificación.'); }); }}>Reenviar correo{sendAt > now ? ` (${Math.ceil((sendAt-now)/1000)} s)` : ''}</button><button disabled={disabled || checkAt > now} onClick={() => { if (Date.now() < checkAt) return; void run(async () => { const value = await controller.verifyEmail(false); setVerified(value); setCheckAt(Date.now()+10000); setMessage(value ? 'Email verificado.' : 'Todavía no vemos el email verificado. Abrí el link del correo y volvé a intentar.'); }); }}>Ya verifiqué</button></section>}
       {(['details','filters'] as const).filter(mode => management === mode).map(mode => <FormSection key={mode} management={!!management} title={mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'}><ProfileForm onDirtyChange={reportFormDirty[mode]} key={`${model.profile!.id}-${mode}`} profile={model.profile!} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled || !!crop} mode={mode} submit={writeProfile}/></FormSection>)}
-      {management !== 'filters' && ['DRAFT', 'ACTIVE'].includes(model.profile.status) && <section className="home-card profile-question-entry"><h3>Preguntas del perfil</h3><p>Son opcionales y públicas. Podés responder varias y elegir hasta tres para mostrar en tu perfil.</p><button ref={questionsEntry} type="button" className="login-button login-outlined" disabled={disabled || !!crop || nestedHomeBlocked || nestedManagement} onClick={openQuestions}>Responder o editar</button></section>}
-      {management !== 'filters' && <details open><summary>Fotos</summary><p>{management ? 'Hasta nueve fotos. Los cambios pueden requerir una nueva revisión del perfil. Revisá los estados de validación y moderación de cada foto.' : 'Hasta nueve fotos. Para la configuración local se suelen requerir cuatro fotos validadas, una de persona y una de cuerpo completo. El servidor decide si podés activar el perfil.'}</p>
+      {management !== 'filters' && ['DRAFT', 'ACTIVE'].includes(model.profile.status) && <section className="home-card profile-question-entry"><h3>Preguntas del perfil</h3><p>Son opcionales y públicas. Podés responder varias y elegir hasta tres para mostrar en tu perfil.</p><button ref={questionsEntry} type="button" className="login-button login-primary" disabled={disabled || !!crop || nestedHomeBlocked || nestedManagement} onClick={openQuestions}>Responder o editar</button></section>}
+      {management !== 'filters' && <PhotoSection><p>{management ? 'Hasta nueve fotos. Los cambios pueden requerir una nueva revisión del perfil. Revisá los estados de validación y moderación de cada foto.' : 'Hasta nueve fotos. Para la configuración local se suelen requerir cuatro fotos validadas, una de persona y una de cuerpo completo. El servidor decide si podés activar el perfil.'}</p>
         <p id="photo-upload-guidance" role="status">{uploadGuidance}</p>
         {!verified && <p><a href="#email-verification">Ir a la verificación de email</a></p>}
         {photoError && <p role="alert">{photoError}</p>}
         <PhotoGrid photos={list} disabled={disabled || !!crop} uploadsDisabled={disabled || !verified || !!crop} onSelect={selectFiles} onMove={reorderPhoto}
           onDelete={photo => { if (window.confirm('¿Eliminar esta foto?')) mutatePhoto(`/${encodeURIComponent(photo.id)}`,'DELETE'); }}/>
-      </details>}
+      </PhotoSection>}
 
       {(['details','filters'] as const).filter(() => !management).map(mode => <FormSection key={mode} management={!!management} title={mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'}><ProfileForm onDirtyChange={reportFormDirty[mode]} key={`${model.profile!.id}-${mode}`} profile={model.profile!} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled || !!crop} mode={mode} submit={writeProfile}/></FormSection>)}
 
     </> : null}
-    {!management && model && model.profile?.status !== 'ACTIVE' && <AccountSection controller={controller} disabled={busy || !!crop} setup onNavigationBlockedChange={value => { accountLocked.current = value; setAccountBusy(value); onNavigationBlockedChange?.(value || !!owner.current?.locked || cropOwned.current || nestedHomeLock.current); }} />}
+    {!management && model && model.profile?.status !== 'ACTIVE' && <AccountSection controller={controller} disabled={busy || !!crop} setup onNavigationBlockedChange={value => { accountLocked.current = value; setAccountBusy(value); onNavigationBlockedChange?.(value || (!!owner.current?.locked && !owner.current.background) || cropOwned.current || nestedHomeLock.current); }} />}
     {crop && <CropDialog file={crop.file} onCancel={closeCrop} onConfirm={async blob => { if (blocked) return; const data = new FormData(); data.append('file',blob,'profile.jpg'); if (!crop.photo) data.append('position',String(crop.position)); const attempted = await run(async signal => { await controller.request(crop.photo ? `/me/profile/photos/${encodeURIComponent(crop.photo.id)}/file` : '/me/profile/photos',signal,crop.photo ? 'PUT' : 'POST',data); }); if (!attempted) throw new Error('Hay una operación en curso. Volvé a intentar.'); if (owner.current && !owner.current.abort.signal.aborted) closeCrop(); }}/ >}
   </div><ProfileQuestions model={questions} navigation={navigation} onReturn={() => navigation.backTo(management ? 'profile' : 'home')}/></>;
 }
 
 function FormSection({ management, title, children }: { management: boolean; title: string; children: React.ReactNode }) {
   return management ? <section aria-label={title}><h3>{title}</h3>{children}</section> : <details><summary>{title}</summary>{children}</details>;
+}
+
+function PhotoSection({ children }: { children: React.ReactNode }) {
+  const [expanded, setExpanded] = useState(true);
+  const id = useId();
+  return <section className="photo-section">
+    <h3><button type="button" className="photo-section-toggle" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded(value => !value)}><span>Fotos</span><span className="photo-section-chevron" aria-hidden="true">⌄</span></button></h3>
+    <div id={id} className="photo-section-expansion" data-expanded={expanded} inert={!expanded}><div className="photo-section-content">{children}</div></div>
+  </section>;
 }

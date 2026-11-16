@@ -40,7 +40,7 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
     if (!issues.length) submit(clean,mode);
   }}>
     <fieldset className="form-controls" disabled={busy}>
-      <button className="profile-submit" type="submit">{busy ? 'Guardando…' : mode === 'create' ? 'Crear perfil' : 'Guardar cambios'}</button>
+      {mode === 'create' && <button className="profile-submit" type="submit">{busy ? 'Guardando…' : 'Crear perfil'}</button>}
       {errors.length > 0 && <div id={errorId} role="alert">{errors.map(x => <p key={x}>{x}</p>)}</div>}
       {mode !== 'filters' && <fieldset className="profile-group">
         <legend>Sobre vos</legend>
@@ -50,7 +50,6 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
             {text('birthDate','Fecha de nacimiento')}
             <label>Género<select {...invalidField('gender')} value={fields.gender} onChange={e => change('gender',e.target.value)}><option value="">Seleccioná tu género</option>{genders.map((g,i) => <option key={g} value={g}>{genderLabels[i]}</option>)}</select></label>
           </>}
-          {text('city','Ciudad',100)}
           <label>País<select {...invalidField('countryCode')} required value={countryCode} onChange={e => change('countryCode',e.target.value)}>
             <option value="">Seleccioná un país</option>
             {countryCode && !countryAvailable && <option value={countryCode} disabled>{countryCode} (no disponible)</option>}
@@ -60,7 +59,8 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
             <p role="status">{countryError || (!catalog.length ? 'Cargando países…' : 'El país seleccionado no está disponible en el catálogo.')}</p>
             {countryError && <button type="button" onClick={retryCountries}>Reintentar carga de países</button>}
           </div>}
-          <label className="field-wide">Bio opcional<textarea {...invalidField('bio')} maxLength={1000} rows={3} value={fields.bio} onChange={e => change('bio',e.target.value)} /></label>
+          {text('city','Ciudad',100)}
+          <label className="field-wide">Bio (opcional)<textarea {...invalidField('bio')} maxLength={1000} rows={3} value={fields.bio} onChange={e => change('bio',e.target.value)} /></label>
         </div>
       </fieldset>}
       {mode !== 'details' && <fieldset className="profile-group">
@@ -77,6 +77,7 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
         <label><span>Distancia máxima: <strong>{fields.maxDistanceKm} km</strong></span><input {...invalidField('maxDistanceKm')} type="range" min="1" max="100" value={fields.maxDistanceKm} onChange={e => change('maxDistanceKm',Number(e.target.value))}/></label>
       </fieldset>}
 
+      {mode !== 'create' && <button className="profile-submit" type="submit">{busy ? 'Guardando…' : 'Guardar cambios'}</button>}
     </fieldset>
   </form>;
 }

@@ -183,6 +183,15 @@ it('requires explicit sensitive choices and focuses the first invalid field with
   fillRequired(); update({ busy:true }); submitForm(); expect(submit).not.toHaveBeenCalled();
   update({ busy:false }); submitForm(); expect(submit).toHaveBeenCalledOnce();
 });
+
+it('places save after editable details, country before city and uses the optional bio label', () => {
+  mount({ profile: existing, mode: 'details' });
+  const country = screen.getByLabelText('País'), city = screen.getByLabelText('Ciudad'), bio = screen.getByLabelText('Bio (opcional)');
+  const save = screen.getByRole('button', { name: 'Guardar cambios' });
+  expect(country.compareDocumentPosition(city) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(bio.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: 'Guardar cambios' })).toHaveLength(1);
+});
 it('keeps sensitive choices empty after filling other fields and links the first error', () => {
   const { submit } = mount();
   fireEvent.change(screen.getByLabelText('Nombre visible'),{ target:{ value:'Ana' } });
