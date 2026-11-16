@@ -28,7 +28,7 @@ fails if Web and Android's seal diverge.
 
 | Public URL | Source / transform | Encoding |
 | --- | --- | --- |
-| `/favicon-16.png`, `/favicon-32.png` | Seal crop `(42,48,424,424)`, centered circular clip (radius 211), then resize to 16/32; retain ivory inside the seal for contrast | Lossless RGBA PNG, transparent corners with antialiased edges |
+| `/favicon-16.png`, `/favicon-32.png` | Circular crop `(42,48,424,424)` from the Android seal; retain R, double ring, gold details and ivory interior; clip the square surround before resizing to 16/32 | RGBA PNG, transparent corners and antialiased circular edges |
 | `/favicon.ico` | The same two PNGs embedded as explicit 16/32 ICO frames | ICO fallback; no extra unused sizes |
 | `/apple-touch-icon.png` | Seal resized to 180 | Opaque 256-color PNG; no baked corner mask |
 | `/icons/icon-192.png` | Decode native Android launcher at its original 192 size | Lossless RGBA PNG, original transparent corners/shadow |
@@ -57,10 +57,76 @@ generated maskable's ink/gold artwork has a measured maximum radius of 184.2 px.
 dimensions, ICO frames, MIME/status, manifest metadata, Chrome parsing and
 light/dark theme references. It also renders a review sheet with actual 16/32 px
 samples and circle, rounded-square and square mask previews. Review sheets in
-ignored `artifacts/identity/` were visually inspected; the ring and R remain
-intact and recognizable on light and dark backgrounds.
+ignored `artifacts/identity/` were visually inspected. The circular tab seal retains the full ring and R on light and dark backgrounds,
+as do the installation previews.
 
 ## Verification and limits
+
+
+### Current circle restoration (2026-11-16)
+
+The user reported that the tab showed only R. The monogram crop explicitly
+removed the ring. Restore the full circular Android seal: R, double ink/gold
+ring, diamonds and ivory interior, with transparent corners. The ivory interior
+provides contrast on dark tabs; at 16 px the R is smaller than the monogram.
+No state, interaction, API, environment or installation assets changed.
+
+Work branch `fix/favicon-circle`, base HEAD `e92ceeb`. No local or remote-tracking
+`development` ref was available; branch created with `--no-track` from current
+HEAD, retaining prior working-tree edits. Android manifest/adaptive launcher
+references and the byte-identical notification seal were inspected read-only.
+
+- `node tools/generate-browser-icons.mjs --favicons-only`: exit 0; PNGs 804/2180
+  bytes, matching two-frame ICO 3022 bytes.
+- `node tools/check-browser-identity.mjs --url=http://127.0.0.1:5187`:
+  all assertions passed in Chromium. Regression asserts ink/gold ring pixels in
+  all eight outer sectors (both sizes), centered bounds, transparent corners,
+  ivory disc coverage, ICO frame equality, status/MIME and manifest metadata.
+- `node tools/check-browser-identity.mjs --url=http://127.0.0.1:5188 --scale=2`:
+  same assertions passed against the production build at high DPI.
+- Actual-size 16/32 px light/dark canvas samples visually inspected in
+  `artifacts/identity/review-1x.png`. Native browser tab chrome and physical
+  devices remain unverified; canvas checks do not establish native-tab parity.
+- `npm run build`: exit 0 (includes typecheck); existing >500 kB bundle advisory.
+
+- `npm test -- --reporter=json --outputFile=artifacts/identity/favicon-circle-tests.json`:
+  exit 1; 1650/1656 passed. Five 5000 ms timeouts and one missing-element failure
+  in LoginScreen, Home.secondRestoration, CropDialog and Onboarding. These files
+  are outside the favicon change; no test or timeout configuration was modified.
+- `npm run test:focused -- src/auth/LoginScreen.test.tsx src/home/Home.secondRestoration.test.tsx src/onboarding/CropDialog.test.tsx src/onboarding/Onboarding.test.tsx --maxWorkers=1`:
+  exit 0, 179/179 passed across those four files in isolation. This does not
+  replace the failed full-suite result or establish its root cause.
+- Both Chromium identity commands above completed with exit 0 and no captured
+  browser diagnostics. `git diff --check`: exit 0. UTF-8/mojibake check of changed
+  text: clean. Diff scope: three favicon binaries, generator, regression checker,
+  this document and the existing parity matrix; prior unrelated edits retained.
+
+Earlier verification below describes superseded favicon variants.
+
+Historical monogram refinement (superseded by the circle restoration below):
+the full circular seal made the R too small at tab sizes and retained a solid
+ivory disc. Only the tab assets now use the source monogram, including its gold
+accent. The generator removes near-paper pixels (RGB >215/205/190), composes a
+fine ivory keyline following the glyph at 4x target resolution, and downsamples.
+Alpha below 16/255 is cleared to remove almost invisible resampling fringes.
+No new logo font, artwork or dependency is introduced.
+
+- `node tools/generate-browser-icons.mjs --favicons-only`: exit 0. PNGs are
+  668/1532 bytes; the matching two-frame ICO is 2238 bytes.
+- `node tools/check-browser-identity.mjs --url=http://127.0.0.1:5174`: exit 0.
+  The checks now also assert fully transparent corners, visible glyph coverage
+  without a solid badge, and a centered mark within one pixel. Measured coverage
+  is 42.19% / 37.01%; centers are (7.5,8) / (16,16).
+- `npm run build`: exit 0 after final generation; existing bundle-size advisory
+  remains. `node tools/check-browser-identity.mjs --url=http://127.0.0.1:5186 --scale=2`:
+  exit 0 against that build, with no manifest/installability errors or captured
+  browser diagnostics.
+- Actual-size 16/32 px light/dark canvas samples were visually inspected. The
+  initial stricter corner check caught faint alpha fringes; final assets pass
+  with all four corners at alpha zero. PWA image files are byte-identical to
+  HEAD; HTML and manifest are unchanged (allowing existing checkout line endings).
+- Native browser-chrome screenshots, physical-device rendering and installation
+  remain unverified. The earlier results below describe previous seal variants.
 
 2026-11-16 tab-only refinement: favicon PNGs are 811/2193 bytes and ICO 3042.
 `check-browser-identity.mjs --url=http://127.0.0.1:5174` passed dimensions,

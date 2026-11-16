@@ -47,8 +47,8 @@ await withIdentityChrome(async({evaluate})=>{
     const specs=[['favicon-16.png',16,'favicon'],['favicon-32.png',32,'favicon'],['apple-touch-icon.png',180,'seal'],['icon-192.png',192,'launcher'],['icon-512.png',512,'seal'],['icon-maskable-512.png',512,'maskable']].filter(([name]) => !${process.argv.includes('--favicons-only')} || name.startsWith('favicon'));
     return specs.map(([name,size,kind])=>{const c=document.createElement('canvas');c.width=size;c.height=size;const x=c.getContext('2d');x.imageSmoothingQuality='high';
       if(kind==='favicon') {
-        // Remove the square surround, retaining the original ivory inside the
-        // seal for contrast on dark tabs. Clip before resampling for soft edges.
+        // Preserve the Android seal's R, double ring and gold details. Remove
+        // only the square surround; ivory inside keeps contrast on dark tabs.
         const seal=document.createElement('canvas');seal.width=seal.height=424;
         const ink=seal.getContext('2d');ink.beginPath();ink.arc(212,212,211,0,Math.PI*2);ink.clip();
         ink.drawImage(images.seal,42,48,424,424,0,0,424,424);
@@ -63,7 +63,10 @@ await withIdentityChrome(async({evaluate})=>{
         for(const [sx,sy,dx,dy] of [[0,0,0,0],[511,0,480,0],[0,511,0,480],[511,511,480,480]])x.drawImage(im,sx,sy,1,1,dx,dy,inset,inset);
         x.drawImage(im,inset,inset,side,side);
       }else x.drawImage(images[kind],0,0,size,size);
-      const data=x.getImageData(0,0,size,size).data;let binary='';for(const byte of data)binary+=String.fromCharCode(byte);return{name,size,rgba:btoa(binary)};
+      const data=x.getImageData(0,0,size,size).data;
+      // Drop near-invisible resampling fringes around the circular tab seal.
+      if(kind==='favicon')for(let i=3;i<data.length;i+=4)if(data[i]<16)data[i]=0;
+      let binary='';for(const byte of data)binary+=String.fromCharCode(byte);return{name,size,rgba:btoa(binary)};
     });
   })()`);
   const files=new Map();

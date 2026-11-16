@@ -1396,3 +1396,17 @@ Mutation review: local field/error state updates do not POST invalid data; busy 
 
 
 Independent-review follow-up to the UX/runtime audit (`e92ceeb`): intention and interested-gender validation in `ProfileForm`/`contracts` now mark and focus only the independently invalid field, including filter editing (COMPLETE for focused Web regressions; existing Android defaults/platform classifications unchanged). The Chromium scaling loop now checks the measured activation object; 390/1280 widths at 100%/200% text passed with exit 0. See [corrected audit evidence and mutation review](ux-runtime-audit.md#independent-review-corrections-to-e92ceeb). No Android/backend or other feature behavior changed.
+
+Historical tab-icon polish (superseded by circle restoration below): the favicon used a larger transparent source monogram with a fine ivory keyline instead of the full circular seal. PWA images remain byte-identical; metadata is unchanged. COMPLETE for decoded assets/ICO, centering/transparency, development and production checks and inspected actual-size light/dark canvas samples; native browser-tab chrome remains unverified. See [current browser identity evidence](browser-identity.md#verification-and-limits).
+
+
+### Tab favicon circle restoration (2026-11-16)
+
+| Android source / expectation | Web implementation | Parity / evidence |
+| --- | --- | --- |
+| Manifest launcher/adaptive icon references and `drawable-nodpi/ic_notification_large.png`: R inside the full ink/gold ring | `tools/generate-browser-icons.mjs`, `public/favicon-{16,32}.png`, `public/favicon.ico`: circular crop preserves R, ring, diamonds and ivory interior | COMPLETE for generated artwork: source equality, eight-sector ring regression, centering/alpha/ICO/metadata assertions passed in Chromium development and production at 1x/2x; actual-size light/dark canvas samples inspected. PARTIAL for native-tab/physical-device appearance, unverified. |
+
+Scope audit: static branding only; interactions, navigation, async state, timers,
+keyboard, accessibility, layouts and backend behavior are unchanged. No mutation
+paths or lifecycle invariants added. Installation images remain unchanged.
+Commands and limits: [browser identity](browser-identity.md#current-circle-restoration-2026-11-16).

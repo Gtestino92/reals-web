@@ -134,3 +134,16 @@ Actual script JSON remains in ignored `artifacts/ux-audit/after-measurements.jso
 - `npm run typecheck`: exit 0.
 - `npm run build`: exit 0, 128 transformed modules; existing >500 kB bundle advisory remains.
 - `git diff --check`: exit 0.
+
+### Subsequently requested favicon follow-up
+
+After the two fixes above were validated, the user requested a further tab-icon
+polish. Only the three favicon assets, their generator/checker and related docs
+were additionally changed. The full circular seal is replaced at tab sizes by
+its larger source monogram on transparency, with a fine ivory keyline for dark
+backgrounds. PWA images remain byte-identical to HEAD; manifest/HTML are unchanged.
+See [browser identity](browser-identity.md#verification-and-limits) for exact
+generation, development and production-preview checks (all final exit codes 0),
+light/dark review and native-tab limitations. The final build was rerun after
+asset generation; application code and unit tests did not change after the full
+suite above. No commit, push, merge or deployment was performed.
