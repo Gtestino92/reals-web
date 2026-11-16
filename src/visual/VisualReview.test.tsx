@@ -10,8 +10,9 @@ function setup() {
  controller.snapshot = {...controller.snapshot,phase:'ready',account:{id:'me',status:'ACTIVE'},profile:{id:'p',userId:'me',status:'ACTIVE'}};
  const listeners = new Set<()=>void>(); vi.spyOn(controller,'subscribe').mockImplementation(fn=>{listeners.add(fn);return()=>{listeners.delete(fn);};});
  const request = vi.spyOn(controller,'request').mockImplementation(async path=>path.endsWith('/visual-profile') ? visualProfile() : {id:path.split('/').at(-1),userAId:'me',userBId:'them',state:'VISUAL_PHASE'});
- const replace = (phase: 'ready' | 'login' = 'ready') => {controller.snapshot={...controller.snapshot,phase,authContextVersion:(controller.snapshot.authContextVersion??0)+1};listeners.forEach(fn=>fn());};
- return {controller,request,replace};
+ const replace = (phase: 'ready' | 'login' = 'ready') => {controller.snapshot={...controller.snapshot,phase,account:phase=='ready'?{id:'replacement',status:'ACTIVE'}:null,authContextVersion:(controller.snapshot.authContextVersion??0)+1};listeners.forEach(fn=>fn());};
+ const notify=()=>{controller.snapshot={...controller.snapshot,authContextVersion:(controller.snapshot.authContextVersion??0)+1};listeners.forEach(fn=>fn());};
+ return {controller,request,replace,notify};
 }
 function deferred() {let resolve!: (v:unknown)=>void;const promise=new Promise<unknown>(r=>{resolve=r;});return {promise,resolve};}
 afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
@@ -30,14 +31,14 @@ it('shows loading, empty-photo state, omits absent sections and supports return'
  request.mockResolvedValueOnce(visualProfile({photos:[],bio:null,affinityIndicators:[],profileQuestions:[]}));
  await act(async()=>pending.resolve({id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'}));
  expect(await screen.findByText('No hay fotos aprobadas disponibles.')).toBeVisible();expect(screen.queryByText('Bio')).toBeNull();expect(screen.queryByText('Afinidades compartidas')).toBeNull();expect(screen.queryByText('Preguntas del perfil')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'Volver a Actividad'}));expect(back).toHaveBeenCalledOnce();
+ fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));expect(back).toHaveBeenCalledOnce();
 });
 it.each([new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE'),new ApiError('backend',409,'VISUAL_REVIEW_EXPIRED'),new ApiError('authorization',403),new ApiError('authorization',401)])('clears partner data on terminal refresh failure',async error=>{
  const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');request.mockRejectedValueOnce(error);
  act(()=>window.dispatchEvent(new Event('online')));await screen.findByRole('alert');expect(screen.queryByText('María')).toBeNull();expect(screen.queryByRole('img')).toBeNull();expect(screen.queryByRole('button',{name:'Reintentar'})).toBeNull();
 });
-it('clears content on transient failure and recovers only via a fresh load',async()=>{
- const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');request.mockRejectedValueOnce(new ApiError('network'));act(()=>window.dispatchEvent(new Event('online')));await screen.findByRole('alert');expect(screen.queryByText('María')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Reintentar'}));await screen.findByText('María');
+it('preserves verified content on transient failure and fences mutations until fresh verification',async()=>{
+ const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');request.mockRejectedValueOnce(new ApiError('network'));act(()=>window.dispatchEvent(new Event('online')));await screen.findByRole('alert');expect(screen.getByText('María')).toBeVisible();expect(screen.getByRole('button',{name:'Aprobar'})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Reintentar'}));await screen.findByText('María');
 });
 it('does not request a visual profile for a changed match',async()=>{
  const {controller,request}=setup();request.mockResolvedValueOnce({id:'m',userAId:'me',userBId:'them',state:'EXPIRED'});render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await waitFor(()=>expect(request).toHaveBeenCalledTimes(1));expect(screen.queryByRole('img')).toBeNull();
@@ -112,7 +113,7 @@ it('failed image recovery waits for the authoritative response then uses its ren
 
 it('retains loaded image DOM across background concealment and authoritative resume',async()=>{
  const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const img=screen.getAllByRole('img')[0]!;fireEvent.load(img);
- vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));expect(img).toBeInTheDocument();expect(img).not.toBeVisible();expect(img.closest('.visual-content')).not.toHaveAttribute('hidden');expect(img.closest('.visual-content')).toHaveAttribute('inert');
+ vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));expect(img).toBeInTheDocument();expect(img).toBeVisible();expect(img.closest('.visual-content')).not.toHaveAttribute('hidden');expect(img.closest('.visual-content')).not.toHaveAttribute('inert');
  vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');act(()=>document.dispatchEvent(new Event('visibilitychange')));await waitFor(()=>expect(img).toBeVisible());expect(screen.getAllByRole('img')[0]).toBe(img);expect(request).toHaveBeenCalledTimes(4);
 });
 it('never auto-reads unread messages; explicit read is single and optional for decisions',async()=>{
@@ -144,7 +145,7 @@ it('blocks only after confirmation and restores focus after cancel',async()=>{
  fireEvent.click(menu);fireEvent.click(screen.getByRole('menuitem'));fireEvent.click(screen.getByRole('button',{name:'Bloquear definitivamente'}));await waitFor(()=>expect(finish).toHaveBeenCalledOnce());
 });
 it('warns within ten minutes and disables all mutations at the local deadline',async()=>{
- vi.useFakeTimers();const {controller,request}=setup();const base=request.getMockImplementation()!;const expires=new Date(Date.now()+1000).toISOString();request.mockImplementation(async(...args)=>args[0].endsWith('/visual-profile')?visualProfile({visualExpiresAt:expires}):base(...args));render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await act(async()=>{});expect(screen.getByText(/Descubrimiento por vencer/)).toBeVisible();await act(async()=>vi.advanceTimersByTime(1000));expect(screen.getByRole('button',{name:'Aprobar'})).toBeDisabled();expect(request).toHaveBeenCalledTimes(4);
+ vi.useFakeTimers();const {controller,request}=setup();const base=request.getMockImplementation()!;const expires=new Date(Date.now()+1000).toISOString();request.mockImplementation(async(...args)=>args[0].endsWith('/visual-profile')?visualProfile({visualExpiresAt:expires}):base(...args));render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await act(async()=>{});expect(screen.getByText(/Descubrimiento por vencer/)).toBeVisible();await act(async()=>vi.advanceTimersByTime(1000));expect(document.querySelector('.visual-content')).toHaveAttribute('inert');expect(screen.getByRole('button',{name:'Decidir más tarde'})).toBeEnabled();expect(request).toHaveBeenCalledTimes(4);
 });
 
 it.each(['APPROVED','block'] as const)('reconciles an uncertain %s result without replay',async action=>{
@@ -177,10 +178,29 @@ it('keeps concealed images mounted when the expiry timer fires in a hidden tab',
  request.mockRejectedValueOnce(new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE'));vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');await act(async()=>document.dispatchEvent(new Event('visibilitychange')));expect(img).not.toBeInTheDocument();
 });
 
-it('places a single Return action above the title and reserves message transition slots',async()=>{
- const {controller}=setup();const {container}=render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const back=screen.getByRole('button',{name:'Volver a Actividad'}),title=screen.getByRole('heading',{name:'Descubrimiento'});expect(back.closest('header')).toContainElement(title);expect(back.compareDocumentPosition(title)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(container.querySelector('.visual-message-body')).toHaveAttribute('aria-live','polite');expect(container.querySelector('.visual-message-action')).toBeInTheDocument();
+it('places defer after decisions with resume copy and keeps the title and overflow in the toolbar',async()=>{
+ const {controller}=setup();const {container}=render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const back=screen.getByRole('button',{name:'Decidir más tarde'}),title=screen.getByRole('heading',{name:'Descubrimiento'});expect(back.closest('header')).toBeNull();expect(container.querySelector('.visual-toolbar')).toContainElement(title);expect(screen.getByRole('button',{name:'Rechazar'}).compareDocumentPosition(back)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(screen.getByText(/Podés retomar este descubrimiento desde Actividad antes/)).toBeVisible();expect(container.querySelector('.visual-message-body')).toHaveAttribute('aria-live','polite');
 });
 
 it('reveals the same authorized snapshot immediately while a slow foreground check remains pending',async()=>{
  const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const img=screen.getAllByRole('img')[0]!;vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));const pending=deferred();request.mockReturnValueOnce(pending.promise);vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');act(()=>document.dispatchEvent(new Event('visibilitychange')));expect(img).toBeVisible();expect(screen.getAllByRole('img')[0]).toBe(img);await act(async()=>pending.resolve({id:'m',userAId:'me',userBId:'them',state:'EXPIRED'}));expect(img).not.toBeInTheDocument();
+});
+
+it('offers an immediate accessible exit after initial loading failure',async()=>{
+ const {controller,request}=setup(),back=vi.fn();request.mockRejectedValueOnce(new ApiError('network'));render(<VisualReview controller={controller} matchId="m" onBack={back}/>);await screen.findByRole('alert');fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));expect(back).toHaveBeenCalledOnce();expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('keeps the same profile, photo and unsaved draft across same-account credential notifications',async()=>{
+ const {controller,notify}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');const image=screen.getAllByRole('img')[0],input=screen.getByLabelText('Mensaje personal');fireEvent.change(input,{target:{value:'Borrador'}});act(notify);await waitFor(()=>expect(screen.getByRole('button',{name:'Aprobar'})).toBeEnabled());expect(screen.getAllByRole('img')[0]).toBe(image);expect(input).toHaveValue('Borrador');
+});
+it('protects a draft on defer, restores editing, and only discards after explicit confirmation',async()=>{
+ const {controller,request}=setup(),back=vi.fn();render(<VisualReview controller={controller} matchId="m" onBack={back}/>);await screen.findByText('María');const input=screen.getByLabelText('Mensaje personal');fireEvent.change(input,{target:{value:'Sin guardar'}});fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));expect(screen.getByRole('dialog')).toHaveAccessibleName('Mensaje sin guardar');expect(back).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'Seguir editando'}));expect(input).toHaveValue('Sin guardar');fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));fireEvent.click(screen.getByRole('button',{name:'Salir sin guardar'}));expect(back).toHaveBeenCalledOnce();expect(request.mock.calls.some(c=>c[2]==='PUT')).toBe(false);
+});
+it.each(['','  '])('does not warn for empty draft %j',async draft=>{
+ const {controller}=setup(),back=vi.fn();render(<VisualReview controller={controller} matchId="m" onBack={back}/>);await screen.findByText('María');fireEvent.change(screen.getByLabelText('Mensaje personal'),{target:{value:draft}});fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));expect(back).toHaveBeenCalledOnce();expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('keeps pending save locked and removes the draft warning after confirmed save',async()=>{
+ const {controller,request}=setup(),back=vi.fn(),pending=deferred();const base=request.getMockImplementation()!;let saved=false;request.mockImplementation(async(...args)=>{if(args[2]==='PUT'){await pending.promise;saved=true;return undefined;}if(args[0].endsWith('/visual-profile'))return visualProfile({myPersonalMessageSubmitted:saved});return base(...args);});render(<VisualReview controller={controller} matchId="m" onBack={back}/>);await screen.findByText('María');fireEvent.change(screen.getByLabelText('Mensaje personal'),{target:{value:'Guardar'}});fireEvent.click(screen.getByRole('button',{name:'Guardar mensaje'}));fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));expect(back).not.toHaveBeenCalled();await act(async()=>pending.resolve(undefined));await screen.findByText('Ya guardaste tu mensaje personal. No se puede modificar.');fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));expect(back).toHaveBeenCalledOnce();expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('does not let an unsaved draft block a forced access withdrawal',async()=>{
+ const {controller,request}=setup(),finish=vi.fn();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}} onFinished={finish}/>);await screen.findByText('María');fireEvent.change(screen.getByLabelText('Mensaje personal'),{target:{value:'Borrador'}});request.mockRejectedValueOnce(new ApiError('authorization',403));act(()=>window.dispatchEvent(new Event('online')));await waitFor(()=>expect(finish).toHaveBeenCalledWith('unavailable'));expect(screen.queryByRole('dialog')).toBeNull();expect(screen.queryByRole('img')).toBeNull();
 });

@@ -21,6 +21,41 @@ const confirmed = async () => { await waitFor(() => { expect(document.querySelec
 const search = () => screen.getByRole('button', { name: 'Buscar chat' });
 const ready = async () => { await waitFor(() => { expect(document.querySelector('.home')).toHaveAttribute('aria-busy', 'false'); expect(screen.queryByText('Hola, Lucía') ?? screen.queryByRole('heading', { name: 'Buscando chat' })).toBeTruthy(); }); };
 const writes = () => fetcher.mock.calls.filter(([url, o]) => String(url).endsWith('/queue') && o?.method !== 'GET');
+async function openVisualReturnFixture() {
+ home.pendingActions=[{type:'VISUAL_REVIEW',matchId:'visual'}];home.activeInteractionsSummary.activeInitialCount=1;
+ const base=fetcher.getMockImplementation()!;
+ fetcher.mockImplementation(async(path,options)=>{
+  if(path==='/api/matches/visual')return json({id:'visual',userAId:'u',userBId:'them',state:'VISUAL_PHASE'});
+  if(path==='/api/matches/visual/visual-profile')return json(visualProfile());
+  if(path==='/api/matches/visual/visual-decision')return json({id:'visual',state:'VISUAL_PHASE'});
+  return base(path,options);
+ });
+ mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));fireEvent.click(screen.getByText('Descubrí el perfil'));await screen.findByRole('heading',{name:'María'});
+}
+it.each(['Aprobar','Rechazar'])('returns directly Home after %s and suppresses an obsolete completed visual snapshot',async action=>{
+ await openVisualReturnFixture();fireEvent.click(screen.getByRole('button',{name:action}));await screen.findByRole('heading',{name:'Inicio'});expect(screen.queryByRole('button',{name:'Ver Actividad'})).toBeNull();expect(screen.queryByText('No tenés pendientes por ahora.')).toBeNull();act(()=>history.back());await screen.findByRole('heading',{name:'Inicio'});act(()=>history.forward());await screen.findByRole('heading',{name:'Inicio'});expect(screen.queryByRole('heading',{name:'María'})).toBeNull();
+});
+it.each(['visual','scheduling','second','notice','preparation','summary'])('returns to Activity when authoritative Home retains %s',async remaining=>{
+ await openVisualReturnFixture();
+ if(remaining==='visual')home.pendingActions.push({type:'VISUAL_REVIEW',matchId:'other'});
+ if(remaining==='scheduling')home.nextSteps=[{type:'SCHEDULING',matchId:'other',connectionId:'c',requiresAction:false}];
+ if(remaining==='second')home.nextSteps=[{type:'SECOND_CHAT_EXPIRED',matchId:'other',connectionId:'c',requiresAction:false}];
+ if(remaining==='notice')home.passiveNotices=[{type:'SCHEDULING_PREPARING'}];
+ if(remaining==='preparation')home.activeInteractionsSummary.hasPendingSchedulingConnection=true;
+ if(remaining==='summary')home.activeInteractionsSummary.activeConnectionCount=1;
+ fireEvent.click(screen.getByRole('button',{name:'Aprobar'}));await screen.findByRole('heading',{name:'Actividad'});expect(screen.queryByRole('heading',{name:'María'})).toBeNull();expect(screen.queryByText('No tenés pendientes por ahora.')).toBeNull();
+});
+it('waits for authoritative Home without flashing empty Activity; failure offers retry and safe Home',async()=>{
+ await openVisualReturnFixture();const base=fetcher.getMockImplementation()!;let release!:(r:Response)=>void;
+ fetcher.mockImplementation((path,options)=>path==='/api/me/home'?new Promise(resolve=>{release=resolve;}):base(path,options));
+ fireEvent.click(screen.getByRole('button',{name:'Rechazar'}));await screen.findByRole('heading',{name:'Actualizando tus actividades'});expect(screen.queryByRole('heading',{name:'Actividad'})).toBeNull();await waitFor(()=>expect(release).toBeDefined());await act(async()=>release(json({},503)));await screen.findByRole('button',{name:'Reintentar actualización'});expect(screen.queryByText('No tenés pendientes por ahora.')).toBeNull();fetcher.mockImplementation(base);fireEvent.click(screen.getByRole('button',{name:'Reintentar actualización'}));await screen.findByRole('heading',{name:'Inicio'});
+});
+it('protects draft on browser Back, cancels, then confirms without another history entry',async()=>{
+ await openVisualReturnFixture();const length=history.length;fireEvent.change(screen.getByLabelText('Mensaje personal'),{target:{value:'Borrador'}});act(()=>history.back());await screen.findByRole('dialog',{name:'Mensaje sin guardar'});await waitFor(()=>expect(history.state.matchId).toBe('visual'));fireEvent.click(screen.getByRole('button',{name:'Seguir editando'}));expect(screen.getByLabelText('Mensaje personal')).toHaveValue('Borrador');act(()=>history.back());await screen.findByRole('dialog',{name:'Mensaje sin guardar'});fireEvent.click(screen.getByRole('button',{name:'Salir sin guardar'}));await screen.findByRole('heading',{name:'Actividad'});expect(history.length).toBe(length);act(()=>history.forward());await screen.findByRole('heading',{name:'María'});expect(screen.getByLabelText('Mensaje personal')).toHaveValue('');
+});
+it('does not show a draft prompt on confirmed expiration',async()=>{
+ await openVisualReturnFixture();fireEvent.change(screen.getByLabelText('Mensaje personal'),{target:{value:'Borrador'}});const base=fetcher.getMockImplementation()!;fetcher.mockImplementation((path,options)=>path==='/api/matches/visual'?Promise.resolve(json({id:'visual',userAId:'u',userBId:'them',state:'EXPIRED'})):base(path,options));act(()=>window.dispatchEvent(new Event('online')));await screen.findByRole('heading',{name:'Inicio'});expect(screen.queryByRole('dialog')).toBeNull();
+});
 it('offers confirmed exceptional sign-out after initial Home failure, while preserving retry', async () => {
   const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => url === '/api/me/home/status' ? Promise.reject(new TypeError('offline')) : base(url, options));
@@ -596,7 +631,7 @@ it('opens visual review only from its card, retains Home and restores Activity w
  const retained = document.querySelector('.home');
  fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));fireEvent.click(screen.getByRole('button',{name:/Descubrí el perfil/}));
  await screen.findByRole('heading',{name:'María'});expect(history.state.matchId).toBe('visual');
- fireEvent.click(screen.getByRole('button',{name:'Volver a Actividad'}));await screen.findByRole('heading',{name:'Actividad'});expect(document.querySelector('.home')).toBe(retained);
+ fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));await screen.findByRole('heading',{name:'Actividad'});expect(document.querySelector('.home')).toBe(retained);
  act(()=>history.forward());await screen.findByRole('heading',{name:'María'});
  act(()=>history.back());await screen.findByRole('heading',{name:'Actividad'});
  expect(fetcher.mock.calls.some(([path])=>String(path).includes('personal-message'))).toBe(false);

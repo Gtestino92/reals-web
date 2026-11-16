@@ -28,10 +28,15 @@
 .visual-review { margin-block-start: 24px; overflow-anchor: none; }
 .visual-header { display: grid; gap: 24px; }
 .visual-header h2 { margin: 0; }
-.visual-concealed { visibility: hidden; pointer-events: none; }
+.visual-toolbar h2 { min-width:0; overflow-wrap:anywhere; }
+.visual-concealed { display:none; visibility:hidden; pointer-events:none; }
 .visual-message-badge { min-block-size: 1.5em; }
 .visual-message-body { min-block-size: 6em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .visual-message-action { min-block-size: 48px; }
 .visual-message-loaded { animation: visual-message-appear 180ms ease-out; }
 @keyframes visual-message-appear { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .visual-message-loaded { animation: none; } }
+.visual-defer { display:grid; gap:12px; margin-top:16px; }
+.visual-defer > button { width:100%; }
+.visual-review dialog { max-width:min(520px,90vw); max-height:85dvh; overflow:auto; background:var(--color-surface); color:var(--color-on-surface); border:1px solid var(--color-outline); border-radius:var(--radius-card); padding:24px; }
+.visual-review dialog::backdrop { background:rgb(0 0 0 / 50%); }
