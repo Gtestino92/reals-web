@@ -1,4 +1,4 @@
-name: CodeQL
+name: CodeQL Advanced
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '19 5 * * 1'
+    - cron: '21 20 * * 2'
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [javascript-typescript, actions]
+        include:
+          - language: actions
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -30,6 +34,7 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
           config-file: ./.github/codeql/codeql-config.yml
       - name: Analyze
         uses: github/codeql-action/analyze@v4
