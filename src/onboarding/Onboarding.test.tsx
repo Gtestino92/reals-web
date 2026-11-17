@@ -298,9 +298,10 @@ it.each(['ACTIVE', 'DRAFT'])('preserves unsaved profile details, bio and filters
 it('edits and resaves outdated answers, orders public selection, clears it, deletes and keeps authoritative feedback', async () => {
   installQuestions([savedAnswer('A', { current: false }), savedAnswer('B'), savedAnswer('C'), savedAnswer('D')]); await openManagement('Tu perfil'); await openProfileQuestions();
   expect(screen.getByText('4 de 4 respondidas')).toBeVisible(); expect(screen.getByText('Versión anterior')).toBeVisible(); fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta A' }));
-  expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Respuesta A'); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await screen.findByText('Respuesta guardada'); expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+  expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Respuesta A'); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await screen.findByText('Respuesta guardada'); expect(screen.queryByLabelText('Tu respuesta')).toBeNull(); expect(screen.getByRole('button', { name: 'Editar: Pregunta A' })).toHaveFocus();
+  fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta A' }));
   fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: '<texto>\nsegunda línea' } }); expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled(); expect(screen.getByText('La respuesta debe escribirse en una sola línea.')).toBeVisible();
-  fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: '  Respuesta actualizada  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await waitFor(() => expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Respuesta actualizada'));
+  fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: '  Respuesta actualizada  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await waitFor(() => expect(screen.queryByLabelText('Tu respuesta')).toBeNull()); expect(screen.getByText('Respuesta actualizada')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Guardar selección' })).toBeDisabled();
   for (const id of ['A','B','C']) fireEvent.click(within(screen.getByRole('article', { name: `Pregunta ${id}` })).getByRole('button', { name: 'Agregar' }));
   fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta C' })).getByRole('button', { name: 'Quitar' }));
@@ -310,7 +311,53 @@ it('edits and resaves outdated answers, orders public selection, clears it, dele
   fireEvent.click(screen.getByRole('button', { name: 'Guardar selección' })); await screen.findByText('Selección guardada'); expect(screen.getByText('3 de 3 elegidas para mostrar')).toBeVisible();
   const selectionCall = writes('PUT').find(([path]) => String(path).endsWith('/question-selections')); expect(JSON.parse(String(selectionCall?.[1]?.body))).toEqual({ questionIds: ['C','A','B'] });
   fireEvent.click(screen.getByRole('button', { name: 'Limpiar selección' })); fireEvent.click(screen.getByRole('button', { name: 'Guardar selección' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); expect(screen.getByText('0 de 3 elegidas para mostrar')).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta A' })); fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta A' })).getByRole('button', { name: 'Eliminar' })); await screen.findByText('Respuesta eliminada'); expect(screen.queryByRole('article', { name: 'Pregunta A' })).toBeNull();
+  fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta A' })).getByRole('button', { name: 'Eliminar' })); await screen.findByText('Respuesta eliminada'); expect(screen.queryByRole('article', { name: 'Pregunta A' })).toBeNull();
+});
+it('cancels only the addressed edit, restores latest saved text and focus without requests', async () => {
+  installQuestions([savedAnswer(), savedAnswer('B')]); await openManagement('Tu perfil'); await openProfileQuestions();
+  const card = within(screen.getByRole('article', { name: 'Pregunta A' }));
+  fireEvent.click(card.getByRole('button', { name: 'Agregar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta B' }));
+  fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: 'Borrador B' } });
+  fireEvent.click(card.getByRole('button', { name: 'Editar: Pregunta A' }));
+  expect(card.getByLabelText('Tu respuesta')).toHaveFocus();
+  expect(card.getAllByRole('button').map(button => button.textContent)).toEqual(['Guardar', 'Cancelar edición']);
+  expect(card.getByText('Posición 1')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Editar: Pregunta B' })).toBeEnabled();
+  fireEvent.change(card.getByLabelText('Tu respuesta'), { target: { value: 'Descartar A' } });
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => String(path).endsWith('/question-answers') && (!options?.method || options.method === 'GET') ? Promise.resolve(json({ answers: [savedAnswer('A', { answer: 'Última guardada' }), savedAnswer('B')] })) : base(path, options));
+  await act(async () => refreshView());
+  expect(card.getByLabelText('Tu respuesta')).toHaveValue('Descartar A');
+  const calls = fetcher.mock.calls.length;
+  fireEvent.click(card.getByRole('button', { name: 'Cancelar edición' }));
+  expect(fetcher).toHaveBeenCalledTimes(calls);
+  expect(card.queryByLabelText('Tu respuesta')).toBeNull();
+  expect(card.getByRole('button', { name: 'Editar: Pregunta A' })).toHaveFocus();
+  expect(card.getByText('Última guardada')).toBeVisible(); expect(card.getByText('Posición 1')).toBeVisible();
+  fireEvent.click(card.getByRole('button', { name: 'Editar: Pregunta A' })); expect(card.getByLabelText('Tu respuesta')).toHaveValue('Última guardada');
+  fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta B' })); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Borrador B');
+});
+it.each([200, 400, 500])('blocks cancellation during writes and closes only on confirmed success (%s)', async status => {
+  installQuestions([savedAnswer()]); await openManagement('Tu perfil'); await openProfileQuestions();
+  fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta A' }));
+  fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: 'Borrador enviado' } });
+  const base = fetcher.getMockImplementation()!; let finish!: (response: Response) => void;
+  fetcher.mockImplementation((path, options) => String(path).endsWith('/question-answers/A') && options?.method === 'PUT' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await waitFor(() => expect(finish).toBeDefined());
+  expect(screen.getByRole('button', { name: 'Cancelar edición' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar edición' })); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Borrador enviado');
+  await act(async () => finish(json(status === 200 ? { answers: [savedAnswer('A', { answer: 'Respuesta del servidor' })] } : { code: 'REJECTED' }, status)));
+  if (status === 200) {
+    expect(screen.queryByLabelText('Tu respuesta')).toBeNull(); expect(screen.getByText('Respuesta del servidor')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Editar: Pregunta A' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta A' })); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Respuesta del servidor');
+  } else {
+    expect(screen.getByRole('alert')).toBeVisible(); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Borrador enviado');
+    expect(screen.getByRole('button', { name: 'Cancelar edición' })).toBeEnabled();
+    if (status === 500) expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+    if (status === 400) expect(screen.getByRole('button', { name: 'Guardar' })).toBeEnabled();
+  }
 });
 it('retains answer and selection drafts after uncertain writes and does not redirect late completion', async () => {
   installQuestions([savedAnswer(), savedAnswer('B')]); await openManagement('Tu perfil'); await openProfileQuestions();
