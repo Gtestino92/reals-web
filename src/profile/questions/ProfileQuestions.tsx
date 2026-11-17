@@ -14,6 +14,13 @@ export function ProfileQuestions({ model, navigation, onReturn }: { model: Profi
   const [drafts, setDrafts] = useState<Drafts>({ identity, text: {}, selection: null });
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const editButtons = useRef(new Map<string, HTMLButtonElement>());
+  const pendingEditFocus = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = pendingEditFocus.current;
+    pendingEditFocus.current = null;
+    if (id && active) editButtons.current.get(id)?.focus({ preventScroll: true });
+  }, [editing, active]);
   const editorOrigin = useRef<'profile-questions' | 'profile-question-list'>('profile-question-list');
   const previousDestination = useRef(destination);
   if (previousDestination.current !== destination) {
@@ -39,6 +46,16 @@ export function ProfileQuestions({ model, navigation, onReturn }: { model: Profi
   const eligible = rows.filter(r => r.selectable), invalidSelection = selection.filter(id => !eligible.some(r => r.question.id === id));
   const setSelection = (ids: string[]) => setDrafts(d => ({ ...d, identity, selection: ids }));
   const setText = (id: string, value: string) => setDrafts(d => ({ ...d, identity, text: { ...d.text, [id]: value } }));
+  const cancelEdit = (id: string) => {
+    if (busy) return;
+    setDrafts(d => {
+      if (d.identity !== identity) return d;
+      const text = { ...d.text }; delete text[id];
+      return { ...d, text };
+    });
+    pendingEditFocus.current = id;
+    setEditing(null);
+  };
   const complete = async (kind: 'upsert' | 'delete' | 'selection', targetId = profileQuestionId) => {
     const row = rows.find(item => item.question.id === targetId);
     if (locked || (kind !== 'selection' && !row)) return;
@@ -59,6 +76,10 @@ export function ProfileQuestions({ model, navigation, onReturn }: { model: Profi
       return { ...d, text: next };
     });
     if (origin !== visit.current) return;
+    if (kind === 'upsert' && editing === questionId) {
+      pendingEditFocus.current = questionId;
+      setEditing(current => current === questionId ? null : current);
+    }
     if (kind === 'selection') {
       if (destination === 'profile-questions') setFeedback({ route, message: 'Selección guardada' });
       else { pendingSelectionFeedback.current = true; navigation.backTo('profile-questions'); }
@@ -74,8 +95,9 @@ export function ProfileQuestions({ model, navigation, onReturn }: { model: Profi
       if (destination === 'profile-questions') setFeedback({ route, message: 'Selección guardada' });
     }
   }, [destination, route]);
-  const renderAnswer = (row: ReturnType<typeof questionRows>[number]) => <AnswerForm
+  const renderAnswer = (row: ReturnType<typeof questionRows>[number], inlineEdit = false) => <AnswerForm
     question={row.question} answer={row.answer} current={row.current} text={answerText(row)} busy={busy} locked={locked}
+    cancel={inlineEdit ? () => cancelEdit(row.question.id) : undefined}
     touched={Object.hasOwn(ownedDrafts.text, row.question.id)}
     change={value => setText(row.question.id, value)} save={() => void complete('upsert', row.question.id)}
     feedback={feedback?.route === route && feedback.questionId === row.question.id ? feedback.message : ''}
@@ -110,10 +132,10 @@ export function ProfileQuestions({ model, navigation, onReturn }: { model: Profi
         {[...eligible].sort((a,b) => { const ai=selection.indexOf(a.question.id), bi=selection.indexOf(b.question.id); return (ai<0 ? Infinity : ai)-(bi<0 ? Infinity : bi); }).concat(rows.filter(row => row.answer && !row.selectable)).map(row => {
           const { question, answer } = row;
           const index = selection.indexOf(question.id), selected = row.selectable && index >= 0;
-          return <article className="home-card question-actions" data-selected={selected} key={question.id} aria-label={question.prompt}><h3>{question.prompt}</h3>{!row.current && <p>Versión anterior</p>}{editing === question.id ? renderAnswer(row) : <p className="question-preview">{answer?.answer}</p>}{selected && <p>Posición {index + 1}</p>}
-            <div className="question-controls"><button className="login-button login-outlined" disabled={busy} aria-expanded={editing === question.id} aria-label={`Editar: ${question.prompt}`} onClick={() => setEditing(editing === question.id ? null : question.id)}>{row.current ? 'Editar respuesta' : 'Actualizar respuesta'}</button><button className="login-button login-outlined" disabled={locked} onClick={() => void complete('delete', question.id)}>Eliminar</button>{row.selectable && <><button className="login-button login-outlined" disabled={locked || (!selected && selection.length >= 3)} onClick={() => setSelection(selected ? selection.filter(id => id !== question.id) : [...selection, question.id])}>{selected ? 'Quitar' : 'Agregar'}</button>
+          return <article className="home-card question-actions" data-selected={selected} key={question.id} aria-label={question.prompt}><h3>{question.prompt}</h3>{!row.current && <p>Versión anterior</p>}{editing === question.id ? renderAnswer(row, true) : <p className="question-preview">{answer?.answer}</p>}{selected && <p>Posición {index + 1}</p>}
+            {editing !== question.id && <div className="question-controls"><button ref={button => { if (button) editButtons.current.set(question.id, button); else editButtons.current.delete(question.id); }} className="login-button login-outlined" disabled={busy} aria-expanded={editing === question.id} aria-label={`Editar: ${question.prompt}`} onClick={() => setEditing(editing === question.id ? null : question.id)}>{row.current ? 'Editar respuesta' : 'Actualizar respuesta'}</button><button className="login-button login-outlined" disabled={locked} onClick={() => void complete('delete', question.id)}>Eliminar</button>{row.selectable && <><button className="login-button login-outlined" disabled={locked || (!selected && selection.length >= 3)} onClick={() => setSelection(selected ? selection.filter(id => id !== question.id) : [...selection, question.id])}>{selected ? 'Quitar' : 'Agregar'}</button>
               <button className="login-button login-outlined" disabled={locked || index <= 0} onClick={() => setSelection(moveSelection(selection, index, index - 1))}>Subir</button>
-              <button className="login-button login-outlined" disabled={locked || !selected || index === selection.length - 1} onClick={() => setSelection(moveSelection(selection, index, index + 1))}>Bajar</button></>}</div>
+              <button className="login-button login-outlined" disabled={locked || !selected || index === selection.length - 1} onClick={() => setSelection(moveSelection(selection, index, index + 1))}>Bajar</button></>}</div>}
           </article>;
         })}
 
@@ -124,9 +146,9 @@ export function ProfileQuestions({ model, navigation, onReturn }: { model: Profi
   </section>;
 }
 
-function AnswerForm({ question, answer, current, text, busy, locked, touched, change, save, feedback }: {
+function AnswerForm({ question, answer, current, text, busy, locked, touched, change, save, feedback, cancel }: {
   question: ReturnType<typeof questionRows>[number]['question']; answer: ReturnType<typeof questionRows>[number]['answer'];
-  current: boolean; text: string; busy: boolean; locked: boolean; touched: boolean; change: (text: string) => void; save: () => void; feedback: string;
+  current: boolean; text: string; busy: boolean; locked: boolean; touched: boolean; change: (text: string) => void; save: () => void; feedback: string; cancel?: (() => void) | undefined;
 }) {
   const id = useId(), validation = validateAnswer(text), showError = touched && !!validation.error;
   const input = useRef<HTMLTextAreaElement>(null), editingSaved = !!answer;
@@ -139,6 +161,7 @@ function AnswerForm({ question, answer, current, text, busy, locked, touched, ch
     <span id={`${id}-count`}>{validation.count}/160</span>
     {showError && <p id={`${id}-error`} className="home-error">{validation.error}</p>}
     <button className="login-button login-primary" disabled={locked || !canSaveAnswer(text, question, answer)} type="submit">Guardar</button>
+    {cancel && <button className="login-button login-outlined" type="button" disabled={busy} onClick={cancel}>Cancelar edición</button>}
     {feedback && <p role="status">{feedback}</p>}
   </form>;
 }

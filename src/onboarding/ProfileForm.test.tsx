@@ -43,7 +43,8 @@ it.each(['create','filters'] as const)('focuses only missing intention in %s whi
   }
   fireEvent.change(intention,{ target:{ value:'DATE' } });
   submitForm();
-  expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ intention:'DATE', lookingForGenders:['FEMALE'] }),mode);
+  if (mode === 'create') expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ intention:'DATE', lookingForGenders:['FEMALE'] }),mode);
+  else expect(submit).not.toHaveBeenCalled();
 });
 
 it.each(['create','filters'] as const)('focuses only missing interested genders in %s while intention stays valid', mode => {
@@ -62,7 +63,8 @@ it.each(['create','filters'] as const)('focuses only missing interested genders 
   expect(intention).not.toHaveAttribute('aria-describedby');
   fireEvent.click(screen.getByRole('checkbox',{ name:'Mujeres' }));
   submitForm();
-  expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ intention:'DATE', lookingForGenders:['FEMALE'] }),mode);
+  if (mode === 'create') expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ intention:'DATE', lookingForGenders:['FEMALE'] }),mode);
+  else expect(submit).not.toHaveBeenCalled();
 });
 
 it('defaults new profiles to catalog-provided Argentina, leaves birth date empty and sorts localized country names', () => {
@@ -118,7 +120,8 @@ it('preserves existing profile country and birth date while editing, including t
   expect(screen.getByLabelText('País')).toHaveValue('ES');
   expect(screen.getByLabelText('Nombre visible')).toHaveValue('Ana');
   update({ catalog }); expect(screen.getByLabelText('País')).toHaveValue('ES');
-  submitForm(); expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ countryCode:'ES',birthDate:'1990-05-18',city:'Madrid' }),'details');
+  fireEvent.change(screen.getByLabelText('Ciudad'), { target: { value: 'Sevilla' } });
+  submitForm(); expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ countryCode:'ES',birthDate:'1990-05-18',city:'Sevilla' }),'details');
 });
 it('does not default an existing empty country to Argentina', () => {
   const { submit } = mount({ profile:{ ...existing,countryCode:'' },mode:'details' });
@@ -159,6 +162,7 @@ it.each([[18,45],[18,18],[99,99],[32,33]])('preserves persisted age interval %s�
   expect(screen.getByText(`Edad: ${min}–${max} años`)).toBeInTheDocument();
   expect(screen.getByRole('spinbutton',{ name:'Desde:' })).toHaveValue(min);
   expect(screen.getByRole('spinbutton',{ name:'Hasta:' })).toHaveValue(max);
+  fireEvent.change(screen.getByLabelText('Intención'), { target:{ value:'FRIENDSHIP' } });
   submitForm(); expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ preferredMinAge:min,preferredMaxAge:max }),'filters');
 });
 it.each(['create','filters'] as const)('submits synchronized numeric ages through the existing %s payload', mode => {
@@ -200,4 +204,44 @@ it('keeps sensitive choices empty after filling other fields and links the first
   submitForm();
   expect(submit).not.toHaveBeenCalled(); expect(screen.getByLabelText('Género')).toHaveFocus();
   expect(screen.getByLabelText('Género')).toHaveAccessibleDescription(/Seleccioná un género/);
+});
+
+it('blocks normalized unchanged edits and disables again on confirmation without replacing drafts', () => {
+  const { submit, update } = mount({ profile:existing, mode:'details' });
+  const save = screen.getByRole('button', { name:'Guardar cambios' });
+  expect(save).toBeDisabled(); submitForm(); expect(submit).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Nombre visible'), { target:{ value:'  Ana  ' } });
+  expect(save).toBeDisabled(); submitForm(); expect(submit).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Ciudad'), { target:{ value:'  Sevilla  ' } });
+  expect(save).toBeEnabled(); submitForm(); expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ city:'Sevilla',displayName:'Ana' }),'details');
+  update({ profile:{ ...existing,city:'Sevilla' } });
+  expect(save).toBeDisabled(); expect(screen.getByLabelText('Ciudad')).toHaveValue('  Sevilla  ');
+  submitForm(); expect(submit).toHaveBeenCalledTimes(1);
+  fireEvent.change(screen.getByLabelText('Ciudad'), { target:{ value:'Otro borrador' } });
+  update({ profile:{ ...existing,city:'Sevilla',bio:'Servidor' } });
+  expect(screen.getByLabelText('Ciudad')).toHaveValue('Otro borrador'); expect(save).toBeEnabled();
+});
+it('ignores preference ordering and enables only actual filter changes', () => {
+  mount({ profile:{ ...existing,lookingForGenders:['FEMALE','MALE'] },mode:'filters' });
+  const save = screen.getByRole('button', { name:'Guardar cambios' }); expect(save).toBeDisabled();
+  fireEvent.click(screen.getByRole('checkbox', { name:'Mujeres' })); expect(save).toBeEnabled();
+  fireEvent.click(screen.getByRole('checkbox', { name:'Mujeres' })); expect(save).toBeDisabled();
+});
+
+it('keeps a stable inline confirmation slot and hides old success while editing', () => {
+  const { update } = mount({ profile:existing,mode:'details' });
+  const status = screen.getByRole('status'); expect(status).toBeEmptyDOMElement();
+  update({ saved:true }); expect(screen.getByRole('status')).toBe(status); expect(status).toHaveTextContent('Cambios guardados.');
+  fireEvent.change(screen.getByLabelText('Ciudad'), { target:{ value:'Sevilla' } });
+  expect(status).toBeEmptyDOMElement(); update({ busy:true }); expect(screen.getByRole('status')).toBe(status);
+  update({ profile:{ ...existing,city:'Sevilla' },busy:false });
+  expect(status).toHaveTextContent('Cambios guardados.'); expect(screen.getByRole('button', { name:'Guardar cambios' })).toBeDisabled();
+});
+
+it('shows saving only for a profile write, not loading or other busy operations', () => {
+  const { update } = mount({ profile:existing,mode:'details',busy:true });
+  expect(screen.getByRole('button', { name:'Guardar cambios' })).toBeDisabled();
+  expect(screen.queryByText('Guardando\u2026')).toBeNull();
+  update({ saving:true }); expect(screen.getByRole('button', { name:'Guardando\u2026' })).toBeDisabled();
+  update({ saving:false,busy:false }); expect(screen.getByRole('button', { name:'Guardar cambios' })).toBeDisabled();
 });

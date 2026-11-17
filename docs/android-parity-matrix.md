@@ -1552,3 +1552,54 @@ existing questions Chromium smoke; this matrix. No other tracked files changed.
 No commit, push, merge, PR or deployment; HEAD remains `c59135a`.
 
 Final full validation: `npm test -- --maxWorkers=1 --reporter=json --outputFile=artifacts/profile-questions/inline-full-tests.json`: exit 0, 1670 tests passed / zero failures. This runs the entire suite on the final production/test tree, including the earlier timed-out regression and all added inline/retry cases. `git diff --check`: PASS; changed text decoded as UTF-8 and scanned for mojibake. Branch/HEAD remain unchanged; all five tracked-file changes are uncommitted.
+
+
+### Answered-card editing actions (2026-11-17)
+
+Base: clean `origin/main` / `f619180`; branch `fix/profile-question-edit-actions`
+created with `--no-track` after fetching origin. Android/backend remain read-only.
+
+Audit: Android `ui/profile/ProfileQuestionScreen.kt` (overview/list/editor/selection),
+`ProfileQuestionPresentation.kt`, `ui/root/ProfileQuestionOperationHandler.kt` and
+its presentation/operation tests retain separate editor navigation, authoritative
+answer installation, mutation exclusion and scoped feedback. Backend contract:
+[profile-question endpoints](../../reals-backend/docs/commons/api.md).
+The existing Web inline flow is an explicitly requested platform adaptation.
+
+| Area / before | Required result / implementation |
+| --- | --- |
+| Answered-card actions: PARTIAL | COMPLETE: `ProfileQuestions.tsx` retains all viewing actions; editing renders only the inline form, Guardar and Cancelar edición. Public position stays visible. Includes stale-version Actualizar cards. |
+| Cancel: MISSING | COMPLETE: discard only the addressed identity-owned text entry, show latest saved answer, restore Edit focus, issue no request. Other answer drafts and public selection stay intact. |
+| Confirmed Save: PARTIAL | COMPLETE: authoritative hook result retires submitted draft and closes the current-visit editor, restoring Edit focus; no route change. |
+| Failed / uncertain Save: COMPLETE | Preserved: editor/draft stay open; rejected writes retain existing error handling; uncertain writes require explicit query recovery. |
+| Navigation, resume, ownership: COMPLETE in existing Web tests | Preserved guards, route visits, keyed fields, foreground exclusion and owner/serial/abort checks. No new timers, effects listening for background events, or API contracts. |
+| Keyboard / responsive rendering: PLATFORM-LIMITED | Browser textarea autofocus and Edit focus restoration replace native navigation semantics. Chromium at 390/1440 px checks keyboard and overflow. Physical device and native visual equivalence remain unverified. |
+| Unanswered forms / other UI: COMPLETE in existing scope | No production behavior change; existing independent drafts, History, quiet refresh and late-write scenarios retained. |
+
+Pre-edit invariant / mutation-response review:
+
+| Path | Invariant / protection |
+| --- | --- |
+| Local typing / cancel | Identity-owned text map; cancel removes one key atomically, preserves selection and every other key. Busy guard and disabled Cancel prevent in-flight cancellation. |
+| Save success | Hook installs validated complete server array first. Existing draft retirement checks submitted value/identity. Close/focus only on same route visit and matching editor. |
+| Save rejection / network / malformed response | Null mutation result never closes or clears editor; existing explicit error/query recovery remains authoritative; no automatic mutation retry. |
+| Selection / delete / quiet refresh | Existing model exclusivity, atomic answer installation and server positions unchanged; local selection survives answer edits. |
+| Navigation / newer visit / sign-out | Existing visit check suppresses late close/focus/feedback. Hook owner, abort and serial validation reject obsolete responses. Identity change clears local editing/drafts. Focus refs own only mounted Edit buttons. |
+
+Diff: answered-card presentation/focus/cancel only; onboarding regression updates;
+existing Chromium runner extended; this matrix. Validation results recorded below.
+
+Validation to date:
+
+- `npm run test:focused -- src/onboarding/Onboarding.test.tsx src/profile/questions/useProfileQuestions.test.tsx --maxWorkers=1`: 135 passed, one existing unrelated Tu perfil revisit failure (Inicio heading unavailable). All four new regressions pass. Earlier iteration failures: UTF-8 pipe corruption corrected; overlong cancel integration reduced to its scoped behavior without increasing timeouts. Existing independent unanswered-draft/navigation tests remain enabled.
+- `npm run typecheck`: PASS after correcting exact optional prop typing.
+- `npm run check:architecture`: PASS, 83 modules / zero runtime cycles.
+- `npm run build`: PASS including typecheck; existing >500 kB chunk advisory.
+- `node tools/profile-questions-smoke.mjs --url=http://127.0.0.1:5190`: PASS, ACTIVE/DRAFT at 390/1440 px, including action visibility, cancel without writes, focus, in-flight lock, 400/500 recovery, authoritative save close, public order/delete, drafts/History/resume and overflow. Repeated only to add scrolled editor screenshots; final run PASS. Screenshots `artifacts/profile-questions/editing-actions-*.png` inspected at mobile and desktop sizes. Synthetic HTTP/auth, no live backend or physical-device claim.
+- `git diff --check`: PASS. Changed text decoded as UTF-8, Spanish accents inspected; original CRLF working-copy line endings preserved.
+
+Final complete-suite result: `npm test -- --maxWorkers=1 --reporter=json --outputFile=artifacts/profile-questions/edit-actions-full-tests.json`: **1668 passed / 6 failed / 1674 total**, 79 files. Five existing onboarding cases timed out (retry success/failure, initial public answers, independent inline drafts, late inline save); existing admin MFA `real pagehide ... persisted=false` could not find the profile name. All new cancel/write regressions passed. Chromium overlapped the early part of this run, so resource contention is a possible cause, not an established diagnosis. No timeout increases or unrelated production fixes were made.
+
+Focused failure investigation without Chromium: `npm run test:focused -- src/onboarding/Onboarding.test.tsx src/admin/mfa.test.tsx -t 'enabled retry button|shows public answers|answers directly|keeps late inline|cancels only|blocks cancellation|real pagehide|retains the confirmed Tu perfil' --maxWorkers=1 --reporter=json --outputFile=artifacts/profile-questions/edit-actions-focused-final.json`: PASS, 12 selected tests / zero failures. Covers all six full-suite failures, the earlier revisit failure, and all new cancel/write cases. Full-suite result remains recorded as failed; no broad rerun was used to replace it. Remaining risk: full-suite timing stability on this machine needs confirmation in CI or an otherwise idle environment.
+
+Final diff reviewed: four files, no backend/Android/contracts/unanswered-form changes. No commit, push, merge or deployment. HEAD remains `f619180` with no upstream on the work branch. Physical-device, live-server and Android pixel-equivalence validation remain outside these synthetic browser results.

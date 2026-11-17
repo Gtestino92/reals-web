@@ -93,3 +93,5 @@
 @media (prefers-reduced-motion: reduce) {
   .photo-section-expansion, .photo-section-content, .photo-section-chevron { transition: none; }
 }
+
+.profile-form .profile-save-feedback { min-height: 1.5em; margin: 8px 0 0; line-height: 1.5; color: var(--color-primary); font-weight: 600; }

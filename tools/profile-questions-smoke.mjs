@@ -10,7 +10,7 @@ const stamp = '2026-11-08T12:00:00Z';
 const catalog = { catalogVersion: 'v1', questions: ['A','B','C','D'].map((id,i) => ({ id, prompt: `Pregunta ${id}`, displayOrder: i+1, semanticVersion: 1, contentVersion: 1 })) };
 const answer = id => ({ questionId: id, questionSemanticVersion: 1, answer: `Respuesta ${id}`, selectedPosition: null, current: id !== 'A', createdAt: stamp, updatedAt: stamp });
 let fixture;
-const reset = status => { fixture = { status, answers: ['A','B','C','D'].map(answer), writes: [], writeDelay: 0, readDelay: 0 }; };
+const reset = status => { fixture = { status, answers: ['A','B','C','D'].map(answer), writes: [], writeDelay: 0, readDelay: 0, writeStatus: 200 }; };
 reset('ACTIVE');
 const server = createServer(async (req,res) => {
   const f = fixture;
@@ -35,6 +35,7 @@ const server = createServer(async (req,res) => {
     if (method !== 'GET') {
       f.writes.push({ path, method, body });
       await new Promise(r => setTimeout(r, f.writeDelay));
+      if (f.writeStatus !== 200) { res.writeHead(f.writeStatus, { 'Content-Type':'application/json' }); res.end(JSON.stringify({ code:'SYNTHETIC_REJECTED' })); return; }
       if (path === '/me/profile/question-selections') f.answers = f.answers.map(a => ({ ...a, selectedPosition:body.questionIds.includes(a.questionId) ? body.questionIds.indexOf(a.questionId)+1 : null }));
       else {
         const id = path.split('/').at(-1), saved = f.answers.find(a => a.questionId === id);
@@ -114,8 +115,27 @@ try {
     await resume('article[aria-label="Pregunta A"] textarea');
     check(await evaluate("document.querySelector('article[aria-label=\"Pregunta A\"] textarea').value.length===160"),'answer resume retains draft');
     await click('Guardar');await wait(visible('Respuesta guardada'),'saved');check(fixture.answers.find(a=>a.questionId==='A').answer.length===160,'authoritative save');
-    await change('article[aria-label="Pregunta A"] textarea','Respuesta editada');await click('Guardar');await wait("document.querySelector('.profile-questions').getAttribute('aria-busy')==='false'&&document.querySelector('.profile-questions button[type=submit]').disabled",'edit saved');
-    await evaluate("document.querySelector('article[aria-label=\"Pregunta A\"] textarea').focus()");await key('Tab','Tab',9);check(await evaluate("document.activeElement.textContent==='Editar respuesta'"),'keyboard focus after unchanged answer');
+    check(await evaluate("!document.querySelector('article[aria-label=\"Pregunta A\"] textarea')&&document.activeElement.getAttribute('aria-label')==='Editar: Pregunta A'"),'confirmed save closes editor and restores focus');
+    await click('Agregar','Pregunta A');
+    await click('Editar: Pregunta A');
+    check(await evaluate("[...document.querySelectorAll('article[aria-label=\"Pregunta A\"] button')].map(n=>n.textContent).join('|')==='Guardar|Cancelar edición'&&document.querySelector('article[aria-label=\"Pregunta A\"]').textContent.includes('Posición 1')"),'only editor actions with public position');
+    await evaluate("document.querySelector('article[aria-label=\"Pregunta A\"]').scrollIntoView({block:'center'})");await screenshot(`editing-actions-${status}-${width}`);
+    await change('article[aria-label="Pregunta A"] textarea','Descartar ñ');const beforeCancel=fixture.writes.length;
+    await click('Cancelar edición');check(fixture.writes.length===beforeCancel,'cancel performs no write');
+    check(await evaluate("document.activeElement.getAttribute('aria-label')==='Editar: Pregunta A'"),'cancel restores Edit focus');
+    await click('Editar: Pregunta A');check(await evaluate("document.querySelector('article[aria-label=\"Pregunta A\"] textarea').value==='x'.repeat(160)"),'cancel restores saved answer');
+    for (const writeStatus of [400,500]) {
+      fixture.writeStatus=writeStatus;fixture.writeDelay=400;
+      await change('article[aria-label="Pregunta A"] textarea','Respuesta editada');await click('Guardar');
+      check(await evaluate("[...document.querySelectorAll('button')].find(n=>n.textContent==='Cancelar edición').disabled"),'cancel locked during write');
+      await wait("!!document.querySelector('.profile-questions [role=alert]')&&!document.querySelector('.profile-questions[aria-busy=true]')",'failed write');
+      check(await evaluate("document.querySelector('article[aria-label=\"Pregunta A\"] textarea').value==='Respuesta editada'"),'failed write preserves editor and draft');
+      fixture.writeStatus=200;fixture.writeDelay=0;await click('Reintentar consulta');
+      await wait("!!document.querySelector('.profile-questions button[type=submit]:not(:disabled)')",'write recovery');
+    }
+    await click('Guardar');await wait("!document.querySelector('article[aria-label=\"Pregunta A\"] textarea')",'edit saved');
+    await key('Tab','Tab',9);check(await evaluate("document.activeElement.textContent==='Eliminar'"),'keyboard reaches restored card actions');
+    await click('Quitar','Pregunta A');
     check(await evaluate("history.state.trail.at(-1)==='profile-questions'"),'edit stays on overview');
     for(const id of ['A','B','C'])await click('Agregar',`Pregunta ${id}`);
     await click('Quitar','Pregunta B');await click('Agregar','Pregunta B');await click('Subir','Pregunta B');await screenshot(`selection-${status}-${width}`);
