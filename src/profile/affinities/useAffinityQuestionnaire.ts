@@ -5,7 +5,7 @@ import { parseAnswers, parseCatalog } from './contracts';
 import type { Answer, Catalog } from './contracts';
 import { answerable, validAnswer } from './presentation';
 interface State { catalog: Catalog | null; answers: Answer[]; busy: boolean; uncertain: boolean; error: string }
-interface Owner { identity: string; lifetime: AbortController; read: AbortController | null; serial: number; mutation: boolean; uncertain: boolean }
+interface Owner { identity: string; lifetime: AbortController; read: AbortController | null; serial: number; mutation: boolean; uncertain: boolean; background: boolean }
 const empty: State = { catalog: null, answers: [], busy: false, uncertain: false, error: '' };
 export function useAffinityQuestionnaire(controller: SessionController, active = true) {
   const foreground = useRef(active); foreground.current = active;
@@ -14,36 +14,38 @@ export function useAffinityQuestionnaire(controller: SessionController, active =
   const [state, setState] = useState(empty), latest = useRef(empty), owner = useRef<Owner | null>(null);
   const install = (next: State) => { latest.current = next; setState(next); };
   const valid = (r: Owner, serial: number) => owner.current === r && !r.lifetime.signal.aborted && serial === r.serial && controller.snapshot.phase === 'ready' && `${controller.snapshot.account?.id}/${controller.snapshot.profile?.id}` === r.identity;
-  const refresh = async () => {
+  const refresh = async (background = false) => {
     const r = owner.current;
     if (!r || r.mutation || r.read) return;
     const read = new AbortController(), serial = ++r.serial;
     r.read = read;
     const signal = AbortSignal.any([read.signal, r.lifetime.signal]);
-    r.uncertain = true;
-    install({ ...latest.current, busy: true, uncertain: true, error: '' });
+    background = background && !!latest.current.catalog && !r.uncertain;
+    r.background = background;
+    if (!background) { r.uncertain = true; install({ ...latest.current, busy: true, uncertain: true, error: '' }); }
     try {
       const [catalog, answers] = await Promise.all([controller.request('/reference/affinity-questions', signal).then(parseCatalog), controller.request('/me/profile/affinity-answers', signal).then(parseAnswers)]);
       if (valid(r, serial)) { r.uncertain = false; install({ catalog, answers, busy: false, uncertain: false, error: '' }); }
     } catch {
-      if (valid(r, serial)) install({ ...latest.current, busy: false, error: 'No pudimos actualizar tus afinidades. Revisá tu conexión y reintentá.' });
-    } finally { if (r.read === read) r.read = null; }
+      if (valid(r, serial)) { r.uncertain = true; install({ ...latest.current, busy: false, uncertain: true, error: 'No pudimos actualizar tus afinidades. Revisá tu conexión y reintentá.' }); }
+    } finally { if (r.read === read) { r.read = null; r.background = false; } }
   };
   useEffect(() => {
     install(empty);
     if (!identity || !controller.snapshot.profile) return;
-    const r: Owner = { identity, lifetime: new AbortController(), read: null, serial: 0, mutation: false, uncertain: false };
+    const r: Owner = { identity, lifetime: new AbortController(), read: null, serial: 0, mutation: false, uncertain: false, background: false };
     owner.current = r; void refresh();
-    const resume = () => { if (foreground.current && document.visibilityState === 'visible') void refresh(); };
+    const resume = () => { if (foreground.current && document.visibilityState === 'visible') void refresh(true); };
     document.addEventListener('visibilitychange', resume);
     return () => { document.removeEventListener('visibilitychange', resume); r.lifetime.abort(); r.read?.abort(); if (owner.current === r) owner.current = null; };
   }, [controller, identity]); // Each identity owns all reads and writes; no polling.
   const mutate = async (questionId: string, answerCode: string | null): Promise<Answer[] | null> => {
     const r = owner.current, snapshot = latest.current;
-    if (!r || r.mutation || r.read || r.uncertain || !snapshot.catalog || !valid(r, r.serial)) return null;
+    if (!r || r.mutation || (r.read && !r.background) || r.uncertain || !snapshot.catalog || !valid(r, r.serial)) return null;
     const q = answerable(snapshot.catalog).find(q => q.id === questionId);
     if (!q || (answerCode !== null && !q.options.some(o => o.code === answerCode))) return null;
     if (answerCode === validAnswer(q, snapshot.answers)?.answerCode) return snapshot.answers;
+    if (r.read) { r.read.abort(); r.read = null; r.background = false; }
     r.mutation = true;
     const serial = ++r.serial;
     install({ ...snapshot, busy: true, error: '' });
