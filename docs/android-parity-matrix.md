@@ -1504,3 +1504,51 @@ Pre-edit invariant / mutation review:
 Reproduction: focused enabled-retry tests (success and failure outcomes) both
 failed at the assertion that the pending background signal was aborted by the
 click, before any production edit.
+
+### Inline profile answers (additional user request)
+
+Android `ProfileQuestionScreen.kt` uses list -> Editor and selection -> overview,
+as audited above. User explicitly requests a Web difference: unanswered cards
+have their own textarea/Save in Responder preguntas; saved cards edit in place
+and offer Delete alongside selection/order in Preguntas del perfil. Before this
+change that flow is MISSING. Backend answer and selection contracts are unchanged.
+
+| Mutation / response path | Invariant |
+| --- | --- |
+| Inline save/delete | Keep existing hook exclusivity, uncertainty, abort and identity checks. One explicit mutation for the addressed question; backend array remains authoritative. |
+| Multiple local drafts | Key by question and authenticated identity. Saving one never clears another or a newer value; navigation keeps existing drafts private and in memory. |
+| Quiet catalog/answer refresh | Preserve draft and mounted field focus; unavailable questions disappear, stale versions remain updateable. Never save from a visibility event. |
+| Save/delete changes list membership | Only confirmed response changes card membership. Keep feedback visible on the originating screen; no late completion navigation. |
+| Selection and inline edits | Maintain maximum three, ordering, explicit selection Save and stale-item recovery; deletion uses authoritative compacted public positions. |
+
+No onboarding refactor or changes to session/backend/Android policy are authorized.
+
+
+Scoped results for the retry audit and subsequent inline-answer request:
+
+| Area | Final implementation / evidence |
+| --- | --- |
+| Explicit retry priority | COMPLETE for Web: one-line `run` guard now rejects incoming background calls or an existing foreground owner. Explicit read and mutation both supersede a background operation. Existing abort/operation identity installation and cleanup are unchanged. |
+| Inline unanswered cards | COMPLETE for requested Web flow: each unanswered question has its own labelled form, textarea, counter/validation and Save; no Abrir or Delete in that list. Successful save removes only the confirmed answered card, leaves other drafts intact and focuses the list heading. |
+| Inline saved cards | COMPLETE for requested Web flow: Edit expands the form inside the same card, autofocuses its field, and saves without navigation. Delete lives on saved cards alongside public selection/order actions. One keyed answered-card list preserves the field DOM and focus across semantic-version changes. Delete retires the old editing state. |
+| Feedback and lifecycle | Mutation feedback is scoped to the question and originating route; removed cards have page feedback. Late responses update authoritative answers without unrelated navigation/feedback. No automatic writes, retry or domain transition added. Existing hook uncertainty/exclusivity/account/lifetime checks retained. |
+| Android / platform differences | Inline forms intentionally differ from Android's separate editor at user request. No other parity changes. Chromium uses synthetic HTTP/auth and visibility events; physical-device and live-backend behavior remain unverified. |
+
+Validation commands/results:
+
+- Before the guard fix: `npm run test:focused -- src/onboarding/Onboarding.test.tsx -t 'enabled retry button' --maxWorkers=1`: exit 1, both new success/failure cases fail because the enabled click does not abort the pending background read.
+- After the guard fix: `npm run test:focused -- src/onboarding/Onboarding.test.tsx --maxWorkers=1`: PASS, 113 tests. Includes no interruption of foreground mutation, repeated background-event suppression, obsolete result rejection, retained drafts/focus and success/failure retry feedback. Existing genuine-mutation supersession regression retained.
+- Interim full run `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/onboarding-retry/full-tests.json`: 1667 passed, one 5000 ms timeout in the existing uncertain-answer/selection test. The user added the inline UI scope during this execution; final full validation below covers the complete final tree. No timeout was relaxed or regression removed.
+- After inline changes: `npm run test:focused -- src/onboarding/Onboarding.test.tsx src/profile/questions/useProfileQuestions.test.tsx --maxWorkers=1`: PASS, 132 tests / two files. New cases save one of multiple drafts, retain others through History/resume, edit without changing route and reject late-completion navigation. The first new navigation assertion was corrected to await actual History traversal.
+- Final keyed-card focus check: `npm run test:focused -- src/onboarding/Onboarding.test.tsx -t 'active question disappears' --maxWorkers=1`: PASS. Semantic refresh retains the exact textarea DOM node, focus and text; removal remains authoritative.
+- `node artifacts/onboarding-retry/browser.mjs`: exit 0, Chromium at 390/1440 px reproduces enabled retry supersession, stale background result rejection, zero writes, retained draft DOM and navigation locks; no captured browser diagnostics. Script/screenshots are ignored artifacts.
+- `node tools/profile-questions-smoke.mjs --url=http://127.0.0.1:5190`: exit 0, ACTIVE/DRAFT at 390/1440 px. Inline new-answer/edit/delete, three-public limit/order/clear, 160/161 boundary and unsafe input, keyboard, quiet resume, Back/Forward drafts, delayed completion and no overflow all pass. The script now waits for save completion as well as a disabled unchanged-save button. Existing scenarios retained with their new routes.
+- Screenshots of inline new answers and saved editing/selection visually inspected in `artifacts/profile-questions/`; no Android pixel-equivalence claim for this explicitly requested Web interaction change.
+- `npm run typecheck`, `npm run check:architecture`, `npm run build`: exit 0 on the final production code. Architecture remains 83 production modules / zero runtime cycles; existing >500 kB chunk advisory.
+
+Diff summary: `Onboarding.tsx` operation-priority guard only; `ProfileQuestions.tsx`
+inline forms, keyed cards and question-scoped feedback; onboarding regressions;
+existing questions Chromium smoke; this matrix. No other tracked files changed.
+No commit, push, merge, PR or deployment; HEAD remains `c59135a`.
+
+Final full validation: `npm test -- --maxWorkers=1 --reporter=json --outputFile=artifacts/profile-questions/inline-full-tests.json`: exit 0, 1670 tests passed / zero failures. This runs the entire suite on the final production/test tree, including the earlier timed-out regression and all added inline/retry cases. `git diff --check`: PASS; changed text decoded as UTF-8 and scanned for mojibake. Branch/HEAD remain unchanged; all five tracked-file changes are uncommitted.

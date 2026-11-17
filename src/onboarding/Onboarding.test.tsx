@@ -201,9 +201,8 @@ it('shows public answers and selection on entry, reserves the extra list for una
   expect(screen.getByRole('article', { name: 'Pregunta A' })).toHaveTextContent('Posición 1');
   expect(screen.getByRole('article', { name: 'Pregunta B' })).toHaveTextContent('Respuesta B');
   fireEvent.click(screen.getByRole('button', { name: 'Responder nuevas preguntas' }));
-  expect(screen.queryByRole('button', { name: 'Abrir: Pregunta A' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta C' }));
-  const text = screen.getByLabelText('Tu respuesta');
+  expect(screen.queryByRole('button', { name: 'Editar: Pregunta A' })).toBeNull();
+  const text = within(screen.getByRole('article', { name: 'Pregunta C' })).getByLabelText('Tu respuesta');
   expect(text).not.toHaveAttribute('aria-invalid', 'true');
   expect(screen.queryByText('Escribí una respuesta para guardar.')).toBeNull();
   expect(screen.queryByText('Una sola línea de texto simple.')).toBeNull();
@@ -214,6 +213,47 @@ it('shows public answers and selection on entry, reserves the extra list for una
   expect(text).toHaveFocus(); expect(text).toBeEnabled(); expect(text).toHaveValue('Mi borrador'); expect(writes('PUT')).toHaveLength(before);
   fireEvent.change(text, { target: { value: 'dos\nlíneas' } });
   expect(screen.getByText('La respuesta debe escribirse en una sola línea.')).toBeVisible();
+});
+it('answers directly in the list, preserves independent drafts and saves only the addressed question', async () => {
+  installQuestions(); await openManagement('Tu perfil'); await openProfileQuestions();
+  fireEvent.click(screen.getByRole('button', { name: 'Responder nuevas preguntas' }));
+  const first = within(screen.getByRole('form', { name: 'Responder: Pregunta A' })), second = within(screen.getByRole('form', { name: 'Responder: Pregunta B' }));
+  expect(screen.queryByRole('button', { name: /Abrir/ })).toBeNull(); expect(screen.queryByRole('button', { name: 'Eliminar' })).toBeNull();
+  const secondText = second.getByLabelText('Tu respuesta');
+  fireEvent.change(first.getByLabelText('Tu respuesta'), { target: { value: 'Respuesta nueva ñ' } });
+  fireEvent.change(secondText, { target: { value: 'Otro borrador' } });
+  fireEvent.click(first.getByRole('button', { name: 'Guardar' })); await screen.findByText('Respuesta guardada');
+  expect(writes('PUT')).toHaveLength(1); expect(String(writes('PUT')[0]?.[0])).toContain('/question-answers/A');
+  expect(screen.getByRole('heading', { name: 'Responder preguntas' })).toHaveFocus();
+  expect(screen.queryByRole('form', { name: 'Responder: Pregunta A' })).toBeNull();
+  expect(secondText).toHaveValue('Otro borrador');
+  secondText.focus(); act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(screen.queryByText('Actualizando preguntas…')).toBeNull());
+  expect(secondText).toHaveFocus(); expect(secondText).toHaveValue('Otro borrador');
+  fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+  await screen.findByRole('heading', { name: 'Preguntas del perfil' });
+  const saved = within(screen.getByRole('article', { name: 'Pregunta A' }));
+  expect(saved.getByText('Respuesta nueva ñ')).toBeVisible();
+  fireEvent.click(saved.getByRole('button', { name: 'Editar: Pregunta A' }));
+  expect(saved.getByLabelText('Tu respuesta')).toHaveFocus();
+  expect(history.state.trail.at(-1)).toBe('profile-questions');
+  fireEvent.click(screen.getByRole('button', { name: 'Responder nuevas preguntas' }));
+  expect(within(screen.getByRole('form', { name: 'Responder: Pregunta B' })).getByLabelText('Tu respuesta')).toHaveValue('Otro borrador');
+});
+it('keeps late inline saves on the current screen without discarding another question draft', async () => {
+  installQuestions(); await openManagement('Tu perfil'); await openProfileQuestions();
+  fireEvent.click(screen.getByRole('button', { name: 'Responder nuevas preguntas' }));
+  const first = within(screen.getByRole('form', { name: 'Responder: Pregunta A' })), second = within(screen.getByRole('form', { name: 'Responder: Pregunta B' }));
+  fireEvent.change(first.getByLabelText('Tu respuesta'), { target: { value: 'Nueva A' } }); fireEvent.change(second.getByLabelText('Tu respuesta'), { target: { value: 'Borrador B' } });
+  const base = fetcher.getMockImplementation()!; let finish!: (response: Response) => void;
+  fetcher.mockImplementation((path, options) => String(path).endsWith('/question-answers/A') && options?.method === 'PUT' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
+  fireEvent.click(first.getByRole('button', { name: 'Guardar' })); await waitFor(() => expect(finish).toBeDefined());
+  expect(second.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' });
+  await act(async () => finish(json({ answers: [savedAnswer('A', { answer: 'Nueva A' })] })));
+  expect(screen.getByRole('heading', { name: 'Preguntas del perfil' })).toBeVisible(); expect(screen.queryByText('Respuesta guardada')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Responder nuevas preguntas' }));
+  expect(within(screen.getByRole('form', { name: 'Responder: Pregunta B' })).getByLabelText('Tu respuesta')).toHaveValue('Borrador B');
 });
 it('keeps photo disclosure mounted and makes collapsed controls inert', async () => {
   await openManagement('Tu perfil'); const toggle = await screen.findByRole('button', { name: 'Fotos' });
@@ -246,22 +286,21 @@ it.each(['ACTIVE', 'DRAFT'])('preserves unsaved profile details, bio and filters
   expect(history.state.trail).toEqual(status === 'ACTIVE' ? ['home', 'profile', 'profile-questions'] : ['home', 'profile-questions']);
   expect(fetcher.mock.calls.filter(([path]) => path === '/api/reference/profile-questions')).toHaveLength(1);
   expect(fetcher.mock.calls.filter(([path]) => path === '/api/me/profile/question-answers')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button', { name: 'Responder nuevas preguntas' })); fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' }));
-  const editor = screen.getByLabelText('Tu respuesta'); fireEvent.change(editor, { target: { value: 'Borrador privado' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Responder nuevas preguntas' }));
+  const editor = within(screen.getByRole('article', { name: 'Pregunta A' })).getByLabelText('Tu respuesta'); fireEvent.change(editor, { target: { value: 'Borrador privado' } });
   expect(JSON.stringify(history.state)).not.toContain('Borrador privado');
-  act(() => history.back()); await screen.findByRole('heading', { name: 'Responder preguntas' }); act(() => history.forward()); await screen.findByRole('heading', { name: 'Editar respuesta' }); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Borrador privado');
-  fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Responder preguntas' }); fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+  act(() => history.back()); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); act(() => history.forward()); await screen.findByRole('heading', { name: 'Responder preguntas' }); expect(within(screen.getByRole('article', { name: 'Pregunta A' })).getByLabelText('Tu respuesta')).toHaveValue('Borrador privado');
+  fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Responder o editar' })).toHaveFocus()); expect(bio).toHaveValue('Mi bio sin guardar ñ'); expect(name).toHaveValue('Borrador'); expect(form).toBeInTheDocument();
   if (filters) expect(within(filters).getByLabelText('Intención')).toHaveValue('FRIENDSHIP');
   expect(writes('PATCH')).toHaveLength(0); expect(writes('PUT')).toHaveLength(0);
 });
 it('edits and resaves outdated answers, orders public selection, clears it, deletes and keeps authoritative feedback', async () => {
   installQuestions([savedAnswer('A', { current: false }), savedAnswer('B'), savedAnswer('C'), savedAnswer('D')]); await openManagement('Tu perfil'); await openProfileQuestions();
-  expect(screen.getByText('4 de 4 respondidas')).toBeVisible(); expect(screen.getByText('Versión anterior')).toBeVisible(); fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' }));
+  expect(screen.getByText('4 de 4 respondidas')).toBeVisible(); expect(screen.getByText('Versión anterior')).toBeVisible(); fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta A' }));
   expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Respuesta A'); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await screen.findByText('Respuesta guardada'); expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
   fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: '<texto>\nsegunda línea' } }); expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled(); expect(screen.getByText('La respuesta debe escribirse en una sola línea.')).toBeVisible();
   fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: '  Respuesta actualizada  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await waitFor(() => expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Respuesta actualizada'));
-  fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' });
   expect(screen.getByRole('button', { name: 'Guardar selección' })).toBeDisabled();
   for (const id of ['A','B','C']) fireEvent.click(within(screen.getByRole('article', { name: `Pregunta ${id}` })).getByRole('button', { name: 'Agregar' }));
   fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta C' })).getByRole('button', { name: 'Quitar' }));
@@ -271,15 +310,14 @@ it('edits and resaves outdated answers, orders public selection, clears it, dele
   fireEvent.click(screen.getByRole('button', { name: 'Guardar selección' })); await screen.findByText('Selección guardada'); expect(screen.getByText('3 de 3 elegidas para mostrar')).toBeVisible();
   const selectionCall = writes('PUT').find(([path]) => String(path).endsWith('/question-selections')); expect(JSON.parse(String(selectionCall?.[1]?.body))).toEqual({ questionIds: ['C','A','B'] });
   fireEvent.click(screen.getByRole('button', { name: 'Limpiar selección' })); fireEvent.click(screen.getByRole('button', { name: 'Guardar selección' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); expect(screen.getByText('0 de 3 elegidas para mostrar')).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' })); fireEvent.click(screen.getByRole('button', { name: 'Eliminar' })); await screen.findByText('Respuesta eliminada'); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('');
+  fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta A' })); fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta A' })).getByRole('button', { name: 'Eliminar' })); await screen.findByText('Respuesta eliminada'); expect(screen.queryByRole('article', { name: 'Pregunta A' })).toBeNull();
 });
 it('retains answer and selection drafts after uncertain writes and does not redirect late completion', async () => {
   installQuestions([savedAnswer(), savedAnswer('B')]); await openManagement('Tu perfil'); await openProfileQuestions();
   const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((path, options) => options?.method === 'PUT' && String(path).includes('/question-') ? Promise.reject(new TypeError('offline')) : base(path, options));
-  fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' })); fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: 'Mi cambio' } }); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await screen.findByRole('alert'); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Mi cambio'); expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta A' })); fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: 'Mi cambio' } }); fireEvent.click(screen.getByRole('button', { name: 'Guardar' })); await screen.findByRole('alert'); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Mi cambio'); expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar consulta' })); await waitFor(() => expect(screen.getByRole('button', { name: 'Guardar' })).toBeEnabled());
-  fireEvent.click(screen.getByRole('button', { name: 'Volver' })); await screen.findByRole('heading', { name: 'Preguntas del perfil' });
   fireEvent.click(within(screen.getByRole('article', { name: 'Pregunta B' })).getByRole('button', { name: 'Agregar' })); fireEvent.click(screen.getByRole('button', { name: 'Guardar selección' })); await screen.findByRole('alert'); expect(screen.getByText('Posición 1')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar consulta' })); await waitFor(() => expect(screen.getByRole('button', { name: 'Guardar selección' })).toBeEnabled());
   let finish!: (r: Response) => void; fetcher.mockImplementation((path, options) => String(path).endsWith('/question-selections') && options?.method === 'PUT' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
@@ -287,9 +325,10 @@ it('retains answer and selection drafts after uncertain writes and does not redi
   await act(async () => finish(json({ answers: [savedAnswer('B', { selectedPosition: 1 })] }))); expect(screen.getByRole('heading', { name: 'Tu perfil' })).toBeVisible(); expect(screen.queryByText('Selección guardada')).toBeNull();
 });
 it('returns to the list when the active question disappears and retains text on a semantic refresh', async () => {
-  const { catalog } = installQuestions([savedAnswer()]); await openManagement('Tu perfil'); await openProfileQuestions(); fireEvent.click(screen.getByRole('button', { name: 'Abrir: Pregunta A' }));
-  fireEvent.change(screen.getByLabelText('Tu respuesta'), { target: { value: 'Mi borrador' } }); catalog.questions[0]!.semanticVersion = 2; refreshView(); await screen.findByText('Versión anterior. Guardá la respuesta para actualizarla.'); expect(screen.getByLabelText('Tu respuesta')).toHaveValue('Mi borrador');
-  catalog.questions = catalog.questions.filter(q => q.id !== 'A'); refreshView(); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); expect(screen.queryByRole('button', { name: 'Abrir: Pregunta A' })).toBeNull();
+  const { catalog } = installQuestions([savedAnswer()]); await openManagement('Tu perfil'); await openProfileQuestions(); fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta A' }));
+  const originalAnswerField = screen.getByLabelText('Tu respuesta'); originalAnswerField.focus();
+  fireEvent.change(originalAnswerField, { target: { value: 'Mi borrador' } }); catalog.questions[0]!.semanticVersion = 2; refreshView(); await screen.findByText('Versión anterior. Guardá la respuesta para actualizarla.'); expect(screen.getByLabelText('Tu respuesta')).toBe(originalAnswerField); expect(originalAnswerField).toHaveFocus(); expect(originalAnswerField).toHaveValue('Mi borrador');
+  catalog.questions = catalog.questions.filter(q => q.id !== 'A'); refreshView(); await screen.findByRole('heading', { name: 'Preguntas del perfil' }); expect(screen.queryByRole('button', { name: 'Editar: Pregunta A' })).toBeNull();
 });
 it('does not enter questions during profile writes or a photo crop', async () => {
   installQuestions(); await openManagement('Tu perfil'); await screen.findByRole('form', { name: 'Datos del perfil' });
