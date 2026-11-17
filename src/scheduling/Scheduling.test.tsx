@@ -60,3 +60,20 @@ it.each([['Buenos Aires', 'AR', 'Buenos Aires, Argentina'], [null, 'XX', null]])
   expect(f.request.mock.calls.some(c => c[0].includes('/reference/countries'))).toBe(false);
   expect(f.request.mock.calls.some(c => c[2] && c[2] !== 'GET')).toBe(false);
 });
+
+it('keeps partner identity and actions stable while the initial profile is delayed', async () => {
+  const f = setup(), read = f.request.getMockImplementation()!; let finish!: (value: unknown) => void;
+  f.request.mockImplementation((path, ...args) => path.endsWith('/visual-profile') ? new Promise(resolve => { finish = resolve; }) : read(path, ...args));
+  const v = view(f); await screen.findByRole('heading', { name: 'Proponé tus horarios' });
+  v.rerender(<Scheduling {...v.props} browse/>);
+  const heading = screen.getByRole('heading', { name: 'María' });
+  const back = screen.getByRole('button', { name: 'Volver' });
+  expect(back.parentElement).toHaveClass('partner-profile-actions');
+  expect(heading.closest('header')).toHaveClass('partner-profile-heading');
+  expect(document.querySelector('.profile-placeholder')).toBeNull();
+  expect(screen.getByRole('status')).toHaveTextContent('Cargando perfil…');
+  await act(async () => finish(visualProfile({ city: 'Rosario', countryCode: 'AR' })));
+  expect(screen.getByRole('heading', { name: 'María, 29' })).toBe(heading);
+  expect(screen.getByRole('button', { name: 'Volver' })).toBe(back);
+  expect(document.querySelector('.partner-profile-loading')).toBeNull();
+});

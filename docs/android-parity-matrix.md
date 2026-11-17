@@ -1697,3 +1697,20 @@ Validation:
 - Screenshots inspected: preview ACTIVE desktop, partner mobile, initial review mobile; generated captures also include both viewport sizes. No horizontal overflow in automated checks. Captures are synthetic browser evidence, not native screenshot matching or real-account/backend validation.
 
 Diff scope: public location formatter/presentation, visual types/parser, owner projection, shared profile/partner/review placement, focused tests (including first-chat privacy), three existing smoke fixtures and this matrix. No async model, endpoint, mutation, dependency or sibling repository changes. No commit/push/PR/merge/deployment. Real backend accounts, physical devices, assistive technology and exact cross-runtime country spelling remain unverified.
+
+
+### Follow-up: entry flicker and partner Back alignment (2026-11-17)
+
+Base: clean `feature/public-profile-location` at `89a3dca` (user's location commit). References rechecked: Android `AffinityQuestionnaireScreen.kt` (loading only without catalog) and `PartnerProfileScreen.kt` (top-aligned identity/actions, compact initial loading). Existing [resume review](resume-glitch.md) applies; no backend contract change.
+
+| Area | Before / cause | Result |
+| --- | --- | --- |
+| Open loaded affinities | PARTIAL: Home forced foreground refresh; busy/status and disabled retry briefly appeared around usable content | COMPLETE: `Home.tsx` requests existing background refresh mode. `AffinityQuestionnaire.tsx` reserves loading for absent data and does not expose recovery during healthy initial loading. Existing drafts/navigation/keyboard behavior preserved. |
+| Partner header from Scheduling card | PARTIAL: generic title replaced by identity/location; three independent flex children displaced Back/menu | COMPLETE: known card name during loading, reserved identity area and top-aligned grouped actions (`PartnerProfile.tsx`, `Scheduling.tsx`, `visual.css`). No age/location inferred before authorized response. |
+| Initial partner loading | PARTIAL: large photo skeleton replaced by compact browse content, causing a pronounced flash | COMPLETE: compact loading card, matching Android source; initial HTTP read still required. Heading focus does not scroll the document. |
+
+Async review: opening affinities with a compatible catalog uses the existing read owner, atomic catalog/answer batch and background mutation-priority fences. Without catalog or after uncertainty it remains blocking. Failed revalidation retains content with actionable retry; no new retry/mutation/cache. Profile still installs only its existing guarded response and cancels its owned request; no prefetch or retention across unmount. Identity/access and Scheduling lifecycle policies unchanged.
+
+Validation: `npm run test:focused -- src/home/Home.test.tsx src/profile/affinities/useAffinityQuestionnaire.test.tsx src/scheduling/Scheduling.test.tsx --maxWorkers=1`: Home and affinity files passed (110 tests); Scheduling initially exposed an overly broad new test assertion that also matched photo-loading status. Corrected the assertion to the profile loading element. `npm run test:focused -- src/scheduling/Scheduling.test.tsx --maxWorkers=1`: 13/13 PASS. Total 123 focused tests pass across these runs. New cases cover delayed failed affinity entry with retained content and delayed partner entry with identical heading/Back DOM nodes.
+
+`npm run typecheck` and `git diff --check`: PASS. `node tools/scheduling-smoke.mjs`: PASS at 390x844 and 1440x900, with explicit Back alignment, location, navigation, preserved Scheduling draft and existing ownership/recovery scenarios. Synthetic Chromium evidence; no physical device or real-account check. Broader regressions/build not repeated for this scoped follow-up. No sibling repository edits, commit, push or deployment.
