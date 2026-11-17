@@ -3,7 +3,9 @@ import { defaults, genders, genderLabels, intentions, intentionLabels, normalize
 import type { Country, Fields, FullProfile } from './contracts';
 import { AgeRangeSlider } from './AgeRangeSlider';
 
-export function ProfileForm({ profile, catalog, countryError, retryCountries, busy, submit, mode = 'create', onDirtyChange }: { onDirtyChange?: ((dirty: boolean) => void) | undefined; profile?: FullProfile; catalog: Country[]; countryError: string; retryCountries: () => void; busy: boolean; submit: (fields: Fields, mode: 'create' | 'details' | 'filters') => void; mode?: 'create' | 'details' | 'filters' }) {
+export function ProfileForm({ profile, catalog, countryError, retryCountries, busy, submit, mode = 'create', onDirtyChange, saved = false, saving = false }: { saving?: boolean; saved?: boolean; onDirtyChange?: ((dirty: boolean) => void) | undefined; profile?: FullProfile; catalog: Country[]; countryError: string; retryCountries: () => void; busy: boolean; submit: (fields: Fields, mode: 'create' | 'details' | 'filters') => void; mode?: 'create' | 'details' | 'filters' }) {
+  const [saveDismissed, setSaveDismissed] = useState(false);
+  useLayoutEffect(() => { setSaveDismissed(false); }, [saved, busy]);
   const form = useRef<HTMLFormElement>(null);
   const errorId = useId();
   const initial = { ...defaults, gender: '', lookingForGenders: [], intention: '' };
@@ -27,14 +29,19 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
     return { name: key, 'aria-invalid': invalid || undefined, 'aria-describedby': invalid ? errorId : undefined };
   };
   const countryCode = fields.countryCode ?? (catalog.some(c => c.code === 'AR') ? 'AR' : '');
+  const clean = normalize({ ...fields, countryCode });
+  const confirmed = normalize({ ...baseline, countryCode: baseline.countryCode ?? countryCode });
+  const changed = keys.some(key => {
+    const value = clean[key], saved = confirmed[key];
+    return JSON.stringify(Array.isArray(value) ? [...value].sort() : value) !== JSON.stringify(Array.isArray(saved) ? [...saved].sort() : saved);
+  });
   const countryAvailable = catalog.some(c => c.code === countryCode);
   const sortedCountries = [...catalog].sort((a,b) => a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' }));
-  const change = <K extends keyof Fields>(key: K, value: Fields[K]) => setFields(f => ({ ...f, [key]: value }));
+  const change = <K extends keyof Fields>(key: K, value: Fields[K]) => { setSaveDismissed(true); setFields(f => ({ ...f, [key]: value })); };
   const text = (key: 'displayName' | 'city' | 'birthDate', label: string, max?: number, wide = false) => <label className={wide ? 'field-wide' : undefined}>{label}<input {...invalidField(key)} type={key === 'birthDate' ? 'date' : 'text'} value={fields[key]} maxLength={max} required onChange={e => change(key,e.target.value)} /></label>;
   return <form ref={form} noValidate className="profile-form" aria-label={mode === 'create' ? 'Crear perfil' : mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'} onSubmit={e => {
     e.preventDefault();
-    if (busy) return;
-    const clean = normalize({ ...fields, countryCode });
+    if (busy || (mode !== 'create' && !changed)) return;
     const issues = validate(clean,catalog,mode);
     setErrors(issues);
     if (!issues.length) submit(clean,mode);
@@ -72,12 +79,14 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
         </fieldset>
         <label>Intención<select {...invalidField('intention')} value={fields.intention} onChange={e => change('intention',e.target.value)}><option value="">Seleccioná tu intención</option>{intentions.map((v,i) => <option value={v} key={v}>{intentionLabels[i]}</option>)}</select></label>
         <fieldset className="age-preference"><legend>Rango de edad</legend>
-          <AgeRangeSlider minAge={fields.preferredMinAge} maxAge={fields.preferredMaxAge} disabled={busy} onChange={(min,max) => setFields(f => ({ ...f,preferredMinAge:min,preferredMaxAge:max }))}/>
+          <AgeRangeSlider minAge={fields.preferredMinAge} maxAge={fields.preferredMaxAge} disabled={busy} onChange={(min,max) => { setSaveDismissed(true); setFields(f => ({ ...f,preferredMinAge:min,preferredMaxAge:max })); }}/>
         </fieldset>
         <label><span>Distancia máxima: <strong>{fields.maxDistanceKm} km</strong></span><input {...invalidField('maxDistanceKm')} type="range" min="1" max="100" value={fields.maxDistanceKm} onChange={e => change('maxDistanceKm',Number(e.target.value))}/></label>
       </fieldset>}
 
-      {mode !== 'create' && <button className="profile-submit" type="submit">{busy ? 'Guardando…' : 'Guardar cambios'}</button>}
+      {mode !== 'create' && <><button className="profile-submit" type="submit" disabled={!changed}>{saving ? 'Guardando…' : 'Guardar cambios'}</button>
+        <p className="profile-save-feedback" role="status">{saved && !busy && !saveDismissed && <><span aria-hidden="true">✓ </span>Cambios guardados.</>}</p>
+      </>}
     </fieldset>
   </form>;
 }

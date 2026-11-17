@@ -137,12 +137,16 @@ it('keeps profile focus and drafts on resume, supersedes a quiet read when savin
 it('does not interrupt a foreground mutation on repeated visibility events', async () => {
   await openManagement('Tu perfil');
   const bio = await screen.findByLabelText('Bio (opcional)');
+  const guidance = window.document.getElementById('photo-upload-guidance')!;
+  const guidanceText = guidance.textContent;
   fireEvent.change(bio, { target: { value: 'Cambio explícito' } });
   const base = fetcher.getMockImplementation()!;
   let signal: AbortSignal | undefined, finish!: (response: Response) => void;
   fetcher.mockImplementation((path, options) => path === '/api/me/profile' && options?.method === 'PATCH' ? new Promise(resolve => { signal = options.signal!; finish = resolve; }) : base(path, options));
   fireEvent.submit(screen.getByRole('form', { name: 'Datos del perfil' }));
   await waitFor(() => expect(finish).toBeDefined());
+  expect(guidance).toHaveTextContent(guidanceText!);
+  expect(screen.getByLabelText('Bio (opcional)')).toBeDisabled();
   const count = fetcher.mock.calls.length;
   act(() => { window.document.dispatchEvent(new Event('visibilitychange')); window.document.dispatchEvent(new Event('visibilitychange')); });
   fireEvent.submit(screen.getByRole('form', { name: 'Datos del perfil' }));
@@ -151,6 +155,11 @@ it('does not interrupt a foreground mutation on repeated visibility events', asy
   await act(async () => finish(json(profile)));
   await screen.findByText('Cambios guardados.'); expect(bio).toHaveValue('Cambio explícito');
   expect(writes('PATCH')).toHaveLength(1);
+  installQuestions([]); await openProfileQuestions();
+  fireEvent.click(screen.getByRole('button', { name:'Volver' }));
+  await screen.findByRole('heading', { name:'Tu perfil' });
+  expect(screen.queryByText('Cambios guardados.')).toBeNull();
+  expect(guidance).toHaveTextContent(guidanceText!);
 });
 it.each(['success', 'failure'] as const)('supersedes a pending background read from the enabled retry button and preserves %s feedback', async outcome => {
   await openManagement('Tu perfil');
@@ -383,6 +392,7 @@ it('does not enter questions during profile writes or a photo crop', async () =>
   await screen.findByRole('dialog'); expect(screen.getByRole('button', { name: 'Responder o editar' })).toBeDisabled(); fireEvent.click(screen.getByRole('button', { name: 'Responder o editar' })); expect(history.state.trail.at(-1)).toBe('profile'); fireEvent.click(screen.getByText('Cancelar recorte'));
   const base = fetcher.getMockImplementation()!; let finish!: (r: Response) => void;
   fetcher.mockImplementation((path, options) => path === '/api/me/profile' && options?.method === 'PATCH' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
+  fireEvent.change(screen.getByLabelText('Ciudad'), { target:{ value:'Rosario' } });
   fireEvent.submit(screen.getByRole('form', { name: 'Datos del perfil' })); await waitFor(() => expect(finish).toBeDefined()); expect(screen.getByRole('button', { name: 'Responder o editar' })).toBeDisabled(); fireEvent.click(screen.getByRole('button', { name: 'Responder o editar' })); expect(history.state.trail.at(-1)).toBe('profile');
   await act(async () => finish(json(profile))); await screen.findByText('Cambios guardados.');
 });
@@ -439,7 +449,11 @@ it.each(['PATCH','DELETE','PUT'])('routes authoritative INACTIVE after ACTIVE mu
   await openManagement(method === 'PUT' ? 'Preferencias' : 'Tu perfil');
   await screen.findByRole('form',{ name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil' });
   if (method === 'DELETE') fireEvent.click(screen.getByRole('button',{ name:'Eliminar foto 1' }));
-  else fireEvent.submit(screen.getByRole('form',{ name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil' }));
+  else {
+    const form = screen.getByRole('form',{ name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil' });
+    fireEvent.change(within(form).getByLabelText(method === 'PUT' ? 'Intención' : 'Ciudad'), { target:{ value:method === 'PUT' ? 'FRIENDSHIP' : 'Rosario' } });
+    fireEvent.submit(form);
+  }
   await screen.findByText('Estado: INACTIVE');
   expect(screen.getByRole('form',{name:method === 'PUT' ? 'Preferencias de búsqueda' : 'Datos del perfil'})).toBeVisible();
   await waitFor(() => expect(screen.getByRole('button',{name:'Volver a Inicio'})).toBeEnabled());
