@@ -417,7 +417,9 @@ it('offers compact management entries and ACTIVE profile editing with photos and
   expect(screen.queryByRole('button',{ name:'Activar perfil' })).toBeNull();
   expect(screen.queryByRole('form',{ name:'Preferencias de búsqueda' })).toBeNull();
   fireEvent.change(within(form).getByLabelText('Bio (opcional)'),{ target:{ value:'Una bio nueva' } }); fireEvent.submit(form);
-  await screen.findByText('Cambios guardados.'); expect(profile?.bio).toBe('Una bio nueva');
+  const confirmation = await within(form).findByText('Cambios guardados.');
+  expect(confirmation).toHaveAttribute('role', 'status');
+  expect(screen.getAllByText('Cambios guardados.')).toHaveLength(1); expect(profile?.bio).toBe('Una bio nueva');
   fireEvent.click(screen.getByRole('button',{ name:'Volver a Inicio' }));
   await screen.findByRole('heading',{ name:'Inicio' }); expect(screen.getByRole('heading',{ name:'Inicio' })).toHaveFocus();
 });
@@ -482,11 +484,16 @@ it.each([false,true])('ACTIVE photos reuse crop and add/replace contracts (repla
   expect(screen.getByRole('button',{ name:'Volver a Inicio' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button',{ name:'Confirmar recorte' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(list).toHaveLength(1); expect(screen.getByRole('button',{ name:'Eliminar foto 1' })).toBeEnabled();
+  const confirmation = await screen.findByText('Cambios guardados.');
+  expect(confirmation).toHaveAttribute('role', 'status'); expect(confirmation.closest('form')).toBeNull();
+  expect(within(screen.getByRole('form', { name:'Datos del perfil' })).getByRole('status')).toBeEmptyDOMElement();
 });
 it('ACTIVE photos retain keyboard reordering', async () => {
   list = [initialPhoto,{ ...initialPhoto,id:'second',position:2 }]; await openManagement('Tu perfil');
   await screen.findByRole('form',{ name:'Datos del perfil' }); reorderWithKeyboard(1,2);
-  await screen.findByText('Cambios guardados.'); expect(list[0]?.position).toBe(2);
+  const confirmation = await screen.findByText('Cambios guardados.'); expect(list[0]?.position).toBe(2);
+  expect(confirmation.closest('form')).toBeNull();
+  expect(within(screen.getByRole('form', { name:'Datos del perfil' })).getByRole('status')).toBeEmptyDOMElement();
 });
 it('returns to waiting if the editor admission read finds an active queue', async () => {
   const original = fetcher.getMockImplementation()!; let queued = false;
@@ -1087,4 +1094,22 @@ it.each(['ACTIVE','DRAFT'] as const)('opens confirmed preview from %s and preser
   await act(async () => { history.forward(); await new Promise(r => setTimeout(r,30)); });
   await screen.findByText('Respuesta B');
   expect(writes('PATCH')).toHaveLength(0); expect(writes('PUT')).toHaveLength(0);
+});
+
+it('keeps photo deletion feedback independent after a profile save and preserves new detail drafts', async () => {
+  list = [initialPhoto]; vi.spyOn(window, 'confirm').mockReturnValue(true);
+  await openManagement('Tu perfil');
+  const form = await screen.findByRole('form', { name:'Datos del perfil' });
+  const bio = within(form).getByLabelText('Bio (opcional)');
+  fireEvent.change(bio, { target:{ value:'Confirmed bio' } }); fireEvent.submit(form);
+  await within(form).findByText('Cambios guardados.');
+  fireEvent.change(bio, { target:{ value:'Unsaved bio' } });
+  fireEvent.click(screen.getByRole('button', { name:'Eliminar foto 1' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name:'Eliminar foto 1' })).toBeNull());
+  const confirmation = await screen.findByText('Cambios guardados.');
+  expect(confirmation).toHaveAttribute('role', 'status'); expect(confirmation.closest('form')).toBeNull();
+  expect(within(form).getByRole('status')).toBeEmptyDOMElement();
+  expect(bio).toHaveValue('Unsaved bio'); expect(profile?.bio).toBe('Confirmed bio');
+  expect(within(form).getByRole('button', { name:'Guardar cambios' })).toBeEnabled();
+  expect(writes('PATCH')).toHaveLength(1); expect(writes('DELETE')).toHaveLength(1);
 });
