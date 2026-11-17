@@ -10,7 +10,7 @@ const stamp = '2026-11-08T12:00:00Z';
 const catalog = { catalogVersion: 'v1', questions: ['A','B','C','D'].map((id,i) => ({ id, prompt: `Pregunta ${id}`, displayOrder: i+1, semanticVersion: 1, contentVersion: 1 })) };
 const answer = id => ({ questionId: id, questionSemanticVersion: 1, answer: `Respuesta ${id}`, selectedPosition: null, current: id !== 'A', createdAt: stamp, updatedAt: stamp });
 let fixture;
-const reset = status => { fixture = { status, answers: ['A','B','C','D'].map(answer), writes: [], writeDelay: 0, readDelay: 0, writeStatus: 200 }; };
+const reset = status => { fixture = { status, answers: ['A','B','C','D'].map(answer), writes: [], previewReads:0, writeDelay: 0, readDelay: 0, writeStatus: 200 }; };
 reset('ACTIVE');
 const server = createServer(async (req,res) => {
   const f = fixture;
@@ -31,7 +31,7 @@ const server = createServer(async (req,res) => {
   else if (path === '/reference/affinity-questions') result = { catalogVersion:'empty', categories:[], questions:[] };
   else if (path === '/me/profile/affinity-answers') result = { answers:[] };
   else if (path === '/reference/profile-questions') result = catalog;
-  else if (path === '/me/profile/question-answers' && method === 'GET') result = { answers:f.answers };
+  else if (path === '/me/profile/question-answers' && method === 'GET') { f.previewReads++; result = { answers:f.answers }; }
   else if (method !== 'GET') { f.writes.push({ path, method }); status=405; result={ code:'READ_ONLY_FIXTURE' }; } else { status=404; result={ code:'SYNTHETIC_NOT_FOUND' }; }
   if (method === 'GET' && f.readDelay) await new Promise(r => setTimeout(r, f.readDelay));
   res.writeHead(status, { 'Content-Type':'application/json' }); res.end(JSON.stringify(result));
@@ -79,6 +79,20 @@ try {
     check(!await evaluate(visible('Local draft')), 'draft excluded');
     check(await evaluate("document.activeElement.textContent==='Vista previa de mi perfil'"),'preview focus');
     check(await evaluate('document.documentElement.scrollWidth<=innerWidth'),'no overflow');
+    await evaluate("window.resumeCard=document.querySelector('.visual-profile');window.resumeFocus=document.activeElement;window.resumeScroll=scrollY;window.resumeTimeOrigin=performance.timeOrigin;window.resumeEvents=[];window.captureResume=()=>resumeEvents.push(document.visibilityState);document.addEventListener('visibilitychange',captureResume)");
+    const beforeResume=fixture.previewReads; fixture.readDelay=650;
+    const other=await call('Target.createTarget',{url:'about:blank'});
+    await call('Target.activateTarget',{targetId:other.targetId});
+    await delay(100);
+    await call('Page.bringToFront');
+    await wait("resumeEvents.includes('hidden')&&resumeEvents.includes('visible')",'real tab visibility transition');
+    check(fixture.previewReads>beforeResume,'real tab return starts revalidation');
+    check(await evaluate("resumeCard.isConnected&&resumeCard===document.querySelector('.visual-profile')&&!document.querySelector('.visual-review [aria-label=\"Cargando perfil?\"]')"),'tab return retains card during delayed reads');
+    check(await evaluate('document.activeElement===resumeFocus&&scrollY===resumeScroll&&performance.timeOrigin===resumeTimeOrigin'),'tab return retains focus scroll and document');
+    await delay(1000); fixture.readDelay=0;
+    check(await evaluate("resumeCard===document.querySelector('.visual-profile')"),'tab return retains card after reads');
+    await call('Target.closeTarget',{targetId:other.targetId});
+    await evaluate("document.removeEventListener('visibilitychange',captureResume)");
     await screenshot(`preview-${status}-${width}`);
     await evaluate('history.back()'); await wait("!!document.querySelector('.onboarding:not([hidden])')",'Back parent');
     check(await evaluate("document.querySelector('.profile-form textarea').value==='Local draft'"),'draft retained');

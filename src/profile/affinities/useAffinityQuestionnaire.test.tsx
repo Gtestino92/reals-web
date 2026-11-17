@@ -102,3 +102,38 @@ it('rejects a mutation from a revoked tab through SessionController and ApiClien
   let task!: Promise<unknown>; act(() => { task = result.current.mutate('a', 'A'); }); await waitFor(() => expect(fetcher.mock.calls.some(([,o]) => o?.method === 'PATCH')).toBe(true));
   act(() => ownership.stop()); await act(async () => { write.resolve(json({ answers: [answer()] })); expect(await task).toBeNull(); }); expect(result.current.answers).toEqual([]); unmount();
 });
+
+it.each(['PATCH','DELETE'] as const)('keeps resume quiet and lets %s supersede a delayed background read', async method => {
+  const { controller, request } = setup(); const { result } = renderHook(() => useAffinityQuestionnaire(controller));
+  await waitFor(() => expect(result.current.catalog).not.toBeNull());
+  await act(async () => { await result.current.mutate('a','A'); });
+  const catalog = result.current.catalog, old = deferred<unknown>(); request.mockReturnValueOnce(old.promise);
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  const signal = request.mock.calls.at(-2)![1];
+  expect(result.current.busy).toBe(false); expect(result.current.uncertain).toBe(false); expect(result.current.catalog).toBe(catalog);
+  await act(async () => { await result.current.mutate('a',method === 'PATCH' ? 'B' : null); });
+  expect(signal.aborted).toBe(true);
+  const confirmed = result.current.answers;
+  expect(confirmed).toEqual(method === 'PATCH' ? [answer('a','B')] : []);
+  await act(async () => old.resolve(fixture())); expect(result.current.answers).toBe(confirmed);
+});
+it('keeps affinity content after resume failure but requires reconciliation before writing', async () => {
+  const { controller, request } = setup(); const { result } = renderHook(() => useAffinityQuestionnaire(controller));
+  await waitFor(() => expect(result.current.catalog).not.toBeNull()); const catalog = result.current.catalog;
+  request.mockRejectedValueOnce(new ApiError('network')); act(() => document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(result.current.error).toBeTruthy()); expect(result.current.catalog).toBe(catalog); expect(result.current.uncertain).toBe(true);
+  const before = request.mock.calls.length; await act(async () => { await result.current.mutate('a','A'); }); expect(request).toHaveBeenCalledTimes(before);
+  await act(async () => { await result.current.refresh(); }); expect(result.current.uncertain).toBe(false);
+});
+
+it('retains local affinity selection, focused controls and enabled saving while resuming', async () => {
+  const { controller, request } = setup();
+  function Probe() { const model = useAffinityQuestionnaire(controller), navigation = useHomeNavigation(() => true); return <><button onClick={() => navigation.open('affinities')}>Afinidades</button><AffinityQuestionnaire model={model} navigation={navigation}/></>; }
+  render(<Probe/>); fireEvent.click(screen.getByText('Afinidades')); fireEvent.click(await screen.findByText('Empezar'));
+  const option = screen.getByLabelText('Nada'); fireEvent.click(option); option.focus();
+  const old = deferred<unknown>(); request.mockReturnValueOnce(old.promise);
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  expect(screen.getByLabelText('Nada')).toBe(option); expect(option).toHaveFocus(); expect(option).toBeChecked(); expect(option).toBeEnabled();
+  expect(screen.getByText('Siguiente')).toBeEnabled();
+  await act(async () => old.resolve(fixture())); expect(screen.getByLabelText('Nada')).toBe(option); expect(option).toBeChecked(); expect(option).toHaveFocus();
+});

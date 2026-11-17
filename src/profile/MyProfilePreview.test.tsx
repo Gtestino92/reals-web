@@ -65,3 +65,34 @@ it('rejects pending results from the previous identity after replacement', async
   expect(signal.aborted).toBe(true); await act(async () => old.resolve(profile));
   expect(screen.queryByText(/Confirmed,/)).toBeNull();
 });
+
+it('revalidates on tab return without replacing content, selected photo, focus or resetting scroll', async () => {
+  const { controller, request } = setup();
+  const images = [1,2].map(position => ({ id:String(position), position, url:`https://example.test/${position}.jpg`, validationStatus:'VALIDATED', moderationStatus:'APPROVED', isPersonPhoto:true, isFullBody:false }));
+  const base = request.getMockImplementation()!;
+  request.mockImplementation((path, signal) => path === '/me/profile/photos' ? Promise.resolve(images) : base(path, signal));
+  render(<MyProfilePreview controller={controller} onBack={() => {}}/>);
+  const selected = await screen.findByRole('button', { name:'Ver foto 2 de 2' }); fireEvent.click(selected); selected.focus();
+  const card = selected.closest('article'), before = request.mock.calls.length;
+  vi.mocked(window.scrollTo).mockClear();
+  const read = deferred(); request.mockReturnValueOnce(read.promise);
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  act(() => document.dispatchEvent(new Event('visibilitychange'))); expect(request).toHaveBeenCalledTimes(before);
+  visibility.mockReturnValue('visible'); act(() => document.dispatchEvent(new Event('visibilitychange')));
+  expect(selected).toBeVisible(); expect(selected).toHaveFocus(); expect(selected).toHaveAttribute('aria-pressed','true');
+  expect(screen.queryByLabelText('Cargando perfil…')).toBeNull(); expect(selected.closest('article')).toBe(card);
+  expect(window.scrollTo).not.toHaveBeenCalled();
+  await act(async () => read.resolve(profile));
+  expect(selected.closest('article')).toBe(card); expect(selected).toHaveFocus(); expect(selected).toHaveAttribute('aria-pressed','true');
+  expect(request).toHaveBeenCalledTimes(before+4);
+});
+it('retains the complete snapshot on failed background reads and recovers without remounting it', async () => {
+  const { controller, request } = setup(); render(<MyProfilePreview controller={controller} onBack={() => {}}/>);
+  const content = await screen.findByText('No hay fotos aprobadas disponibles.');
+  request.mockRejectedValueOnce(new Error('offline'));
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  await screen.findByRole('alert'); expect(content).toBeVisible();
+  expect(screen.getByText('No hay fotos aprobadas disponibles.')).toBe(content);
+  fireEvent.click(screen.getByRole('button', { name:'Reintentar' }));
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull()); expect(content).toBeVisible();
+});
