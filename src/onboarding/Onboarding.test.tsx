@@ -134,6 +134,68 @@ it('keeps profile focus and drafts on resume, supersedes a quiet read when savin
   await act(async () => finish(json({ ...initialProfile, status: 'ACTIVE', bio: 'Obsoleto' })));
   expect(bio).toHaveValue('Borrador con ñ'); expect(writes('PATCH')).toHaveLength(1);
 });
+it('does not interrupt a foreground mutation on repeated visibility events', async () => {
+  await openManagement('Tu perfil');
+  const bio = await screen.findByLabelText('Bio (opcional)');
+  fireEvent.change(bio, { target: { value: 'Cambio explícito' } });
+  const base = fetcher.getMockImplementation()!;
+  let signal: AbortSignal | undefined, finish!: (response: Response) => void;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' && options?.method === 'PATCH' ? new Promise(resolve => { signal = options.signal!; finish = resolve; }) : base(path, options));
+  fireEvent.submit(screen.getByRole('form', { name: 'Datos del perfil' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  const count = fetcher.mock.calls.length;
+  act(() => { window.document.dispatchEvent(new Event('visibilitychange')); window.document.dispatchEvent(new Event('visibilitychange')); });
+  fireEvent.submit(screen.getByRole('form', { name: 'Datos del perfil' }));
+  expect(fetcher).toHaveBeenCalledTimes(count); expect(signal!.aborted).toBe(false);
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeDisabled();
+  await act(async () => finish(json(profile)));
+  await screen.findByText('Cambios guardados.'); expect(bio).toHaveValue('Cambio explícito');
+  expect(writes('PATCH')).toHaveLength(1);
+});
+it.each(['success', 'failure'] as const)('supersedes a pending background read from the enabled retry button and preserves %s feedback', async outcome => {
+  await openManagement('Tu perfil');
+  const bio = await screen.findByLabelText('Bio (opcional)');
+  fireEvent.change(bio, { target: { value: 'Mi borrador con ñ' } });
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' ? Promise.reject(new TypeError('offline')) : base(path, options));
+  act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+  await screen.findByRole('alert');
+  const retry = screen.getByRole('button', { name: 'Consultar estado' });
+  expect(retry).toBeEnabled(); retry.focus();
+
+  const reads: { signal: AbortSignal; finish: (response: Response) => void }[] = [];
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' ? new Promise(resolve => { reads.push({ signal: options!.signal!, finish: resolve }); }) : base(path, options));
+  act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(reads).toHaveLength(1));
+  act(() => { window.document.dispatchEvent(new Event('visibilitychange')); window.document.dispatchEvent(new Event('visibilitychange')); });
+  expect(reads).toHaveLength(1); expect(reads[0]!.signal.aborted).toBe(false);
+  expect(retry).toBeEnabled(); expect(retry).toHaveFocus(); expect(screen.getByRole('alert')).toBeVisible();
+  fireEvent.click(retry);
+  expect(reads[0]!.signal.aborted).toBe(true);
+  await waitFor(() => expect(reads).toHaveLength(2));
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByText('Actualizando estado…')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeDisabled();
+  act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+  expect(reads).toHaveLength(2); expect(reads[1]!.signal.aborted).toBe(false);
+  await act(async () => reads[1]!.finish(outcome === 'success' ? json(profile) : json({ code: 'TEMPORARILY_UNAVAILABLE' }, 503)));
+  if (outcome === 'failure') {
+    expect(screen.getByRole('alert')).toBeVisible(); expect(screen.getByRole('button', { name: 'Consultar estado' })).toBeEnabled();
+  } else {
+    expect(screen.queryByRole('alert')).toBeNull(); expect(screen.queryByRole('button', { name: 'Consultar estado' })).toBeNull();
+  }
+  await act(async () => reads[0]!.finish(json({ ...initialProfile, status: 'DRAFT' })));
+  expect(screen.queryByText('Estado: DRAFT')).toBeNull();
+  expect(bio).toHaveValue('Mi borrador con ñ'); expect(bio).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
+  expect(writes('PATCH')).toHaveLength(0); expect(writes('PUT')).toHaveLength(0); expect(writes('POST')).toHaveLength(0);
+  if (outcome === 'failure') {
+    expect(screen.getByRole('alert')).toBeVisible(); fetcher.mockImplementation(base);
+    fireEvent.click(screen.getByRole('button', { name: 'Consultar estado' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    await waitFor(() => expect(bio).toBeEnabled());
+  }
+});
 it('shows public answers and selection on entry, reserves the extra list for unanswered questions and defers pristine errors', async () => {
   installQuestions([savedAnswer('A', { selectedPosition: 1 }), savedAnswer('B')]); await openManagement('Tu perfil'); await openProfileQuestions();
   expect(screen.getByRole('article', { name: 'Pregunta A' })).toHaveTextContent('Posición 1');

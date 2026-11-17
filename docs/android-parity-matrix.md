@@ -1481,3 +1481,26 @@ Earlier favicon, onboarding validation and UX-audit edits remain preserved.
 No Android/backend/environment/deployment changes, commit, push or mutation retry.
 
 Final validation: `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/profile-questions/full-tests-final.json`: exit 0, 1665 tests passed / zero failures (complete suite after the final ownership fix). `git diff --check`: PASS. Changed text decoded as UTF-8 and scanned for mojibake; Spanish copy inspected. Remaining validation is physical-device/native-window switching and live backend, as noted above.
+
+### Explicit onboarding retry during background reconciliation (independent audit)
+
+Base: clean `fix/profile-editing-experience` at `c59135a`, verified against the
+remote branch HEAD. Scoped defect: enabled Consultar estado ignores a click
+while a quiet read owns the operation. Existing Android references above still
+define loading/retry presentation; browser operation priority is a Web adaptation.
+PARTIAL before fix: retry is visible/enabled but performs no read. No changes to
+layout, contracts, navigation, timers or Android/backend sources are needed.
+
+Pre-edit invariant / mutation review:
+
+| Incoming call / current owner | Required behavior |
+| --- | --- |
+| Repeated visibility / any locked operation | Ignore; do not restart reads or interrupt mutations. |
+| Explicit retry or mutation / background read | Abort background operation, acquire new foreground operation, retain existing loading/error and navigation-lock behavior. |
+| Explicit retry or mutation / foreground operation | Ignore; never interrupt foreground work. |
+| Aborted background result / new foreground owner | Existing combined abort signal and operation-identity cleanup reject installation and cannot unlock newer work. |
+| Foreground success/failure | Preserve drafts and DOM; install only authoritative data, retain actionable error/retry feedback on failure. Existing disposal/sign-out ownership unchanged. |
+
+Reproduction: focused enabled-retry tests (success and failure outcomes) both
+failed at the assertion that the pending background signal was aborted by the
+click, before any production edit.

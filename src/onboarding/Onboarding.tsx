@@ -126,7 +126,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     const resource = owner.current;
     if (!resource || resource.abort.signal.aborted || accountLocked.current) return false;
     if (resource.locked) {
-      if (!task || !resource.background) return false;
+      if (background || !resource.background) return false;
       resource.operation?.abort();
     }
     const operation = new AbortController();
