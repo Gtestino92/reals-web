@@ -1603,3 +1603,47 @@ Final complete-suite result: `npm test -- --maxWorkers=1 --reporter=json --outpu
 Focused failure investigation without Chromium: `npm run test:focused -- src/onboarding/Onboarding.test.tsx src/admin/mfa.test.tsx -t 'enabled retry button|shows public answers|answers directly|keeps late inline|cancels only|blocks cancellation|real pagehide|retains the confirmed Tu perfil' --maxWorkers=1 --reporter=json --outputFile=artifacts/profile-questions/edit-actions-focused-final.json`: PASS, 12 selected tests / zero failures. Covers all six full-suite failures, the earlier revisit failure, and all new cancel/write cases. Full-suite result remains recorded as failed; no broad rerun was used to replace it. Remaining risk: full-suite timing stability on this machine needs confirmation in CI or an otherwise idle environment.
 
 Final diff reviewed: four files, no backend/Android/contracts/unanswered-form changes. No commit, push, merge or deployment. HEAD remains `f619180` with no upstream on the work branch. Physical-device, live-server and Android pixel-equivalence validation remain outside these synthetic browser results.
+
+
+## My Profile Preview (2026-11-17)
+
+Preparation: clean `main`/HEAD `7345455`, fetched `origin/main` at the same revision; work branch `feature/my-profile-preview` created with `--no-track`. No existing changes displaced. Backend contracts: [owner reads and public questions](../../reals-backend/docs/commons/api.md), [external photo visibility](../../reals-backend/docs/commons/domain.md). Sibling repositories remained read-only.
+
+Audit before implementation: owner preview MISSING on both platforms; Web already has counterpart presentation and owner reads. Reused Android references: `ui/chat/PartnerProfileScreen.kt`, `VisualProfileCard.kt`, `VisualProfilePhotoLoadingPolicy.kt`, `ui/root/PartnerProfileCoordinator.kt`, `ui/profile/ProfileQuestionScreen.kt`, `ProfileQuestionPresentation.kt`, question repository/DTO/model/use cases, plus `PartnerProfileScreenPresentationTest`, `VisualProfileCardPresentationTest`, `VisualProfileQuestionsTest`, `ProfileQuestionPresentationTest` and coordinator tests in the Android checkout. Android counterpart interactions/messages remain outside owner preview scope.
+
+| Area | Status / implementation / evidence |
+| --- | --- |
+| Public presentation | COMPLETE for existing Web presentation reuse: `src/profile/PublicProfileView.tsx` extracted from `PartnerProfile.tsx`; caller retains counterpart loading, message handling, navigation and photo selection. Owner uses the same bio/question/photo markup, tokens, thumbnails and image retry. No separate visual design. Android exact visual equivalence remains PARTIAL (existing Web presentation; no Android owner screen or matching screenshot). |
+| Public projection | COMPLETE: `MyProfilePreview.tsx` uses confirmed owner profile, approved photos in position order and up to three selected, nonblank current answers whose semantic version matches the active catalog, in saved selection order. Birthday age uses local calendar date. No affinity read/indicators, personal messages, fabricated match ID or mutations. ACTIVE and DRAFT supported; discreet DRAFT notice. |
+| Navigation and drafts | COMPLETE in automated Web scenarios: entry under Tu perfil / draft setup; owned History Back/Forward, heading focus and entry focus/scroll restoration; parent forms remain mounted and keep unsaved drafts. Read-only preview never activates a draft. |
+| Async state / loading / recovery | COMPLETE at client batch boundary: placeholder until all four parsed reads succeed; whole-batch failure/retry; reopen/resume reads authoritative state. Abort on cleanup, identity change, retry/resume; account/profile/phase checks reject obsolete results. No old/new partial result installation. SessionController retains terminal-session/ownership policy. No polling, mutations or business timers. |
+| Keyboard / touch / desktop | PLATFORM-LIMITED: semantic buttons, existing photo navigation and browser focus/History; Chrome emulation at 390x844 and 1440x900 verifies no horizontal overflow, drafts, focus, Back/Forward and read-only behavior. Physical Android, TalkBack, virtual keyboard and exact Android visual comparison unverified. |
+
+Invariants and response-installation review:
+
+| Path | Invariant / handling |
+| --- | --- |
+| Open / retry / image retry | Start a new four-read batch; clear displayed snapshot; install public fields together only after all parsers and owner checks pass. Retry performs reads only. |
+| Partial/malformed/network failure | Display actionable error, abort remaining reads, install no partial content; explicit retry. Terminal auth/account policy remains in SessionController. |
+| Resume / overlapping responses | Visibility resume aborts prior batch before starting replacement. Each effect owns its AbortController; ignored aborts still cannot install results. No automatic mutation retries or idempotency concerns. |
+| Account/profile replacement / sign-out / unmount | Subscription immediately gates rendered snapshot by identity; cleanup aborts owned reads; check live phase, account and profile before installation. |
+| Back/Forward / parent draft | Preview unmounts on exit; parent stays mounted. Focus/scroll restored to entry. Forward/reopen fetches a fresh batch. No parent form fields are populated from preview. |
+
+Deferred backend debt: a dedicated owner public-profile preview read could centralize projection, server-calendar age and provide one transaction/revision across profile, photos, catalog and answers. Current endpoints provide no shared revision token: the client installs only complete batches and checks catalog semantic compatibility, but cannot prove server-side transactional consistency if another device edits during the four reads. This endpoint is deferred, not required by this task; no backend endpoints changed.
+
+Deferred Android follow-up: add My Profile Preview using the shared Android public presentation and migrate the reorganized Web profile-question UX (inline answer/edit, optional public selection and separate unanswered list). This is follow-up work, not a change to Android in this branch.
+
+Validation: focused projection/lifecycle tests and onboarding integration cover filtering, age, ordering, moderation, empty state, recovery, account replacement, late responses, abort, drafts and navigation. `node tools/my-profile-preview-smoke.mjs` passed 28 assertions across ACTIVE/DRAFT and mobile/desktop Chromium with synthetic HTTP and real React/SessionController; screenshots/results in ignored `artifacts/profile-questions/`. Mobile DRAFT and desktop ACTIVE screenshots inspected. This does not validate live backend, signed photo delivery, real devices or Android pixel parity. Final commands/results recorded below after validation.
+
+
+Final validation for My Profile Preview:
+
+- `npm run test:focused -- src/onboarding/Onboarding.test.tsx src/profile/MyProfilePreview.test.tsx`: PASS, 127 tests (includes 8 new cases).
+- `npm run typecheck`: PASS. `npm run check:architecture`: PASS, 85 production modules / zero runtime cycles.
+- `npm run build`: PASS, existing Vite chunk-size advisory remains.
+- `node tools/my-profile-preview-smoke.mjs`: PASS, 28 assertions in four Chromium scenarios; Vite at 127.0.0.1:5174. Tests use synthetic data, no credentials.
+- `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/my-profile-preview-tests.json`: 1685 PASS / 1 FAIL / 1686 total. Failure: untouched `src/admin/modes.test.tsx`, `full-page exit from ordinary mode still revokes the retained grant`, timed out waiting for `Dato privado admin` in the verify helper. Full-suite result is **not green**.
+- Investigation: `npm run test:focused -- src/admin/modes.test.tsx`: PASS, all 42 tests. An isolated pass does not establish the full-suite failure's cause; possible load-sensitive timing remains unresolved. No unrelated admin changes and no repeated full-suite runs to mask the failure.
+- `git diff --check`: PASS; changed strings reviewed for encoding corruption.
+
+Diff summary: shared presentation extracted; owner preview/projection added; Home/History and Onboarding entry wired with retained drafts; focused/integration tests and Chromium fixture added; this matrix updated. No CSS redesign, dependency, backend, Android or deployment changes. No commits or remote writes.

@@ -1067,3 +1067,24 @@ it.each(['Tu perfil', 'Preferencias'])('retains the confirmed %s form across del
   expect(form).toBeVisible(); expect(form.querySelector('input')).toBeDisabled();
   expect(writes(destination === 'Tu perfil' ? 'PATCH' : 'PUT')).toHaveLength(0);
 });
+
+it.each(['ACTIVE','DRAFT'] as const)('opens confirmed preview from %s and preserves parent drafts through Back/Forward', async status => {
+  installQuestions([savedAnswer('B', { selectedPosition: 1 })]);
+  profile = { ...initialProfile, status }; mount();
+  if (status === 'ACTIVE') {
+    const entry = await screen.findByRole('button', { name: 'Tu perfil' }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  }
+  const entry = await screen.findByRole('button', { name: 'Vista previa de mi perfil' }); await waitFor(() => expect(entry).toBeEnabled());
+  const form = screen.getByRole('form', { name: 'Datos del perfil' });
+  fireEvent.change(within(form).getByLabelText('Bio (opcional)'), { target: { value: 'Unsaved local draft' } });
+  fireEvent.click(entry);
+  await screen.findByRole('heading', { name: 'Vista previa de mi perfil' }); await screen.findByText('Respuesta B');
+  expect(screen.getByText('Unsaved local draft')).not.toBeVisible();
+  expect(fetcher.mock.calls.some(([path]) => String(path).includes('/visual-profile'))).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+  await waitFor(() => expect(entry).toBeVisible()); expect(entry).toHaveFocus();
+  expect(within(form).getByLabelText('Bio (opcional)')).toHaveValue('Unsaved local draft');
+  await act(async () => { history.forward(); await new Promise(r => setTimeout(r,30)); });
+  await screen.findByText('Respuesta B');
+  expect(writes('PATCH')).toHaveLength(0); expect(writes('PUT')).toHaveLength(0);
+});
