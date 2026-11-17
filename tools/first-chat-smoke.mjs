@@ -1,3 +1,4 @@
+import { captureDiagnostics } from './browser-diagnostics.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,6 +13,7 @@ try {
   ws=new WebSocket(target.webSocketDebuggerUrl); await new Promise(r=>ws.addEventListener('open',r,{once:true}));
   let id=0; const pending=new Map(); ws.addEventListener('message',e=>{const m=JSON.parse(e.data); if(m.id){const p=pending.get(m.id); pending.delete(m.id); m.error?p.reject(new Error(m.error.message)):p.resolve(m.result);}});
   const call=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});ws.send(JSON.stringify({id:key,method,params}));});
+  await captureDiagnostics(ws, call, 'first-chat-smoke.mjs');
   await call('Page.navigate',{url:'http://127.0.0.1:5173'}); await new Promise(r=>setTimeout(r,1800));
   const result=await call('Runtime.evaluate',{awaitPromise:true,returnByValue:true,expression:`(async()=>{
     const {inspectAudio,recordingMime}=await import('/src/chat/audio.ts');

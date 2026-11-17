@@ -7,7 +7,7 @@ import { canSaveAnswer, sameSelection, selectedIds, selectionValid, validateAnsw
 
 export type QuestionMutation = { kind: 'upsert'; questionId: string; answer: string } | { kind: 'delete'; questionId: string } | { kind: 'selection'; questionIds: string[] };
 interface State { identity: string; catalog: QuestionCatalog | null; answers: SavedAnswer[]; busy: boolean; uncertain: boolean; error: string }
-interface Owner { identity: string; lifetime: AbortController; read: AbortController | null; serial: number; mutation: boolean; uncertain: boolean }
+interface Owner { identity: string; lifetime: AbortController; read: AbortController | null; serial: number; mutation: boolean; background: boolean; uncertain: boolean }
 const empty: State = { identity: '', catalog: null, answers: [], busy: false, uncertain: false, error: '' };
 
 export function useProfileQuestions(controller: SessionController, active: boolean) {
@@ -16,41 +16,46 @@ export function useProfileQuestions(controller: SessionController, active: boole
   const [state, setState] = useState(empty), latest = useRef(empty), owner = useRef<Owner | null>(null);
   const install = (next: State) => { latest.current = next; setState(next); };
   const valid = (r: Owner, serial: number) => owner.current === r && !r.lifetime.signal.aborted && r.serial === serial && controller.snapshot.phase === 'ready' && `${controller.snapshot.account?.id}/${controller.snapshot.profile?.id}` === r.identity;
-  const refresh = async () => {
+  const refresh = async (background = false) => {
     const r = owner.current;
     if (!r || r.mutation || r.read || !valid(r, r.serial)) return;
+    background = background && !!latest.current.catalog && !r.uncertain;
+    r.background = background;
     const read = new AbortController(), serial = ++r.serial;
     r.read = read;
     const signal = AbortSignal.any([read.signal, r.lifetime.signal]);
-    r.uncertain = true;
-    install({ ...latest.current, busy: true, uncertain: true, error: '' });
+    if (!background) { r.uncertain = true; install({ ...latest.current, busy: true, uncertain: true, error: '' }); }
     try {
       const [catalog, answers] = await Promise.all([
         controller.request('/reference/profile-questions', signal).then(parseQuestionCatalog),
         controller.request('/me/profile/question-answers', signal).then(parseQuestionAnswers),
       ]);
-      if (valid(r, serial)) { r.uncertain = false; install({ identity: r.identity, catalog, answers, busy: false, uncertain: false, error: '' }); }
+      if (!signal.aborted && valid(r, serial)) { r.uncertain = false; install({ identity: r.identity, catalog, answers, busy: false, uncertain: false, error: '' }); }
     } catch {
-      if (valid(r, serial)) install({ ...latest.current, busy: false, error: 'No pudimos actualizar las preguntas. Revisá tu conexión y reintentá la consulta.' });
+      if (!signal.aborted && valid(r, serial)) {
+        r.uncertain = true;
+        install({ ...latest.current, busy: false, uncertain: true, error: 'No pudimos actualizar las preguntas. Revisá tu conexión y reintentá la consulta.' });
+      }
     } finally { if (r.read === read) r.read = null; }
   };
   useLayoutEffect(() => {
     install({ ...empty, identity });
     if (!identity) return;
-    const r: Owner = { identity, lifetime: new AbortController(), read: null, serial: 0, mutation: false, uncertain: false };
+    const r: Owner = { identity, lifetime: new AbortController(), read: null, serial: 0, mutation: false, background: false, uncertain: false };
     owner.current = r;
     return () => { r.lifetime.abort(); r.read?.abort(); if (owner.current === r) owner.current = null; };
   }, [controller, identity]);
   useEffect(() => {
     if (!active || !identity) return;
     void refresh();
-    const resume = () => { if (document.visibilityState === 'visible') void refresh(); };
+    const resume = () => { if (document.visibilityState === 'visible') void refresh(true); };
     document.addEventListener('visibilitychange', resume);
     return () => document.removeEventListener('visibilitychange', resume);
   }, [active, identity, controller]);
   const mutate = async (operation: QuestionMutation): Promise<SavedAnswer[] | null> => {
     const r = owner.current, snapshot = latest.current;
-    if (!r || r.mutation || r.read || r.uncertain || !snapshot.catalog || !valid(r, r.serial)) return null;
+    if (!r || r.mutation || (r.read && !r.background) || r.uncertain || !snapshot.catalog || !valid(r, r.serial)) return null;
+    if (r.read) { r.read.abort(); r.read = null; }
     let path = '/me/profile/question-selections', method = 'PUT', body: unknown;
     if (operation.kind === 'selection') {
       if (!selectionValid(operation.questionIds, snapshot.catalog, snapshot.answers)) return null;

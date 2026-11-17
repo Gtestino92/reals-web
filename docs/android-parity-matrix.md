@@ -965,7 +965,7 @@ The lifecycle is implemented across all functional sections; **overall Android p
 | Contextual time/duration/expiration copy | COMPLETE | Home presentation audit: contextual backend start, configured maximum duration, separate entryClosesAt/expiresAt copy, authoritative ON_TIME/LATE feedback, read-only retention text. Unit and Chromium 390/1280 px tests; exact glyph/device parity not claimed. |
 | Partner profile access | PARTIAL | Uses existing Scheduling partner-profile surface only for permitted active/waiting cards; no new dedicated end-to-end profile scenario. |
 | Home dismissal | COMPLETE | `useHome.ts` owns mutation/read fence and authoritative Home reload; `useHome.secondChat.test.tsx` covers success, uncertain result and duplicate exclusion. |
-| No automatic entry after Scheduling | COMPLETE | Scheduling unchanged; Second Chat is opened explicitly from Activity and has an explicit attendance button. Browser entry has an extra confirmation step relative to Android's immediate eligible card-entry join. |
+| No automatic entry after Scheduling | COMPLETE | Scheduling unchanged; explicit Home priority/Activity entry verifies status and joins when eligible. Passive reads/restoration never join. The manual attendance button remains for recovery; see direct-entry follow-up below. |
 | Validated lifecycle contract | COMPLETE | `chat/secondContracts.ts`; mandatory booleans, timestamps, identity, attendance, request roles and known statuses validated; malformed response tests. |
 | Early/on-time/late/cutoff admission | COMPLETE | `secondContracts.test.ts` covers before/at/after boundaries; joined attendance is server-provided; `SecondChatSession.test.ts` covers uncertain late admission reconciliation. |
 | Waiting and messaging without implied attendance | COMPLETE | `SecondChat.tsx`; policy/component tests and Chromium two-participant waiting scenario. No additional both-joined audio condition. |
@@ -1240,3 +1240,315 @@ Pre-edit: PARTIAL. Android SchedulingScreen separates picker children through Co
 Additional spacing audit from user feedback: PARTIAL. Scheduling currently renders partner, round and deadline as separate outer-grid items; 1rem row gaps accumulate with Home paragraph margins. Its outer surface also lacks Visual Review's top separation from the shared brand header. Group metadata into one compact block with 4 px internal gaps/zero paragraph margins; add 24 px above the scheduling surface while avoiding doubled top spacing in browse mode. Preserve title/back/overflow semantics, deadline/progress, all backend values and pending locks. Android SchedulingScreen likewise groups partner/round/deadline below its title; browser shared branding needs this explicit surface margin.
 
 Result: COMPLETE for these three spacing corrections. Scheduling.tsx groups metadata; scheduling.css restores the selected-heading margin and surface separation, with no changes to domain/session/controller code. Existing scheduling-smoke now uses production button/brand CSS and a representative brand header, measures ≥24 px before selected options (≥48 px at 200% text), 3–5 px between metadata lines and ≥24 px between brand header and scheduling surface. PASS at 390/1440; heading/selector screenshots inspected under ignored artifacts/scheduling. `npm run test:focused -- src/scheduling/Scheduling.test.tsx` 10/10 PASS; `npm test -- --maxWorkers=2` 1588/1588 PASS in 64 files (139.25 s); build/typecheck, architecture (82 modules, zero runtime cycles), diff check and UTF-8 scan PASS. Synthetic fixtures do not establish Android-device pixel parity. Earlier uncommitted visual-message correction is preserved; no commit or push.
+
+### Visual Review availability polling investigation
+
+COMPLETE for the scoped synthetic availability flow: Android HomeCoordinator status-first polling and HomePendingScreens summary/detail presentation match Web discovery at serverTime >= nextRefreshAt. Thirteen controlled-clock scenarios and native Chromium five-second polling verify Home/Activity discovery, hidden/resume, stale responses, concurrent reads and recovery. No production behavior changed. Live production reproduction and physical-device parity remain unverified. See [investigation and diagnostic checklist](home-availability-investigation.md).
+
+Delivery review integrates `origin/main` `8d8cde6` by fast-forward, preserves its browser-runner correction, fixes fixture summary/catalog consistency and makes native tab cleanup tolerate socket closure before command acknowledgment. Final full suite **1601/1601 PASS in 65 files**; focused Home/polling **103/103 PASS**; native availability browser PASS; complete Second Chat regression **540 checks / 40 combinations PASS**. Typecheck, build, architecture (82 modules, zero cycles), diff and UTF-8 checks PASS. No application production logic or backend/Android source changed; the original onboarding timeout did not recur and no timeout was altered. Exact evidence and the original investigation result remain linked above.
+
+
+### Direct Second Chat entry follow-up (2026-11-16)
+
+Scope/base: clean `feature/second-chat`, HEAD and `origin/feature/second-chat` both `835114d`. No local/remote `development` reference is available in Web. Android/backend remain read-only; no contract changes. Android references: `RealsRootViewModel.openSecondChat` (public explicit tap passes `joinIfAllowed = true`, restored entry passes false), `SecondChatCoordinator.load/openFromStatus/refresh` (status before JOIN, refresh passes false), `SecondChatTimingPresentationTest` (status receipt, JOIN success/failure and stale Home cutoff), `SecondChatCoordinatorTest`. Backend: [authoritative Second Chat endpoints](../../reals-backend/docs/commons/api.md), status and JOIN; the earlier full Second Chat audit above remains applicable.
+
+| Relevant behavior | Before | Result / implementation and evidence |
+| --- | --- | --- |
+| Available Home priority and Activity tap | PARTIAL: extra confirmation | COMPLETE: `Home.tsx` creates a memory-only `SecondChatEntryIntent` only after accepted explicit navigation. `SecondChat.tsx` passes it to `SecondChatSession.openFromUserAction`; fresh status gates the existing JOIN/write/reconciliation lane. Integration tests cover both CTA paths and synchronous repeated clicks. |
+| Starting soon / existing attendance | COMPLETE | Preserved: soon opens Activity, existing attendance opens conversation without POST. Status attendance must be PENDING as well as authoritative canJoin and timing eligibility. Tests cover stale cutoff and already joined. |
+| Passive navigation, polling, reload, resume, auth notification | COMPLETE | Intent never enters URL/history/storage. Passive paths only refresh. Consumed intent cannot replay. An auth-context change during preflight cancels JOIN; later reads remain usable. Tests cover reload-style remount, polling/resume and auth notification. |
+| Errors and retry | COMPLETE | Failed verification consumes intent; no automatic JOIN loop. Accessible existing manual entry and connection retry remain. Uncertain JOIN goes through post-write reconciliation before a manual retry can POST. |
+| State/lifecycle/navigation | COMPLETE for direct-entry scope | Existing attendance, expiry, no-show, read-only and tab/history guards retained. StrictMode defers work until effect setup survives cleanup. Disposal, identity replacement and sign-out reject obsolete responses. |
+| Visual structure, gestures, keyboard/focus, mobile/desktop | COMPLETE for unchanged entry surface | No styling, gestures or layouts changed. Existing focus and semantic buttons retained. Synthetic Chromium covers 390/1280 px, history and 200% text. Whole-screen pixel identity and physical-device parity remain subject to the earlier audit limitations. |
+
+Mutation/response review (all new paths):
+
+| Path | Invariant / ownership / response installation |
+| --- | --- |
+| Accepted explicit tap | One capability per accepted navigation, controller, account/auth context, connection and match. Repeated navigation rejected synchronously by existing router. No capability for automatic navigation. |
+| Initial entry and manual JOIN | Both reserve `entering`/busy before status verification. Only the explicit capability can bypass initial blocked state, and only to read status. Resume cannot interrupt preflight. Polling cannot release mutation ownership. Fresh verified PENDING + canJoin + window required before existing serialized write. |
+| POST and reconciliation | Existing write generation, abort signal, busy/blocked fields and authoritative reload unchanged. Ambiguous result reconciles without automatic replay; manual retry re-verifies. Failed reconciliation blocks writes until a successful read. |
+| Cancellation / cleanup | Intent consumed once even on failure. Effect cleanup cancels deferred setup and disposes session; lifetime/generation/identity reject obsolete reads and writes. Auth-context change during verification cancels pending JOIN without disabling future same-account reads. No local lifecycle transition invented. |
+
+Diff: Home intent plumbing; SecondChat deferred entry setup; session one-shot capability and shared verified entry lane; focused session/component/Home regressions; synthetic Chromium entry, auth/reload and navigation scenarios. No backend/Android/environment edits or new dependencies.
+
+Validation (final):
+
+- `npm run test:focused -- src/chat/SecondChatSession.test.ts src/chat/SecondChat.test.tsx src/home/Home.test.tsx src/home/HomeSecondPresentation.test.tsx src/home/useHomeNavigation.test.tsx`: PASS, 153 tests / 5 files. After correcting the new test's ellipsis literal, `npm run test:focused -- src/chat/SecondChat.test.tsx`: PASS, 5 tests.
+- `npm test`: final PASS, 1612 tests / 65 files. An earlier concurrent validation run timed out in the unchanged onboarding test `edits and resaves outdated answers...` (5000 ms); repeating the full suite without concurrent Chromium passed. No timeout/config changes made.
+- `npm run typecheck`: PASS; `npm run check:architecture`: PASS, 82 production modules / zero runtime cycles; `npm run build`: PASS (also runs typecheck), existing bundle-size warning above 500 kB.
+- `npm run dev -- --host 127.0.0.1 --port 5175`, `node tools/second-chat-browser.mjs`: PASS, 42 scenario/viewport combinations, 542 checks. After adding explicit auth notification/reload assertions, `node tools/second-chat-browser.mjs --home-only`: PASS, 16 combinations, 148 checks. Widths 390/1280 px. Auth notification remounts synthetic authenticated Home; actual browser reload returns to login because fixture authentication is not persisted. Authenticated remount without an intent is separately tested in jsdom.
+- `git diff --check`: PASS. Changed text scanned for replacement characters/mojibake; UTF-8 and existing Spanish retained.
+
+Browser coverage uses synthetic HTTP and auth; no real backend/Firebase, physical device, production transaction, Android screenshot comparison or microphone result is claimed. No visual redesign was made. Broader parity gaps from the earlier audit remain outside this entry fix. No credentials or `.env.local` values were read. No commit, push or deployment.
+
+
+### Second Chat backend DTO correction (2026-11-16)
+
+Audit base: clean Web `feature/second-chat` at `a1f84af` (same remote HEAD). Read-only backend checkout `42dd4d3`, Android `87e2979`. The earlier synthetic browser evidence did **not** establish real ChatResponse compatibility: those fixtures incorrectly added FirstChatResponse.partner. This correction supersedes that assumption.
+
+Actual source comparison: [ChatController](../../reals-backend/src/main/kotlin/com/reals/backend/controller/ChatController.kt), [ConnectionController](../../reals-backend/src/main/kotlin/com/reals/backend/controller/ConnectionController.kt), [ChatConnectionDtos](../../reals-backend/src/main/kotlin/com/reals/backend/controller/dto/ChatConnectionDtos.kt), [MatchController](../../reals-backend/src/main/kotlin/com/reals/backend/controller/MatchController.kt), [MatchmakingDtos](../../reals-backend/src/main/kotlin/com/reals/backend/controller/dto/MatchmakingDtos.kt), [UserBlockResponse](../../reals-backend/src/main/kotlin/com/reals/backend/controller/dto/UserBlockResponse.kt), and [API contract](../../reals-backend/docs/commons/api.md). Android `RealsRootViewModel.openSecondChat`, `SecondChatCoordinator.load/openFromStatus/loadChatAndMessages` retain the supplied Home partnerName, install the JOIN status snapshot, then load chat/messages; inspected associated coordinator/timing tests from the preceding entry audit. Existing mobile/desktop layout, gestures, focus, Back, expiry, no-show, read-only and ownership flows are unchanged except the safe diagnostic reference added to errors.
+
+| Request / DTO | Parser and audit result |
+| --- | --- |
+| GET /matches/{id} / MatchResponse | Identity/match validated, counterpart derived from userAId/userBId; rejects self counterpart. No name in this DTO. |
+| GET /connections/{id}/second-chat/status / SecondChatAttendanceResponse | `parseSecondStatus` matches authoritative dates, nullable fields, attendance, resolution objects, capabilities, last-message metadata and audio policy. Unknown unused DTO fields (e.g. policy enabledAt) need not be installed. |
+| POST second-chat JOIN, no-show, completion, decision, inactivity / SecondChatAttendanceResponse | Same parser now validates/installs each successful lifecycle response before existing read reconciliation. Corrected fixtures return this DTO rather than {}. Decisions still send {decision}; other lifecycle requests have no body. |
+| GET /chats/{id} / ChatResponse | **Before MISSING real-contract compatibility; now COMPLETE for consumed fields.** No partner property. Keep chat id, match id, connection id and SECOND_CHAT checks. Lifecycle remains governed by status, not duplicated chat metadata. |
+| GET /chats/{id}/messages?limit=500[&after=...] | ChatController returns ChatMessageResponse[] without cursor; ChatMessagesResponse {messages,hasMore,serverTime} with cursor. Existing parser supports both; corrected fixtures exercise both shapes. Existing participant, chat, cursor, pagination and URL checks retained. |
+| POST text, multipart audio; PUT reaction / ChatMessageResponse | `parseMessage` matches nullable content/audio/reply/reaction and response IDs. Text body {content,clientMessageId,replyTo?}; multipart file/clientMessageId/replyToType/replyToTargetId and reaction {type:HEART} agree with actual controller. Existing UUID retention and reconciliation untouched. |
+| POST safety / ChatExitOutcomeResponse; POST match block / UserBlockResponse | Existing consumed-field validation and safe return remain; complete successful safety fixtures now use chat/exitRequest/penaltyApplied/penalizedUserId and resolvedAt. The read diagnostic wrapper preserves HTTP 403/404 access-withdrawal handling. |
+
+| Invariant / mutation or response path | Review / result |
+| --- | --- |
+| Home metadata to session | COMPLETE: `Home.tsx` passes partnerName to SecondChat/session. Name never establishes identity, is React text, and survives StrictMode cleanup/setup; absent/blank falls back to existing neutral copy. No extra profile request. |
+| Lifecycle write response installation | COMPLETE: under existing generation, authenticated identity, abort signal and exclusive write ownership, install status + receipt timestamp atomically. Confirmed JOIN attendance survives later status/chat/message failures. Fresh status is still required before manual entry; no automatic JOIN retry. |
+| Read failure / retry / diagnostics | COMPLETE: block on read/validation failure; successful connection retry clears error/reference. Store only local stage + ApiError kind + HTTP number. No exception text, backend code/detail, IDs, URLs, names, tokens or private content in diagnostic or logs. Existing manual retry remains accessible. |
+| Cancellation, navigation and message writes | Existing lifetime/generation/identity guards, router locks, advisory timers, authoritative deadlines, attendance policies and stable outgoing UUID unchanged. Existing regressions retained; malformed lifecycle response reconciles before another attempt. |
+
+Evidence: new `src/chat/SecondChat.contract.test.tsx` exercises two participants from pre-entry through JOIN, active ChatResponse without partner, message loading and both joined; wrong chat/match/connection/type; post-JOIN status/chat/message failures without duplicate JOIN; malformed JOIN reconciliation; Home name/fallback/StrictMode; private-data-free diagnostic. Home integration now reaches enabled composer from both priority and Activity with backend-shaped chat JSON. Synthetic Chromium fixture mirrors these DTO shapes (abbreviated test IDs, simulated scheduler/auth, no production transactions). Broader Android pixel parity and physical-device/backend integration remain unverified; no redesign or backend/Android edits.
+
+Final validation:
+
+- `npm run test:focused -- src/chat/SecondChat.contract.test.tsx src/chat/SecondChatSession.test.ts src/chat/SecondChat.test.tsx src/chat/SecondChat.review.test.tsx src/chat/SecondChatSession.media.test.ts src/chat/secondContracts.test.ts src/home/Home.test.tsx`: PASS, 194 tests / 7 files. After completing the safety fixture, `npm run test:focused -- src/chat/SecondChat.review.test.tsx src/chat/SecondChat.contract.test.tsx`: PASS, 36 tests / 2 files.
+- `npm test`: PASS, 1625 tests / 66 files.
+- `npm run typecheck`: PASS; `npm run check:architecture`: PASS, 82 production modules / zero runtime cycles; `npm run build`: PASS, existing >500 kB bundle advisory only.
+- `node tools/second-chat-browser.mjs` against the already-running Vite server on 127.0.0.1:5175: PASS, 44 scenario/viewport combinations, 586 checks (390/1280 px). Includes both-participant entry/message exchange and a confirmed JOIN followed by chat GET failure, safe diagnostic and explicit read recovery with exactly one JOIN per participant. Synthetic fixtures now omit partner in ChatResponse, return complete lifecycle responses, initial message arrays and cursor envelopes. No live backend/Firebase/device, production transaction or new Android screenshot validation claimed.
+- `git diff --check`: PASS; changed UTF-8 strings inspected/scanned for mojibake and existing line endings retained. `.env.local` was not read or changed.
+
+Diff summary: `src/chat/SecondChatSession.ts` (contract, lifecycle installation, safe diagnostic); `src/chat/SecondChat.tsx` and `src/home/Home.tsx` (trusted name and diagnostic UI); `src/chat/secondFixtures.ts`, `src/chat/SecondChat.contract.test.tsx`, `src/chat/SecondChat.test.tsx`, `src/chat/SecondChat.review.test.tsx`, `src/home/Home.test.tsx` (backend-shaped fixtures and regressions); `tools/second-chat-synthetic.mjs`, `tools/second-chat-browser.mjs` (DTO-compatible browser smoke); this parity matrix. No changes to backend, Android, deployment resources or dependencies. No commit/push/merge/deploy.
+
+
+### Active Second Chat reload restoration and terminal audio (2026-11-16)
+
+Base/remote audit: `git fetch origin` before edits; Web HEAD and latest `origin/feature/second-chat` both `339318b`, clean initial tree. `git ls-remote` confirmed Android development `87e2979` and backend development `42dd4d3`, matching inspected sibling checkouts. Web has no development ref. Siblings and deployment resources remain read-only.
+
+Android source audit: `matchmaking/HomeRouter.activeSecondChatRoute` and `HomeRouterTest`; `root/HomeCoordinator` Home-route installation; `RealsRootViewModel` passive open with joinIfAllowed=false; `RealsRootUiState.SecondChat.canReturnHomeNow` and `SecondChatTimingPresentation` genuinelyActive/partner-cutoff; `SecondChatCoordinator.sendAudioMessage`, `isSecondChatAudioLifecycleConflict`, `withTerminalAudioDraftDiscardedIfNeeded`, plus coordinator lifecycle/audio tests. Backend audit: [Second Chat contract](../../reals-backend/docs/commons/api.md), `SecondChatConversationLifecycleService.finishInitialSilence`, `ChatAudioService`/`ChatAudioPolicyService`, `ChatMessageService`, actual controller DTOs from the preceding correction. The server's ten-minute initial-silence rule, absolute duration, attendance, audio policy and scheduler are unchanged.
+
+| Behavior | Audit / implementation / scoped parity |
+| --- | --- |
+| Authenticated reload into joined ACTIVE Second Chat | Before MISSING. Now COMPLETE: `useSecondChatRestoration.ts` consumes the already-loaded authoritative Home projection, checks joined/ACTIVE candidates through `SecondChatSession.refresh`, then transfers the verified session into `SecondChat.tsx`. Never creates or consumes an entry intent. Home/status/messages snapshots are reused on handoff, including StrictMode. |
+| Both present; joined alone before cutoff | COMPLETE: both restore automatically and block in-app Home navigation. No browser flag or History entry is domain truth. |
+| Alone after cutoff; terminal/read-only; absolute expiry; expired retention; stale Home says joined but status says pending | COMPLETE: authoritative status/policy allows Home. One restoration decision per authenticated Home mount prevents re-entry loops after an allowed return. Malformed joined ACTIVE status without chatId stays in recovery. Authoritative 403/404 access withdrawal permits safe Home. |
+| Loading/read failures and Home flash | Before PARTIAL: initial null status allowed exit. Now COMPLETE: session.canReturnHome denies unverified exit; Home retains its existing noninteractive skeleton during initial projection, then gates interactive controls while verifying a candidate. Transient failures expose a retryable recovery screen using the same Home response; status retry does not refetch fresh Home. Known ACTIVE read errors keep exit locked until policy allows it. |
+| Navigation, account and tab ownership | COMPLETE in simulated-session tests: restoration uses replaceState with a fresh owner, not push or persisted routing data. Existing Back/Forward guard remains. Actual reload after explicit entry tests same-document Back/Forward without duplicate History or JOIN; a fresh bootstrap with no prior same-document Home uses a synthetic popstate to exercise the in-app guard rather than leaving the test for about:blank. Real Web Locks/BroadcastChannel transfers unmount the old owner and restore the new owner passively. |
+| 409 audio, status still ACTIVE | COMPLETE: safe allowlisted lifecycle/audio-policy error codes classify the conflict; HTTP 409 alone does not mean terminal. Keep UUID/Blob and explicit reconciliation/retry for recoverable or uncertain failures. |
+| Terminal audio rejection or in-flight transition | Before PARTIAL: obsolete failed outgoing bubble remained. Now COMPLETE for fully reconciled history: status is installed first, messages reconciled by clientMessageId before removing an uncommitted payload. A committed audio remains in read-only messages. Clear outgoing/confirmed Blob references, unmount/revoke composer preview and stop tracks; no permanently disabled retry bubble. Contextual terminal notice replaces generic action failure only after authoritative reconciliation. |
+| Full first message page | COMPLETE for tested 501-message case: terminal audio reconciliation follows the backend's initial 500-row list with cursor/envelope reads before concluding absence. Nonprogressing/failed/truncated history remains guarded; unconfirmed internal payload is retained if reconciliation cannot complete, hidden from terminal retry UI and released on disposal. No claim of infinite-history reconciliation. |
+| Visual/keyboard/scroll adaptations | Existing Home/chat styling, focus, controls, read-only messages and responsive layout retained. Added a noninteractive verification stage and contextual status notice. Chromium covers 390/1280 px and existing 200% text cases. Pixel identity against Android and physical-device behavior remain unverified. |
+
+Mutation / response-installation review:
+
+| Path | Invariants / cancellation / ownership |
+| --- | --- |
+| Authoritative Home to restore decision | No additional Home hook/request. Verified Home without candidates keeps its existing header/control identity and skips the asynchronous gate. Candidate metadata is an index only; match identity and Second Chat status are verified in the existing session. Effect cancellation, controller identity/account and session lifetime reject obsolete work. An abandoned verification session is disposed; a successfully handed-off session belongs to the chat. |
+| Restored chat setup/teardown | Initial verified snapshot reused without another status/message request; effect replay defers final disposal by one microtask while stopping timers/listeners immediately. A real unmount disposes the session; identity and ownership guards reject obsolete responses. No persisted JOIN capability or personal conversation data. |
+| Router restoration / allowed exit | Authoritative bootstrap replaces current History under the new owner; returning through an allowed path clears the session ref and does not rerun the completed bootstrap decision. Initial/read-failure exit policy shares session.canReturnHome across button, unload and router guard. A JOIN whose response and reconciliation both fail cannot use old PENDING attendance as permission to leave: a private uncertainty flag is cleared only by verified status/JOIN acknowledgment. Tests cover both committed and uncommitted outcomes without repeating POST. |
+| Audio POST / uncertainty | Existing single writer, immutable clientMessageId, full post-write reconciliation, stale generation, abort signal, idempotency conflict and retry protections remain. Safe code classification stores only a boolean, never raw details or private payloads. |
+| Terminal reconciliation / resource release | Only server terminal status plus successful message reconciliation resolves an outgoing audio; confirmed messages merge before payload removal. Active network/5xx/409 failures retain payload. Status/message failure never silently discards uncertainty. Terminal inaccessible/expired-retention navigation disposes the owning session rather than inventing a business transition. |
+
+Browser harness now persists only test authentication coordinates (synthetic user/backend fixture URL) in sessionStorage; a document-start harness redirect reloads the simulated authenticated application despite the production router's normalized slash URL. This is test-only, not production persistence. The ownership scenario uses the real TabGate and request abort signals. Recorder bytes remain deterministic MP4/AAC; preview Blob URLs and track cleanup are measured in the real browser. A closing native page may lose its CDP close acknowledgment; that specific cleanup error is tolerated without weakening scenario assertions.
+
+Validation evidence:
+
+- `npm run test:focused -- src/home/Home.test.tsx src/home/Home.secondRestoration.test.tsx src/home/useHomeNavigation.test.tsx src/chat/SecondChat.test.tsx src/chat/SecondChat.contract.test.tsx src/chat/SecondChat.review.test.tsx src/chat/SecondChatSession.test.ts src/chat/SecondChatSession.media.test.ts src/chat/SecondChatSession.terminalAudio.test.ts`: PASS, 190 tests / 9 files at that iteration. Final guard/pagination checks: `npm run test:focused -- src/chat/SecondChatSession.terminalAudio.test.ts src/chat/SecondChatSession.test.ts src/chat/SecondChat.contract.test.tsx src/home/Home.secondRestoration.test.tsx`: PASS, 57 tests / 4 files.
+- Full regression exposed an Admin header remount when no candidate existed and an onboarding assertion that used the loading heading as readiness. The no-candidate gate was corrected to preserve control identity; onboarding now awaits the actual Home search control. `npm run test:focused -- src/admin/modes.test.tsx src/onboarding/Onboarding.test.tsx src/home/Home.secondRestoration.test.tsx`: PASS, 159 tests / 3 files. No existing regression or timeout was removed/relaxed.
+- `npm run typecheck`: PASS; `npm run check:architecture`: PASS, 83 production modules / zero runtime cycles; `npm run build`: PASS, existing >500 kB bundle advisory.
+- Against the existing Vite server at 127.0.0.1:5175, `node tools/second-chat-browser.mjs`: PASS, 70 scenario/viewport combinations / 686 checks. After the final uncertain-JOIN guard addition, `node tools/second-chat-browser.mjs --case=reload-uncertain`: PASS, 2 combinations / 20 checks. Both 390/1280 px; repeated real Page.reload, persistent simulated authentication, History, no Home interactive flash, zero passive JOIN, retry, separate account and actual tab transfer; audio success/terminal/recoverable/ambiguous-committed, Blob URL/track release and retained playback controls.
+- `npm test -- --reporter=json --outputFile=artifacts/second-chat-final-tests.json`: final PASS, 1649 tests / 68 files / zero failures. Report is in ignored artifacts. `git diff --check` and UTF-8/mojibake inspection: PASS.
+
+Diff summary: new `src/home/useSecondChatRestoration.ts`; Home/session handoff in `Home.tsx`, replace-only restoration in `useHomeNavigation.ts`; verified/uncertain exit policy and terminal audio reconciliation in `SecondChatSession.ts`/`SecondChat.tsx`; backend-compatible audio fixture; new `Home.secondRestoration.test.tsx` and `SecondChatSession.terminalAudio.test.ts`; one onboarding readiness assertion; persistent-auth/ownership fixture and reload/audio browser cases in `tools/second-chat-fixture.tsx`, `second-chat-synthetic.mjs`, `second-chat-browser.mjs`, new `second-chat-reload-browser-cases.mjs`, adjusted existing Home browser scenarios; this matrix. `useHome.ts`, App auth ownership, shared AudioComposer and backend contracts stay unchanged. No backend/Android/deployment edits, credentials read, personal data persistence, commit/push/merge/deploy.
+
+Limitations: simulated authentication/HTTP/scheduler and recorder, not live Firebase/backend transactions, a real microphone, physical Android/iOS or Android pixel comparisons. Interrupted/incomplete history reconciliation stays conservative as described above.
+
+
+### Browser identity assets and manifest (2026-11-16)
+
+Audit base: latest fetched Web HEAD and origin/feature/second-chat `339318b`. Existing uncommitted restoration/audio changes from the preceding task were present and preserved; this task changes no product flow. Android notification/seal, launcher/round launcher/adaptive foreground, adaptive icon background XML and Web theme tokens inspected read-only. Source hashes, transformations, stable URLs and reproduction commands: [browser identity](browser-identity.md).
+
+| Item | Scoped parity / evidence |
+| --- | --- |
+| Branding source | COMPLETE: existing Reals seal (byte-identical to Android large notification) and native xxxhdpi launcher. No new mark or monochrome status-icon substitution. Side-by-side 16/32 px review selected a tighter seal crop for tab legibility. |
+| Browser favicon | COMPLETE assets/declarations: optimized 16/32 PNG plus ICO with both frames. Chrome decoded assets; reviewed actual-size samples on light/dark backgrounds. PARTIAL native browser-chrome verification: Computer Use stopped because it could not determine the Windows browser URL confidently; no native-tab screenshot result claimed for normal/high DPI. |
+| Apple Touch and general app icons | COMPLETE assets/metadata: opaque 180, native launcher 192 with its original alpha corners, opaque 512 seal; typed manifest declarations. PLATFORM-LIMITED validation: no physical iOS/Android or OS install performed. |
+| Maskable icon | COMPLETE for generated asset: separate opaque 512 image; important ink/gold radius 184.2 px is inside the 204.8 px safe circle. Circle/rounded-square/square previews visually inspected. |
+| Manifest/theme/title | COMPLETE metadata: Reals names/title/product description; root id/start_url/scope; standalone; existing Ivory light and dark Ink HTML theme colors, static light manifest fallback. Dev/production HTTP status/MIME/path/dimension checks and Chrome manifest parsing pass. |
+| Offline/push/install interaction | OUTSIDE SCOPE: no Service Worker, caching, messaging, permissions, prompts or runtime dependencies added. Chrome reported no installability errors for this metadata; actual installation and platform-specific appearance are unverified. |
+
+This is a metadata/static-asset change: no stateful mutation paths, ownership/lifecycle changes, timers or API integrations. Prior Second Chat and authentication safeguards remain untouched. Full commands/results and remaining native-tab verification are recorded in the linked document.
+
+
+## UX/runtime quality audit - 2026-11-16
+
+Base Web `1f0cbbd`, Android `87e2979` (read-only). See [audit findings, reproduction, invariants and measurements](ux-runtime-audit.md) for exact commands and remaining validation; earlier feature rows remain authoritative.
+
+| Area / Android reference | Expected behavior and Web locations | Status / evidence / outstanding differences |
+| --- | --- | --- |
+| Creation defaults and validation: `ui/profile/CreateProfileScreen.kt`, gender selector, domain validation | `onboarding/ProfileForm.tsx`: explicit sensitive choices for new profiles, existing choices retained; one validator, alert associations and first-error focus | COMPLETE for focused tested Web behavior; deliberate Android default difference (MALE/FEMALE/DATE -> explicit choice), no eligibility contract change. RTL + synthetic Chromium Enter. Hardware accessibility remains PARTIAL. |
+| Primary action placement: Create screen; `ProfileStatusScreen.kt` and `root/ProfileOperationHandler.kt` | Create/Save at form start; Activate before explanatory body; natural scroll and one reset on new profile ID in `Onboarding.tsx` | PARTIAL visual parity: intentional browser adaptation, no sticky overlay or rigid wizard. Before/after at 390/1280 widths and 200% text evidence in audit. Browser toolbar/IME, full zoom and Android screenshot comparison remain unverified. |
+| Photos/legal/activation lifecycle: photo/crop sections, `LegalRequirementsScreen.kt`, profile/legal coordinators | Existing verification, legal actions, moderation gates, mutation ownership and authoritative refresh unchanged | COMPLETE for retained unit regressions + synthetic legal/crop/upload flow; live moderation/storage/consent documents remain PARTIAL. |
+| Home/Activity: `MatchmakingHomeScreen.kt`, Home coordinator | `home/Home.tsx`: FIRST_CHAT action disabled during blocked reconciliation; supported Web actions no longer universally direct users to Android | COMPLETE for tested retry/disabled/copy paths. Unknown activity types keep platform fallback. No navigation-policy change. |
+| Visual/Scheduling/both chats: visual lifecycle/profile card, scheduling lifecycle/coordinator, chat panels/coordinators | Retain gestures, safety confirmations, Back/history, attendance, expiry, pending and obsolete-response guards | PARTIAL audit coverage; existing mobile/desktop smoke scenarios plus full unit suite, no broad UX redesign. See audit for second-chat harness synchronization and timeouts. Real audio/device and exhaustive screenshot equivalence not verified. |
+| Authentication/account: Login/session, HomeAccount/delete/notification screens | Explicit consent/destruction, pending/recovery feedback, accurate notification-platform copy | PARTIAL cross-platform verification: synthetic login/logout and full regressions; live OAuth, reauthentication, mail, browser push and native assistive technology unverified. Browser push/audio differences remain PLATFORM-LIMITED. |
+| Browser identity | `public/favicon-{16,32}.png`, `favicon.ico`; no PWA changes | COMPLETE for decoded assets/ICO/metadata/production checks; tighter centered circular crop and transparent corners inspected on light/dark canvas backgrounds. Native tab chrome remains unverified. |
+
+Mutation review: local field/error state updates do not POST invalid data; busy submissions return. Existing profile/filters remain independent editable sections. No automatic legal acceptance, activation, retry or JOIN was added. Onboarding scroll reset depends only on empty-to-created identity and never installs backend state; existing owner abort/sign-out/uncertain-write paths remain unchanged. Diagnostics record categories/counts only.
+
+
+Independent-review follow-up to the UX/runtime audit (`e92ceeb`): intention and interested-gender validation in `ProfileForm`/`contracts` now mark and focus only the independently invalid field, including filter editing (COMPLETE for focused Web regressions; existing Android defaults/platform classifications unchanged). The Chromium scaling loop now checks the measured activation object; 390/1280 widths at 100%/200% text passed with exit 0. See [corrected audit evidence and mutation review](ux-runtime-audit.md#independent-review-corrections-to-e92ceeb). No Android/backend or other feature behavior changed.
+
+Historical tab-icon polish (superseded by circle restoration below): the favicon used a larger transparent source monogram with a fine ivory keyline instead of the full circular seal. PWA images remain byte-identical; metadata is unchanged. COMPLETE for decoded assets/ICO, centering/transparency, development and production checks and inspected actual-size light/dark canvas samples; native browser-tab chrome remains unverified. See [current browser identity evidence](browser-identity.md#verification-and-limits).
+
+
+### Tab favicon circle restoration (2026-11-16)
+
+| Android source / expectation | Web implementation | Parity / evidence |
+| --- | --- | --- |
+| Manifest launcher/adaptive icon references and `drawable-nodpi/ic_notification_large.png`: R inside the full ink/gold ring | `tools/generate-browser-icons.mjs`, `public/favicon-{16,32}.png`, `public/favicon.ico`: circular crop preserves R, ring, diamonds and ivory interior | COMPLETE for generated artwork: source equality, eight-sector ring regression, centering/alpha/ICO/metadata assertions passed in Chromium development and production at 1x/2x; actual-size light/dark canvas samples inspected. PARTIAL for native-tab/physical-device appearance, unverified. |
+
+Scope audit: static branding only; interactions, navigation, async state, timers,
+keyboard, accessibility, layouts and backend behavior are unchanged. No mutation
+paths or lifecycle invariants added. Installation images remain unchanged.
+Commands and limits: [browser identity](browser-identity.md#current-circle-restoration-2026-11-16).
+
+
+### Profile editing and questions review (2026-11-16)
+
+Base HEAD `e92ceeb`; branch `fix/profile-editing-experience` from current HEAD
+(no development ref available). Existing favicon/onboarding edits preserved.
+Android read-only references: `ui/profile/ProfileDetailsSection.kt`,
+`CreateProfileScreen.kt`, `ProfilePhotosSection.kt`, `ProfileStatusScreen.kt`,
+`ProfileQuestionScreen.kt`, `ProfileQuestionPresentation.kt`,
+`ui/root/ProfileQuestionOperationHandler.kt` and presentation tests.
+Backend contracts: `docs/commons/api.md` profile answers/selections.
+
+| Area | Before / expected within this task |
+| --- | --- |
+| Details form | PARTIAL: Save precedes fields; restore below existing-profile fields. User requests country before city and Bio (opcional), deliberate copy/order differences from Android. |
+| Foreground refresh | PARTIAL: profile GET looks like saving, questions disables editor. Retain drafts, focus and scroll; quietly reconcile authoritative data; never POST/PUT/PATCH because of visibility. |
+| Photos disclosure | PARTIAL: native instant details. Add reversible expansion/collapse animation and reduced-motion handling, retain photo/crop/reorder behavior. |
+| Question overview | PARTIAL per user request: Android overview has two navigation buttons. Show public selection and answered cards directly; separate unanswered list, retain edit/delete, stale answers, maximum three, ordering and clear. |
+| Answer feedback | PARTIAL: empty editor immediately shows validation error. Suppress pristine error and remove generic helper, retain actual validation and safe React text. |
+| Navigation/accessibility/errors | Existing Back/History, identity-owned drafts, semantic versions, explicit uncertain-write recovery retained; validate changed routes and keyboard on mobile/desktop Chromium. Physical devices remain unverified. |
+
+Pre-edit mutation/invariant matrix:
+
+| Path | Ownership / installation rule |
+| --- | --- |
+| Initial/explicit reads | Keep loading and uncertain recovery; atomically install complete parsed snapshots. |
+| Visibility reads | Quiet only with confirmed data; preserve drafts/focus/feedback. One read per owner, aborted/obsolete results rejected. Failures remain explicit and block unsafe writes. |
+| Profile/photo/legal writes | Exclusive mutation; supersede quiet read before writing, reconcile afterwards. No automatic mutation retries or domain transitions. |
+| Answer upsert/delete/selection | Exclusive writes and authoritative response arrays; cancel quiet read before mutation. Preserve newer drafts and reject stale serial/account/profile results. |
+| Unmount/sign-out/background | Lifetime abort, listener cleanup, generation/account checks; visibility never mutates. |
+
+
+Implementation and final scoped parity:
+
+| Area / Web files | Result / evidence / differences |
+| --- | --- |
+| `onboarding/ProfileForm.tsx` | COMPLETE for requested Web behavior: exactly one Save after existing-profile fields (details and filters); country before city; Bio (opcional). New-profile creation placement retained. Copy/order explicitly diverge from Android at user request. RTL order and payload regressions, Chromium profile screenshot. |
+| `onboarding/Onboarding.tsx`, `profile/questions/useProfileQuestions.ts` | COMPLETE for simulated resume: confirmed question reads and retained-profile refreshes do not advertise saving or disable/focus-reset editors. Background reads abort before writes; stale responses cannot install. Question read errors mark uncertain and require recovery. Successful profile reconciliation installs the complete validated model/profile after all reads. Quiet ownership is excluded from setup navigation locks, including Account callbacks. |
+| `onboarding/onboarding.css`, PhotoSection | COMPLETE for Web expand/collapse: 240 ms grid/opacity transition, reversible and no timer, controls inert while collapsed, retained photo DOM, reduced-motion disables animation. Native Android expansion/layout behavior is adapted to browser controls. PhotoGrid gestures, crop and upload tests retained. |
+| `profile/questions/ProfileQuestions.tsx`, CSS | COMPLETE for requested Web flow: main overview has answered cards, current public selection first with positions and accent, up to three, add/remove/reorder/clear/save, stale answers can be updated. Extra list contains unanswered questions only; editors return to their actual parent using Back and History. Existing legacy selection destination remains renderable. This intentionally differs from Android's two-action overview. |
+| Entry, editor and feedback | Profile question entry uses gold border/background and primary action. Editor removes generic helper and pristine validation error; actual invalid edits still show associated errors and disable saving. Existing semantic-version, immutable identity-owned drafts and explicit ambiguous-write recovery retained. |
+| Browser/platform limits | COMPLETE for assertions in synthetic Chromium at 390x844 and 1440x900 for ACTIVE and DRAFT; screenshots of profile, overview, selection and boundary answers inspected. PARTIAL for physical-device/browser-window behavior: visibility events are simulated, not native window switching or live Firebase/backend. Native Android pixel equivalence is not claimed for the authorized redesign. |
+
+Validation:
+
+- `npm run test:focused -- src/onboarding/ProfileForm.test.tsx src/onboarding/Onboarding.test.tsx src/profile/questions/useProfileQuestions.test.tsx --maxWorkers=1`:
+  incremental run exposed test readiness/selector adjustments for changed routes and
+  disclosure. Focused failures corrected without relaxing timeouts or assertions.
+  Hook/field tests passed (40 tests); onboarding passed 108/109 before the final
+  disclosure test's document-shadowing correction. `npm run test:focused -- src/onboarding/Onboarding.test.tsx -t 'keeps photo disclosure' --maxWorkers=1`:
+  PASS, 1 test. Final full suite below covers every file and the added setup-navigation regression.
+- `node tools/profile-questions-smoke.mjs`: exit 0, four viewport/status
+  combinations. Exercises draft/focus retention after delayed visibility reads,
+  one Save below fields, inert disclosure/reduced motion, answered overview,
+  invalid pasted text and 160/161 boundaries, save/delete, public maximum/order,
+  clear, unanswered-only extra screen, pristine errors, keyboard Tab, Back/Forward,
+  late mutation completion, parent DOM/draft preservation, reopening and no overflow.
+  Results/screenshots in ignored `artifacts/profile-questions/`.
+- `npm run build`: exit 0 including typecheck; existing >500 kB chunk advisory.
+  `npm run check:architecture`: exit 0, 83 modules / zero runtime cycles.
+- Initial full validation `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/profile-questions/full-tests.json`:
+  PASS, 1664 tests. Chromium then revealed the setup navigation lock on quiet
+  refresh; fixed it and added its regression, requiring the final suite below.
+
+Diff summary for this task: details form/copy/order; onboarding quiet read ownership
+and photos disclosure; profile question layout/routing/validation/quiet read
+ownership; focused regressions and updated existing Chromium smoke; this matrix.
+Earlier favicon, onboarding validation and UX-audit edits remain preserved.
+No Android/backend/environment/deployment changes, commit, push or mutation retry.
+
+Final validation: `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/profile-questions/full-tests-final.json`: exit 0, 1665 tests passed / zero failures (complete suite after the final ownership fix). `git diff --check`: PASS. Changed text decoded as UTF-8 and scanned for mojibake; Spanish copy inspected. Remaining validation is physical-device/native-window switching and live backend, as noted above.
+
+### Explicit onboarding retry during background reconciliation (independent audit)
+
+Base: clean `fix/profile-editing-experience` at `c59135a`, verified against the
+remote branch HEAD. Scoped defect: enabled Consultar estado ignores a click
+while a quiet read owns the operation. Existing Android references above still
+define loading/retry presentation; browser operation priority is a Web adaptation.
+PARTIAL before fix: retry is visible/enabled but performs no read. No changes to
+layout, contracts, navigation, timers or Android/backend sources are needed.
+
+Pre-edit invariant / mutation review:
+
+| Incoming call / current owner | Required behavior |
+| --- | --- |
+| Repeated visibility / any locked operation | Ignore; do not restart reads or interrupt mutations. |
+| Explicit retry or mutation / background read | Abort background operation, acquire new foreground operation, retain existing loading/error and navigation-lock behavior. |
+| Explicit retry or mutation / foreground operation | Ignore; never interrupt foreground work. |
+| Aborted background result / new foreground owner | Existing combined abort signal and operation-identity cleanup reject installation and cannot unlock newer work. |
+| Foreground success/failure | Preserve drafts and DOM; install only authoritative data, retain actionable error/retry feedback on failure. Existing disposal/sign-out ownership unchanged. |
+
+Reproduction: focused enabled-retry tests (success and failure outcomes) both
+failed at the assertion that the pending background signal was aborted by the
+click, before any production edit.
+
+### Inline profile answers (additional user request)
+
+Android `ProfileQuestionScreen.kt` uses list -> Editor and selection -> overview,
+as audited above. User explicitly requests a Web difference: unanswered cards
+have their own textarea/Save in Responder preguntas; saved cards edit in place
+and offer Delete alongside selection/order in Preguntas del perfil. Before this
+change that flow is MISSING. Backend answer and selection contracts are unchanged.
+
+| Mutation / response path | Invariant |
+| --- | --- |
+| Inline save/delete | Keep existing hook exclusivity, uncertainty, abort and identity checks. One explicit mutation for the addressed question; backend array remains authoritative. |
+| Multiple local drafts | Key by question and authenticated identity. Saving one never clears another or a newer value; navigation keeps existing drafts private and in memory. |
+| Quiet catalog/answer refresh | Preserve draft and mounted field focus; unavailable questions disappear, stale versions remain updateable. Never save from a visibility event. |
+| Save/delete changes list membership | Only confirmed response changes card membership. Keep feedback visible on the originating screen; no late completion navigation. |
+| Selection and inline edits | Maintain maximum three, ordering, explicit selection Save and stale-item recovery; deletion uses authoritative compacted public positions. |
+
+No onboarding refactor or changes to session/backend/Android policy are authorized.
+
+
+Scoped results for the retry audit and subsequent inline-answer request:
+
+| Area | Final implementation / evidence |
+| --- | --- |
+| Explicit retry priority | COMPLETE for Web: one-line `run` guard now rejects incoming background calls or an existing foreground owner. Explicit read and mutation both supersede a background operation. Existing abort/operation identity installation and cleanup are unchanged. |
+| Inline unanswered cards | COMPLETE for requested Web flow: each unanswered question has its own labelled form, textarea, counter/validation and Save; no Abrir or Delete in that list. Successful save removes only the confirmed answered card, leaves other drafts intact and focuses the list heading. |
+| Inline saved cards | COMPLETE for requested Web flow: Edit expands the form inside the same card, autofocuses its field, and saves without navigation. Delete lives on saved cards alongside public selection/order actions. One keyed answered-card list preserves the field DOM and focus across semantic-version changes. Delete retires the old editing state. |
+| Feedback and lifecycle | Mutation feedback is scoped to the question and originating route; removed cards have page feedback. Late responses update authoritative answers without unrelated navigation/feedback. No automatic writes, retry or domain transition added. Existing hook uncertainty/exclusivity/account/lifetime checks retained. |
+| Android / platform differences | Inline forms intentionally differ from Android's separate editor at user request. No other parity changes. Chromium uses synthetic HTTP/auth and visibility events; physical-device and live-backend behavior remain unverified. |
+
+Validation commands/results:
+
+- Before the guard fix: `npm run test:focused -- src/onboarding/Onboarding.test.tsx -t 'enabled retry button' --maxWorkers=1`: exit 1, both new success/failure cases fail because the enabled click does not abort the pending background read.
+- After the guard fix: `npm run test:focused -- src/onboarding/Onboarding.test.tsx --maxWorkers=1`: PASS, 113 tests. Includes no interruption of foreground mutation, repeated background-event suppression, obsolete result rejection, retained drafts/focus and success/failure retry feedback. Existing genuine-mutation supersession regression retained.
+- Interim full run `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/onboarding-retry/full-tests.json`: 1667 passed, one 5000 ms timeout in the existing uncertain-answer/selection test. The user added the inline UI scope during this execution; final full validation below covers the complete final tree. No timeout was relaxed or regression removed.
+- After inline changes: `npm run test:focused -- src/onboarding/Onboarding.test.tsx src/profile/questions/useProfileQuestions.test.tsx --maxWorkers=1`: PASS, 132 tests / two files. New cases save one of multiple drafts, retain others through History/resume, edit without changing route and reject late-completion navigation. The first new navigation assertion was corrected to await actual History traversal.
+- Final keyed-card focus check: `npm run test:focused -- src/onboarding/Onboarding.test.tsx -t 'active question disappears' --maxWorkers=1`: PASS. Semantic refresh retains the exact textarea DOM node, focus and text; removal remains authoritative.
+- `node artifacts/onboarding-retry/browser.mjs`: exit 0, Chromium at 390/1440 px reproduces enabled retry supersession, stale background result rejection, zero writes, retained draft DOM and navigation locks; no captured browser diagnostics. Script/screenshots are ignored artifacts.
+- `node tools/profile-questions-smoke.mjs --url=http://127.0.0.1:5190`: exit 0, ACTIVE/DRAFT at 390/1440 px. Inline new-answer/edit/delete, three-public limit/order/clear, 160/161 boundary and unsafe input, keyboard, quiet resume, Back/Forward drafts, delayed completion and no overflow all pass. The script now waits for save completion as well as a disabled unchanged-save button. Existing scenarios retained with their new routes.
+- Screenshots of inline new answers and saved editing/selection visually inspected in `artifacts/profile-questions/`; no Android pixel-equivalence claim for this explicitly requested Web interaction change.
+- `npm run typecheck`, `npm run check:architecture`, `npm run build`: exit 0 on the final production code. Architecture remains 83 production modules / zero runtime cycles; existing >500 kB chunk advisory.
+
+Diff summary: `Onboarding.tsx` operation-priority guard only; `ProfileQuestions.tsx`
+inline forms, keyed cards and question-scoped feedback; onboarding regressions;
+existing questions Chromium smoke; this matrix. No other tracked files changed.
+No commit, push, merge, PR or deployment; HEAD remains `c59135a`.
+
+Final full validation: `npm test -- --maxWorkers=1 --reporter=json --outputFile=artifacts/profile-questions/inline-full-tests.json`: exit 0, 1670 tests passed / zero failures. This runs the entire suite on the final production/test tree, including the earlier timed-out regression and all added inline/retry cases. `git diff --check`: PASS; changed text decoded as UTF-8 and scanned for mojibake. Branch/HEAD remain unchanged; all five tracked-file changes are uncommitted.

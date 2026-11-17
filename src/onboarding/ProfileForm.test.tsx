@@ -17,11 +17,53 @@ function mount(patch: Partial<Props> = {}) {
   return { submit,retryCountries,update: (next: Partial<Props>) => { props = { ...props,...next }; view.rerender(tree()); } };
 }
 function fillRequired() {
+  fireEvent.change(screen.getByLabelText('Género'),{ target:{ value:'MALE' } });
+  fireEvent.change(screen.getByLabelText('Intención'),{ target:{ value:'DATE' } });
+  fireEvent.click(screen.getByRole('checkbox',{ name:'Mujeres' }));
   fireEvent.change(screen.getByLabelText('Nombre visible'),{ target:{ value:'Ana' } });
   fireEvent.change(screen.getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } });
   fireEvent.change(screen.getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } });
 }
 const submitForm = () => fireEvent.submit(screen.getByRole('form'));
+
+it.each(['create','filters'] as const)('focuses only missing intention in %s while interested genders stay valid', mode => {
+  const { submit } = mount(mode === 'create' ? {} : { profile:existing, mode });
+  if (mode === 'create') fillRequired();
+  const intention = screen.getByLabelText('Intención');
+  const checkboxes = screen.getAllByRole('checkbox');
+  fireEvent.change(intention,{ target:{ value:'' } });
+  submitForm();
+  expect(submit).not.toHaveBeenCalled();
+  expect(intention).toHaveFocus();
+  expect(intention).toHaveAttribute('aria-invalid','true');
+  expect(intention).toHaveAccessibleDescription('Elegí una intención válida.');
+  for (const checkbox of checkboxes) {
+    expect(checkbox).not.toHaveAttribute('aria-invalid');
+    expect(checkbox).not.toHaveAttribute('aria-describedby');
+  }
+  fireEvent.change(intention,{ target:{ value:'DATE' } });
+  submitForm();
+  expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ intention:'DATE', lookingForGenders:['FEMALE'] }),mode);
+});
+
+it.each(['create','filters'] as const)('focuses only missing interested genders in %s while intention stays valid', mode => {
+  const { submit } = mount(mode === 'create' ? {} : { profile:existing, mode });
+  if (mode === 'create') fillRequired();
+  const intention = screen.getByLabelText('Intención');
+  fireEvent.click(screen.getByRole('checkbox',{ name:'Mujeres' }));
+  submitForm();
+  expect(submit).not.toHaveBeenCalled();
+  expect(screen.getByRole('checkbox',{ name:'Hombres' })).toHaveFocus();
+  for (const checkbox of screen.getAllByRole('checkbox')) {
+    expect(checkbox).toHaveAttribute('aria-invalid','true');
+    expect(checkbox).toHaveAccessibleDescription('Elegí al menos un género válido que te interese.');
+  }
+  expect(intention).not.toHaveAttribute('aria-invalid');
+  expect(intention).not.toHaveAttribute('aria-describedby');
+  fireEvent.click(screen.getByRole('checkbox',{ name:'Mujeres' }));
+  submitForm();
+  expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ intention:'DATE', lookingForGenders:['FEMALE'] }),mode);
+});
 
 it('defaults new profiles to catalog-provided Argentina, leaves birth date empty and sorts localized country names', () => {
   const { submit } = mount();
@@ -127,4 +169,35 @@ it.each(['create','filters'] as const)('submits synchronized numeric ages throug
   fireEvent.change(to,{ target:{ value:'34' } }); fireEvent.blur(to);
   expect(screen.getByText('Edad: 33–34 años')).toBeInTheDocument(); submitForm();
   expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ preferredMinAge:33,preferredMaxAge:34 }),mode);
+});
+
+it('requires explicit sensitive choices and focuses the first invalid field without writing', () => {
+  const { submit, update } = mount();
+  expect(screen.getByLabelText('Género')).toHaveValue('');
+  expect(screen.getByLabelText('Intención')).toHaveValue('');
+  for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).not.toBeChecked();
+  submitForm();
+  expect(screen.getByLabelText('Nombre visible')).toHaveFocus();
+  expect(screen.getByLabelText('Nombre visible')).toHaveAttribute('aria-invalid','true');
+  expect(submit).not.toHaveBeenCalled();
+  fillRequired(); update({ busy:true }); submitForm(); expect(submit).not.toHaveBeenCalled();
+  update({ busy:false }); submitForm(); expect(submit).toHaveBeenCalledOnce();
+});
+
+it('places save after editable details, country before city and uses the optional bio label', () => {
+  mount({ profile: existing, mode: 'details' });
+  const country = screen.getByLabelText('País'), city = screen.getByLabelText('Ciudad'), bio = screen.getByLabelText('Bio (opcional)');
+  const save = screen.getByRole('button', { name: 'Guardar cambios' });
+  expect(country.compareDocumentPosition(city) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(bio.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: 'Guardar cambios' })).toHaveLength(1);
+});
+it('keeps sensitive choices empty after filling other fields and links the first error', () => {
+  const { submit } = mount();
+  fireEvent.change(screen.getByLabelText('Nombre visible'),{ target:{ value:'Ana' } });
+  fireEvent.change(screen.getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } });
+  fireEvent.change(screen.getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } });
+  submitForm();
+  expect(submit).not.toHaveBeenCalled(); expect(screen.getByLabelText('Género')).toHaveFocus();
+  expect(screen.getByLabelText('Género')).toHaveAccessibleDescription(/Seleccioná un género/);
 });

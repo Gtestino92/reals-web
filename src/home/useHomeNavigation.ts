@@ -153,6 +153,11 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const value: Entry = { owner: initial.owner, trail: [...current.current.trail, 'second-chat'], connectionId, matchId };
     window.history.pushState(value, '', '/'); current.current = value; setState(value); return true;
   };
+  // Authoritative bootstrap replaces History without creating an entry intent.
+  const restoreSecondChat = (connectionId: string, matchId: string) => {
+    const value: Entry = { owner: initial.owner, trail: ['home','second-chat'], connectionId, matchId };
+    window.history.replaceState(value,'','/'); current.current = value; setState(value);
+  };
   const closeSecondChat = () => {
     secondChat.current = null; moving.current = false;
     const value: Entry = { owner: initial.owner, trail: ['home'] };
@@ -164,6 +169,6 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const value:Entry={owner:initial.owner,trail:target==='home'?['home']:['home','activity']};
     window.history.replaceState(value,'','/');current.current=value;setState(value);
   };
-  return { registerVisualReview, finishVisualReview, registerSecondChat, openSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
+  return { registerVisualReview, finishVisualReview, registerSecondChat, openSecondChat, restoreSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
 }
 export type HomeNavigation = ReturnType<typeof useHomeNavigation>;
