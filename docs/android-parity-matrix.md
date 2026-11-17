@@ -1655,3 +1655,45 @@ Placement validation: `npm run test:focused -- src/onboarding/Onboarding.test.ts
 ## Cross-screen tab-return glitch
 
 See [the general resume-glitch review](resume-glitch.md) for the screen inventory, read/write invariants and prevention guidance. My Profile Preview now preserves the complete same-owner card, selected photo and focus during revalidation; Affinities now uses silent healthy resume with mutation priority. Initial loading, terminal/session protection, explicit image retries and authoritative lifecycle transitions remain separate. Android owner preview is still MISSING; `PartnerProfileCoordinator.kt` retains its published profile during refresh, a consistency reference rather than authority for browser visibility. Exact Android visual parity and physical-device resume remain unverified.
+
+
+## Public profile declared location (2026-11-17)
+
+Base: latest fetched `origin/main` at `131add3`, after My Profile Preview merge #31; clean initial tree. Work branch: `feature/public-profile-location`, no protected upstream. Android/backend remain read-only.
+
+References inspected: Android `ui/profile/OwnerProfilePreview.kt`, `OwnerProfilePreviewDialog.kt`, `ui/root/OwnerProfilePreviewHandler.kt` and its tests; `ui/chat/VisualProfileCard.kt`, `PublicProfileLocation.kt` and its tests, `PartnerProfileScreen.kt`, `VisualApprovalScreen.kt`, `ui/root/PartnerProfileCoordinator.kt`, visual DTO/domain mapping and presentation tests. Backend: [commons domain](../../reals-backend/docs/commons/domain.md), [API](../../reals-backend/docs/commons/api.md) and `VisualProfileResponse` in [OpenAPI](../../reals-backend/docs/commons/openapi.yaml). No relevant Android screenshots were found; comparison uses current source and Web Chromium captures.
+
+| Behavior audited | Before | Result / implementation |
+| --- | --- | --- |
+| Declared city and country under name/age: owner preview | MISSING | COMPLETE: confirmed FullProfile projection includes both fields; shared PublicProfileView line. Local form drafts excluded. |
+| Partner browse identity/location | MISSING | COMPLETE: existing guarded visual-profile response, shared location presentation under heading; PublicProfileView retains all browse content without duplicating the line. |
+| Initial visual review identity/location | MISSING | COMPLETE: shared line inside existing protected header before photos/decision controls, from visual-profile response. |
+| Country names / legacy and invalid data | MISSING | COMPLETE: ISO alpha-2 allowlist matches Android country scope; Intl.DisplayNames in Spanish. Unknown codes omitted, city-only/country-only allowed, empty line omitted. Malformed additive fields become null without rejecting otherwise usable profile. Browser without DisplayNames falls back to a valid ISO code. Browser ICU country wording can differ from Android Java locale data. |
+| Photos, questions, message and affinity presentation; gestures/selection | COMPLETE (existing scope) | Preserved existing components, order and callbacks; focused tests and synthetic Chromium browse/review scenarios. No new interaction, animation or keyboard target. |
+| Navigation/Back, loading, errors, disabled controls, scrolling and drafts | COMPLETE (existing scope) | Preserved existing policies; focused tests and Chromium history/draft/recovery/200% text scenarios. Location is wrapping React text with existing muted color token. |
+| Async identity, timers/polling and background/resume | COMPLETE (existing scope) | No ownership/timer/request changes; location travels in existing atomic snapshots. Existing delayed/failing resume, identity, cancellation and stale-response tests retained. Chromium checks real tab return for preview and existing review revalidation/media retention. |
+| First-chat privacy and backend visibility | COMPLETE | No first-chat location component or visual-profile request; regression injects extra city/country in chat payload and verifies no exposure. Existing backend guards remain authoritative; no coordinates/distances used. |
+| Mobile/desktop and native layout | PLATFORM-LIMITED | Chromium emulation at 390x844 and desktop 1440x900; source comparison and screenshots, not physical Android/iOS or pixel-exact native certification. Existing browser history/full-screen preview adaptation retained. |
+
+Invariant / response-installation review (presentation-only addition):
+
+| Path | Invariant |
+| --- | --- |
+| Owner initial/retry/resume | Existing four-read batch installs confirmed identity-owned profile, photos and selected public answers atomically; location copied from that same profile. No new read or local draft source. |
+| Guarded partner/review load and refresh | Parse location only from authorized visual-profile response; existing generation/context/abort fences own installation. Optional malformed fields cannot weaken validation of flags/access/deadlines. |
+| Pending decision/message, retry and overlapping requests | No new mutations, retries or captured async values. Existing models and request ordering unchanged. |
+| Background failure/resume | Existing same-owner usable content/selected media retained; no location-driven key, effect, image retry or navigation change. |
+| Identity replacement/sign-out/access denial/expiry | Location lives inside existing gated profile render; no separate cache or fallback to another identity. Existing fail-closed paths still remove/conceal the whole profile. |
+
+Validation:
+
+- `npm run test:focused -- src/profile/publicProfileLocation.test.tsx src/profile/MyProfilePreview.test.tsx src/visual/contracts.test.ts src/visual/VisualReview.test.tsx src/scheduling/Scheduling.test.tsx src/chat/FirstChat.test.tsx --maxWorkers=1`: 182/182 PASS in six files. An earlier two-worker run had one existing Scheduling test timeout under concurrent build/browser load; single-worker run passed without changing timeout thresholds. Initial implementation failures (Windows module-name resolution and new test strings) were corrected before this run.
+- After the final partner header adjustment, `npm run test:focused -- src/scheduling/Scheduling.test.tsx src/profile/MyProfilePreview.test.tsx --maxWorkers=1`: 22/22 PASS.
+- `git diff --check` and UTF-8/mojibake scan of all 18 changed/new text files: PASS.
+- `npm run typecheck`, `npm run check:architecture` (87 production modules, zero runtime cycles), `npm run build`: PASS. Existing bundle-size advisory remains.
+- `node tools/my-profile-preview-smoke.mjs`: all 48 functional assertions PASS at both sizes and ACTIVE/DRAFT, including declared location, real tab activation with delayed reads, same DOM/focus/scroll and local draft retention. Process exit 1 occurred only during Chrome temporary-profile cleanup (`EBUSY` on a spellcheck dictionary); functional results are recorded in `artifacts/profile-questions/preview-results.json`. Temporary directory may remain under system temp. This is not a clean process-exit claim.
+- `node tools/visual-review-smoke.mjs`: PASS, both sizes; initial location before any decision, media/order/message/expiry/ownership regressions. New assertion initially detected fixture writes retained from the prior viewport; fixture now resets writes per viewport, with no production behavior change.
+- `node tools/scheduling-smoke.mjs`: PASS, both sizes, including final identity/location placement, browse Back/draft retention, polling/write ownership and error recovery. Repeated only after the partner identity layout adjustment.
+- Screenshots inspected: preview ACTIVE desktop, partner mobile, initial review mobile; generated captures also include both viewport sizes. No horizontal overflow in automated checks. Captures are synthetic browser evidence, not native screenshot matching or real-account/backend validation.
+
+Diff scope: public location formatter/presentation, visual types/parser, owner projection, shared profile/partner/review placement, focused tests (including first-chat privacy), three existing smoke fixtures and this matrix. No async model, endpoint, mutation, dependency or sibling repository changes. No commit/push/PR/merge/deployment. Real backend accounts, physical devices, assistive technology and exact cross-runtime country spelling remain unverified.

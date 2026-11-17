@@ -211,3 +211,14 @@ it('keeps pending save locked and removes the draft warning after confirmed save
 it('does not let an unsaved draft block a forced access withdrawal',async()=>{
  const {controller,request}=setup(),finish=vi.fn();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}} onFinished={finish}/>);await screen.findByText('María');fireEvent.change(screen.getByLabelText('Mensaje personal'),{target:{value:'Borrador'}});request.mockRejectedValueOnce(new ApiError('authorization',403));act(()=>window.dispatchEvent(new Event('online')));await waitFor(()=>expect(finish).toHaveBeenCalledWith('unavailable'));expect(screen.queryByRole('dialog')).toBeNull();expect(screen.queryByRole('img')).toBeNull();
 });
+
+it.each([['Buenos Aires', 'AR', 'Buenos Aires, Argentina'], [42, {}, null], [undefined, undefined, null]])('shows initial authorized location %s before any visual decision', async (city, countryCode, label) => {
+  const { controller, request } = setup(), read = request.getMockImplementation()!;
+  request.mockImplementation((path, signal) => path.endsWith('/visual-profile') ? Promise.resolve(visualProfile({ city, countryCode })) : read(path, signal));
+  render(<VisualReview controller={controller} matchId="m" onBack={() => {}}/>);
+  await screen.findByRole('heading', { name: 'María' });
+  if (label) expect(screen.getByText('29 años').nextElementSibling).toHaveTextContent(label);
+  else expect(document.querySelector('.public-profile-location')).toBeNull();
+  expect(request.mock.calls.map(c => c[0])).toEqual(['/matches/m','/matches/m/visual-profile']);
+  expect(screen.getByRole('button', { name: 'Aprobar' })).toBeEnabled();
+});

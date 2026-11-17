@@ -44,3 +44,5 @@
 .placeholder-line { height:1em; width:65%; margin-bottom:16px; border-radius:8px; background:var(--color-outline-variant); }
 .placeholder-title { width:45%; height:1.6em; }
 .placeholder-photo { width:100%; aspect-ratio:4 / 5; border-radius:12px; background:var(--color-surface-variant); }
+
+.public-profile-location { margin: 0 0 .75rem; color: var(--color-on-surface-variant); overflow-wrap: anywhere; }

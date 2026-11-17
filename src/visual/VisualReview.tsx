@@ -1,3 +1,4 @@
+import { PublicProfileLocation } from '../profile/PublicProfileLocation';
 import type { HomeNavigation } from '../home/useHomeNavigation';
 import type { VisualOutcome } from './VisualSession';
 import { photoIdentity } from './photoIdentity';
@@ -67,7 +68,7 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
     <div className={`visual-content${concealed ? ' visual-concealed' : ''}`} style={{ visibility: concealed ? 'hidden' : 'visible' }} inert={concealed} aria-hidden={concealed}>
     {profile&&<>
       <article className="home-card visual-profile">
-        <header><h3>{profile.displayName}</h3><p>{profile.age} años</p></header>
+        <header><h3>{profile.displayName}</h3><p>{profile.age} años</p><PublicProfileLocation city={profile.city} countryCode={profile.countryCode}/></header>
         {!profile.photos.length&&<p role="status">No hay fotos aprobadas disponibles.</p>}
         {photo(0)}{profile.bio&&<section className="visual-insert"><h4>Bio</h4><p>{profile.bio}</p></section>}{photo(1)}
         {!!profile.affinityIndicators.length&&<section className="visual-insert"><h4>Afinidades compartidas</h4><p>Temas en los que encontraron afinidad.</p><ul className="visual-affinities">{profile.affinityIndicators.map(a=><li key={a.categoryId}>{a.title}</li>)}</ul></section>}
