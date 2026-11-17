@@ -58,7 +58,34 @@ npm run build
 
 To inspect results, open the repository's **Actions** tab, select **CI**, then open a run and its **Web validation** job to view step logs. On a pull request, open **Checks** or follow **Details** beside the check. After the first successful run, require the exact status-check name **`Web validation`** (GitHub Actions) in the branch-protection rule for `main`. Keep this job name stable so the required check continues to match.
 
-The workflow has only `contents: read` permission and needs no custom secrets or backend connection. It performs code-quality validation only; CodeQL default analysis and Dependabot remain configured separately. GitHub-hosted execution must be confirmed by the first run; local commands do not verify hosted execution.
+The workflow has only `contents: read` permission and needs no custom secrets or backend connection. It performs code-quality validation only; CodeQL and Dependabot are configured separately. GitHub-hosted execution must be confirmed by the first run; local commands do not verify hosted execution.
+
+### CodeQL analysis scope
+
+[CodeQL](../.github/workflows/codeql.yml) loads
+[the analysis configuration](../.github/codeql/codeql-config.yml), which excludes
+the root `tools/**` directory from analysis. This is an analysis exclusion, not a
+workflow trigger filter: changes under tools still run CI, and the existing full
+regression suite continues testing those helpers. JavaScript/TypeScript and
+GitHub Actions remain analyzed with the default query suite. CodeQL runs for PRs
+targeting `main`, pushes to `main`, weekly, and manually.
+
+Activation: the repository currently uses CodeQL **default setup** (verified
+read-only while preparing this change). A standalone configuration file does
+not customize default setup for this personal-account repository. When adopting
+the checked-in workflow, switch the repository's CodeQL configuration to
+**advanced setup** under Settings -> Advanced Security -> Code scanning ->
+CodeQL analysis, using this workflow rather than creating a second one. The
+workflow/configuration must be present on the analyzed branch. Until that switch,
+default setup remains authoritative and the exclusion is not active. See
+[GitHub's setup instructions](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/configure-code-scanning/configuring-advanced-setup-for-code-scanning)
+and [configuration reference](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options#specifying-directories-to-scan).
+
+No repository settings are changed by these files. Hosted CodeQL execution and
+actual file coverage must be verified on the first advanced-setup run; local
+tests/build do not run CodeQL.
+
+Local validation (2026-11-16): YAML parsing and configuration-path/language/permission checks passed; referenced action major tags verified upstream. `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/codeql-config/full-tests.json`: 1670 passed, zero failures. `npm run build` (including typecheck), `npm run check:architecture` and `git diff --check`: PASS; existing bundle-size advisory remains. Source code, dependencies and `.github/workflows/ci.yml` are unchanged. No hosted CodeQL run or repository setting change was performed.
 
 Session tests mock Firebase through a typed service and HTTP through injected fetch. Separate adapter tests mock the modular SDK. They cover missing config, sign-in/signup/Google outcomes, verification send/retry, restoration and StrictMode, identity replacement, external sign-out, stale responses, reset validation/202/failure/cooldown, provisioning restrictions, profile detection/validation, token refresh limits, malformed/network responses and restricted/terminal accounts. No backend, real credentials or phone is needed. Existing login tests retain fake-clock coverage of cooldown expiry and background resume.
 
