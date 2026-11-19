@@ -1,6 +1,6 @@
 # Reals Web
 
-React + TypeScript POC for a future Reals Progressive Web App. Stage A implements the Android-referenced login interface with sign-in/sign-up modes, recovery, Google action, pending states and errors. Authentication actions currently report that integration is unavailable; Firebase Authentication and PWA install/offline behavior are not implemented.
+React + TypeScript Web client for Reals with Firebase Authentication and a Spring Boot API.
 
 Requires Node.js 24.15+ in the 24.x line and npm (lockfile committed for reproducibility).
 
@@ -9,7 +9,7 @@ npm ci
 npm run dev
 ```
 
-Open <http://localhost:5173>. The development server proxies `/api` to `http://localhost:8080` without rewriting the path. The entry point makes no API calls and works without a running backend.
+Open <http://localhost:5173>. The local Vite server proxies `/api` to `http://localhost:8080` without rewriting the path. Copy `.env.example` to `.env.local` and configure the local Firebase Web app for authentication.
 
 `npm run dev` first attempts an ADB reverse tunnel for port 5173 on every authorized Android device, then starts Vite even if ADB setup fails. This uses Node.js and works in IntelliJ IDEA's PowerShell or CMD terminal on Windows. On Android Chrome, open <http://127.0.0.1:5173/>: ADB reverse connects Android localhost to Windows localhost, with Vite still forwarding `/api` to the local backend on port 8080. No LAN exposure is required.
 
@@ -21,9 +21,9 @@ Wireless ADB needs an existing authorized connection. After disconnecting, recon
 | `npm run typecheck` | Strict TypeScript checking, including tests and configuration |
 | `npm test -- src/auth/LoginScreen.test.tsx src/App.test.tsx` | Focused login and entry point tests |
 | `npm run test:watch` | Interactive Vitest runner |
-| `npm run build` | Type-check and create `dist/` |
-| `npm run preview` | Preview the production bundle locally (no API proxy) |
+| `npm run build` | Type-check, validate explicit Reals `dev` or `prod` settings and create `dist/` |
+| `npm run preview` | Preview `dist/` locally using the settings compiled into the bundle |
 
 Sibling repositories are references: [`../reals-app`](../reals-app) owns the Android implementation and [`../reals-backend`](../reals-backend) owns the Spring Boot API, PostgreSQL persistence and domain lifecycle. This task changes only `reals-web`.
 
-See the [documentation index](docs/README.md), [local integration](docs/local-development.md) and [effort log template](docs/poc-log.md). Coding-agent instructions live in [AGENTS.md](AGENTS.md).
+See the [documentation index](docs/README.md), [local integration](docs/local-development.md), [deployment configuration](docs/deployment.md) and [effort log template](docs/poc-log.md). Coding-agent instructions live in [AGENTS.md](AGENTS.md).

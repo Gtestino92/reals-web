@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { initializeApp } from 'firebase/app';
+import { ReCaptchaEnterpriseProvider, ReCaptchaV3Provider } from 'firebase/app-check';
 const sdk = vi.hoisted(() => ({ initializeAppCheck: vi.fn(() => ({})), getToken: vi.fn() }));
 vi.mock('firebase/app-check', () => ({ ...sdk, ReCaptchaEnterpriseProvider: class { constructor(public key: string) {} }, ReCaptchaV3Provider: class { constructor(public key: string) {} } }));
 import { appCheckTokens, localAppCheckDebugEnabled } from './appCheck';
@@ -28,12 +29,31 @@ it.each(['localhost', '127.0.0.1'])('enables official debug mode before SDK init
   expect(self.FIREBASE_APPCHECK_DEBUG_TOKEN).toBe(true);
 });
 it.each([
-  [false, true, 'localhost'], [true, false, 'example.com'], [true, false, '192.168.1.5'],
-])('never enables debug for disallowed runtime DEV=%s PROD=%s host=%s', async (DEV, PROD, hostname) => {
-  vi.stubGlobal('self', { location: { hostname } });
+  ['dev', false, true, 'localhost'], ['prod', false, true, 'localhost'],
+  ['dev', true, false, 'localhost'], ['prod', true, false, '127.0.0.1'],
+  ['local', false, true, 'localhost'], ['local', true, false, 'example.com'],
+  ['local', true, false, '192.168.1.5'],
+])('uses Enterprise with debug disabled for %s (DEV=%s PROD=%s host=%s)', async (VITE_REALS_ENVIRONMENT, DEV, PROD, hostname) => {
+  vi.stubGlobal('self', { location: { hostname }, FIREBASE_APPCHECK_DEBUG_TOKEN: 'synthetic-debug' });
   sdk.getToken.mockResolvedValue({ token: 'synthetic-attestation' });
-  await appCheckTokens(app(), { ...env, DEV, PROD, VITE_FIREBASE_APP_CHECK_DEBUG: 'true' })();
-  expect(self.FIREBASE_APPCHECK_DEBUG_TOKEN).toBeUndefined();
+  sdk.initializeAppCheck.mockImplementationOnce(() => { expect(self.FIREBASE_APPCHECK_DEBUG_TOKEN).toBe(false); return {}; });
+  await appCheckTokens(app(), { ...env, DEV, PROD, VITE_REALS_ENVIRONMENT, VITE_FIREBASE_APP_CHECK_DEBUG: 'true' })();
+  expect(sdk.initializeAppCheck).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({
+    provider: expect.any(ReCaptchaEnterpriseProvider),
+  }));
+});
+it.each(['dev', 'prod'])('rejects v3 under %s even on the Vite server', async VITE_REALS_ENVIRONMENT => {
+  await expect(appCheckTokens(app(), { ...env, DEV: true, PROD: false, VITE_REALS_ENVIRONMENT, VITE_FIREBASE_APP_CHECK_PROVIDER: 'v3' })())
+    .rejects.toMatchObject({ code: 'APP_CHECK_NOT_CONFIGURED' });
+  expect(sdk.initializeAppCheck).not.toHaveBeenCalled();
+});
+it('retains local v3 support', async () => {
+  sdk.getToken.mockResolvedValue({ token: 'synthetic-attestation' });
+  await expect(appCheckTokens(app(), { ...env, DEV: true, PROD: false, VITE_REALS_ENVIRONMENT: 'local', VITE_FIREBASE_APP_CHECK_PROVIDER: 'v3' })())
+    .resolves.toBe('synthetic-attestation');
+  expect(sdk.initializeAppCheck).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({
+    provider: expect.any(ReCaptchaV3Provider),
+  }));
 });
 it('initializes once per app and obtains valid tokens through the SDK', async () => {
   const a = app(); sdk.getToken.mockResolvedValue({ token: 'synthetic-attestation' });

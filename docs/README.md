@@ -2,6 +2,7 @@
 
 - [Architecture](architecture.md): current structure, ownership and deliberate limits.
 - [Local development](local-development.md): Vite, proxy and existing Docker services.
+- [Deployment configuration](deployment.md): Reals environments, Cloudflare Pages and remote backend integration.
 - [Testing](testing.md): automated checks and manual smoke verification.
 - [Browser identity](browser-identity.md): favicon/app icons, source artwork, reproduction and manifest verification limits.
 - [Home D1](home-review.md): overview, queue lifecycle, refresh invariants and integration limitations.

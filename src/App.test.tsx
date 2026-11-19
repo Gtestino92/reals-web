@@ -88,10 +88,12 @@ it('missing configuration is actionable and never starts auth', () => {
   expect(screen.getByRole('alert')).toHaveTextContent('.env.local'); expect(auth.observe).not.toHaveBeenCalled();
 });
 it('local flag requires dev, opt in and loopback', () => {
-  expect(localVerificationEnabled(true, 'true', '127.0.0.1')).toBe(true);
-  expect(localVerificationEnabled(false, 'true', '127.0.0.1')).toBe(false);
-  expect(localVerificationEnabled(true, 'true', 'example.com')).toBe(false);
-  expect(localVerificationEnabled(true, undefined, 'localhost')).toBe(false);
+  const env = { DEV: true, PROD: false, MODE: 'test', BASE_URL: '/', SSR: false };
+  const optedIn = { ...env, VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION: 'true' };
+  expect(localVerificationEnabled(optedIn, '127.0.0.1')).toBe(true);
+  expect(localVerificationEnabled({ ...optedIn, DEV: false, PROD: true }, '127.0.0.1')).toBe(false);
+  expect(localVerificationEnabled(optedIn, 'example.com')).toBe(false);
+  expect(localVerificationEnabled(env, 'localhost')).toBe(false);
 });
 it('validates empty credentials without invoking Firebase', () => {
   mount(); login(); fireEvent.click(screen.getByRole('button', { name: 'Ingresar' }));

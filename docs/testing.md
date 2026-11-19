@@ -58,7 +58,7 @@ npm run build
 
 To inspect results, open the repository's **Actions** tab, select **CI**, then open a run and its **Web validation** job to view step logs. On a pull request, open **Checks** or follow **Details** beside the check. After the first successful run, require the exact status-check name **`Web validation`** (GitHub Actions) in the branch-protection rule for `main`. Keep this job name stable so the required check continues to match.
 
-The workflow has only `contents: read` permission and needs no custom secrets or backend connection. It performs code-quality validation only; CodeQL and Dependabot are configured separately. GitHub-hosted execution must be confirmed by the first run; local commands do not verify hosted execution.
+The workflow has only `contents: read` permission and needs no custom secrets or backend connection. Its Build step supplies the [synthetic configuration in CI](../.github/workflows/ci.yml) to exercise the same Reals `dev` validation as Pages. For local build checks, use those fixture settings or a valid remote configuration and set both local-only flags to `false` if enabled in `.env.local`. See [deployment settings](deployment.md). GitHub-hosted execution must be confirmed by the first run.
 
 ### CodeQL analysis scope
 

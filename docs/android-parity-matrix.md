@@ -1,5 +1,21 @@
 # Android-first migration and First Chat parity
 
+## Web environment configuration
+
+Audited Android's [flavor and dependency isolation](../../reals-app/app/build.gradle.kts), [App Check installers by source set](../../reals-app/docs/local-development.md#firebase-app-check), and the [backend API contract](../../reals-backend/docs/commons/api.md). This change concerns build configuration and request destinations. Existing visual, navigation, accessibility, lifecycle and session parity is tracked in the relevant product sections below.
+
+| Behavior | Before → after | Web evidence and remaining differences |
+| --- | --- | --- |
+| Explicit environment, backend and Firebase selection | MISSING → COMPLETE for configuration and routing | [Environment resolver](../src/config/environment.ts), [Vite build validation](../vite.config.ts) and [ApiClient](../src/auth/api.ts). Focused tests cover local proxy paths, normalized remote URLs, missing settings and invalid combinations. Synthetic `dev` and `prod` builds pass. Real Railway HTTPS and CORS remain unverified. |
+| Attestation in remote environments | PARTIAL → COMPLETE for provider selection, PLATFORM-LIMITED for Android's Play Integrity | Android remote release flavors use Play Integrity and remote debug flavors use the Android SDK debug provider. [Web App Check](../src/auth/appCheck.ts) uses Enterprise in both remote environments regardless of Vite mode. SDK mocks verify provider selection and debug suppression. Live Enterprise attestation and backend acceptance remain unverified. |
+| Local development and local verification | COMPLETE → COMPLETE for Web policy | Android disables App Check in its local flavor. Web retains its opt-in loopback SDK debug provider and locally gated email verification. Focused ADB and Firebase persistence tests passed. Desktop Chromium sent a real request through Vite to a loopback HTTP fixture. The compiled development bundle rendered the login form at desktop and mobile widths with external requests blocked. Physical ADB and real Firebase verification remain unverified. |
+
+| Path | Invariant |
+| --- | --- |
+| Build and app initialization | An invalid environment or destination fails before normal API use. Remote flags cannot enable local verification or debug. Firebase projects and host registrations remain deployment inputs. |
+| Client creation, cloning and retry | The client captures a single destination. Ownership and App Check clones preserve it. Every attempt uses the same origin and existing authorization, abort, cache and error rules. |
+| Response, sign-out and resume | Destination selection adds no asynchronous work, timers or mutable session state. Existing response installation, tab ownership, session identity and cancellation paths continue to apply. |
+
 ## Browser URL validation hardening — 2026-11-12
 
 Scoped audit against main `531f277`: Android `src/prod/res/xml/network_security_config.xml` forbids cleartext; local permits localhost, 127.0.0.1 and emulator 10.0.2.2. Inspected `ProfilePhotoImageRequests.kt` and `ProfilePhotoUrlHelpersTest.kt` (signed URLs remain unchanged), `LegalMappers.kt` / `LegalMappersTest.kt` / `LegalRequirementsScreen.kt` (backend URL passed to external URI handler), and `ChatAudioPlaybackController.kt` (URL passed to playback). Backend commons API photo/audio contracts require fresh read URLs and no client persistence. No Android or backend changes.
