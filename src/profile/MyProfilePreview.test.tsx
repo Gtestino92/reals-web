@@ -96,3 +96,14 @@ it('retains the complete snapshot on failed background reads and recovers withou
   fireEvent.click(screen.getByRole('button', { name:'Reintentar' }));
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull()); expect(content).toBeVisible();
 });
+
+it.each([['Buenos Aires', 'AR', 'Buenos Aires, Argentina'], ['', '', null]])('shows only confirmed owner location %s without extra reads', async (city, countryCode, label) => {
+  const { controller, request } = setup(), read = request.getMockImplementation()!;
+  request.mockImplementation((path, signal) => path === '/me/profile' ? Promise.resolve({ ...profile, city, countryCode }) : read(path, signal));
+  render(<MyProfilePreview controller={controller} onBack={() => {}}/>);
+  await screen.findByText('No hay fotos aprobadas disponibles.');
+  const heading = screen.getByRole('heading', { name: /Confirmed,/ });
+  if (label) expect(heading.nextElementSibling).toHaveTextContent(label);
+  else expect(document.querySelector('.public-profile-location')).toBeNull();
+  expect(request.mock.calls.map(c => c[0])).toEqual(['/me/profile','/me/profile/photos','/reference/profile-questions','/me/profile/question-answers']);
+});

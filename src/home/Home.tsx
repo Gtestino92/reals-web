@@ -147,7 +147,7 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
   if (managementActive) retainedManagement.current = profileActive ? 'details' : 'filters';
   useLayoutEffect(() => { onManagementActiveChange?.(!!surface); return () => onManagementActiveChange?.(false); }, [surface, onManagementActiveChange]);
   const homePosition = useRef(0);
-  const open = (next: ManagementSurface) => { homePosition.current = window.scrollY; retireNotice(); navigation.open(next); if (next === 'affinities') void affinities.refresh(); };
+  const open = (next: ManagementSurface) => { homePosition.current = window.scrollY; retireNotice(); navigation.open(next); if (next === 'affinities') void affinities.refresh(true); };
   const returnHome = () => navigation.backTo('home');
   const focusSurface = profileActive ? 'profile' : surface;
   const previousFocusSurface = useRef(focusSurface);

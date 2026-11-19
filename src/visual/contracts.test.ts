@@ -13,3 +13,13 @@ it('filters blank sections, deduplicates positive indicators and caps at three; 
 it.each([null,{},visualProfile({age:'29'}),visualProfile({photos:null}),visualProfile({visualExpiresAt:'invalid'}),visualProfile({profileQuestions:{}})])('rejects malformed profiles',v=>expect(()=>parseVisualProfile(v)).toThrow());
 
 it.each(['myPersonalMessageSubmitted','partnerPersonalMessageSubmitted','partnerPersonalMessageRead','decisionRequiresPartnerPersonalMessageRead'])('fails closed for missing or malformed %s',key=>{expect(()=>parseVisualProfile(visualProfile({[key]:undefined}))).toThrow();expect(()=>parseVisualProfile(visualProfile({[key]:'true'}))).toThrow();});
+
+it.each([undefined, null, '', '  ', 42, {}, []])('tolerates missing or malformed additive location fields %j', value => {
+  const p = parseVisualProfile(visualProfile({ city: value, countryCode: value }));
+  expect(p.city).toBeNull(); expect(p.countryCode).toBeNull(); expect(p.photos).toHaveLength(4);
+});
+it('preserves declared location without reading private location fields', () => {
+  const p = parseVisualProfile(visualProfile({ city: ' Buenos Aires ', countryCode: ' ar ', latitude: 1, longitude: 2, distanceKm: 3 }));
+  expect(p.city).toBe('Buenos Aires'); expect(p.countryCode).toBe('ar');
+  expect(p).not.toHaveProperty('latitude'); expect(p).not.toHaveProperty('longitude'); expect(p).not.toHaveProperty('distanceKm');
+});

@@ -676,3 +676,18 @@ it.each([[false,true],[true,true],[false,false],[true,false]])('keeps Scheduling
  home.nextSteps=[{type:'SCHEDULING',connectionId:'connection',matchId:'m',requiresAction:!ownSubmitted,createdAt:new Date(Date.now()-60000).toISOString(),schedulingExpiresAt:new Date(Date.now()+60000).toISOString()}];
  mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));expect(screen.getByRole('button',{name:ownSubmitted?'Ver coordinación':'Elegir horarios'})).toBeEnabled();expect(screen.queryByText('Esperando respuesta.')).not.toBeInTheDocument();expect(fetcher.mock.calls.some(([path])=>String(path).includes('/proposals'))).toBe(false);
 });
+
+it('opens loaded affinities silently and keeps content on delayed failure', async () => {
+  mount(); await ready(); await waitFor(() => expect(screen.queryByText('Cargando afinidades…')).toBeNull());
+  const base = fetcher.getMockImplementation()!; let finish!: (value: Response) => void;
+  fetcher.mockImplementation((url, options) => url === '/api/reference/affinity-questions' ? new Promise(resolve => { finish = resolve; }) : base(url, options));
+  fireEvent.click(screen.getByRole('button', { name: 'Afinidades' }));
+  await screen.findByRole('heading', { name: 'Preguntas de afinidad' });
+  expect(screen.queryByText('Actualizando afinidades…')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Reintentar consulta' })).toBeNull();
+  const content = screen.getByText('No hay preguntas disponibles por ahora.');
+  expect(document.querySelector('.affinities')).toHaveAttribute('aria-busy', 'false');
+  await act(async () => finish(new Response('{}', { status: 503 })));
+  await screen.findByRole('alert'); expect(content).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Reintentar consulta' })).toBeEnabled();
+});

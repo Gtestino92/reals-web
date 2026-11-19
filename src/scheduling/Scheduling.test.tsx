@@ -47,3 +47,33 @@ it('keeps picker, submit, profile and block responsive during a slow background 
  expect(screen.queryByText(/Actualizando/)).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Más acciones'}));fireEvent.click(screen.getByRole('menuitem'));expect(screen.getByRole('button',{name:'Bloquear definitivamente'})).toBeEnabled();
  await act(async()=>resolve(await read('/connections/c',new AbortController().signal)));
 });
+
+it.each([['Buenos Aires', 'AR', 'Buenos Aires, Argentina'], [null, 'XX', null]])('shows guarded partner location %s through the shared profile', async (city, countryCode, label) => {
+  const f = setup(), read = f.request.getMockImplementation()!;
+  f.request.mockImplementation(async (path, ...args) => path.endsWith('/visual-profile') ? visualProfile({ city, countryCode }) : read(path, ...args));
+  const v = view(f); await screen.findByRole('heading', { name:'Proponé tus horarios' });
+  v.rerender(<Scheduling {...v.props} browse/>);
+  const heading = await screen.findByRole('heading', { name:'María, 29' });
+  if (label) expect(heading.nextElementSibling).toHaveTextContent(label);
+  else expect(document.querySelector('.public-profile-location')).toBeNull();
+  expect(f.request.mock.calls.filter(c => c[0].endsWith('/visual-profile'))).toHaveLength(1);
+  expect(f.request.mock.calls.some(c => c[0].includes('/reference/countries'))).toBe(false);
+  expect(f.request.mock.calls.some(c => c[2] && c[2] !== 'GET')).toBe(false);
+});
+
+it('keeps partner identity and actions stable while the initial profile is delayed', async () => {
+  const f = setup(), read = f.request.getMockImplementation()!; let finish!: (value: unknown) => void;
+  f.request.mockImplementation((path, ...args) => path.endsWith('/visual-profile') ? new Promise(resolve => { finish = resolve; }) : read(path, ...args));
+  const v = view(f); await screen.findByRole('heading', { name: 'Proponé tus horarios' });
+  v.rerender(<Scheduling {...v.props} browse/>);
+  const heading = screen.getByRole('heading', { name: 'María' });
+  const back = screen.getByRole('button', { name: 'Volver' });
+  expect(back.parentElement).toHaveClass('partner-profile-actions');
+  expect(heading.closest('header')).toHaveClass('partner-profile-heading');
+  expect(document.querySelector('.profile-placeholder')).toBeNull();
+  expect(screen.getByRole('status')).toHaveTextContent('Cargando perfil…');
+  await act(async () => finish(visualProfile({ city: 'Rosario', countryCode: 'AR' })));
+  expect(screen.getByRole('heading', { name: 'María, 29' })).toBe(heading);
+  expect(screen.getByRole('button', { name: 'Volver' })).toBe(back);
+  expect(document.querySelector('.partner-profile-loading')).toBeNull();
+});

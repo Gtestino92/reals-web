@@ -35,7 +35,7 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onBack,o
   const error=<>{s.error&&<p role="alert" className="home-error">{s.error}</p>}</>;
   const blockMenu=<div className="chat-overflow" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))setMenu(false);}} onKeyDown={e=>{if(e.key==='Escape'){setMenu(false);menuButton.current?.focus();}}}><button ref={menuButton} className="login-button login-outlined" aria-label="Más acciones" aria-haspopup="menu" aria-expanded={menu} disabled={s.busy||s.terminal} onClick={()=>setMenu(v=>!v)} onKeyDown={e=>{if(e.key==='ArrowDown'){e.preventDefault();setMenu(true);}}}>⋮</button>{menu&&<div className="chat-menu" role="menu"><button ref={menuItem} role="menuitem" onClick={()=>{setMenu(false);setDialog(true);}}>Bloquear a esta persona</button></div>}</div>;
   return <section className="scheduling" aria-busy={s.busy&&!s.connection}>
-    {browse?<PartnerProfile controller={controller} matchId={matchId} onBack={onCloseBrowse} disabled={s.pending} menu={blockMenu}/>:<>
+    {browse?<PartnerProfile partnerName={partnerName} controller={controller} matchId={matchId} onBack={onCloseBrowse} disabled={s.pending} menu={blockMenu}/>:<>
       <header className="home-heading"><h2>Coordinar horarios</h2><button className="login-button login-outlined" disabled={s.pending} onClick={onBack}>Volver a Actividad</button>{blockMenu}</header>
       <div className="scheduling-meta"><p>{partnerName?`Con ${partnerName}`:'Con la otra persona'}</p>
       {s.negotiation&&<p>Ronda {s.negotiation.roundNumber}{s.busy?' · Actualizando…':''}</p>}

@@ -330,3 +330,15 @@ it('retains an audio draft during partner approval and explicitly discards it wi
     fireEvent.click(screen.getByRole('button',{name:'Descartar borrador de audio'}));await waitFor(()=>expect(screen.getByRole('button',{name:'Aprobar'})).toBeEnabled());expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:synthetic-draft');expect(vi.mocked(controller.request).mock.calls.some(c=>c[0].endsWith('/audio-messages'))).toBe(false);
   } finally {read.mockRestore();Reflect.deleteProperty(navigator,'mediaDevices');}
 });
+
+it('never fetches or presents public location in first chat', async () => {
+  const read = vi.mocked(controller.request).getMockImplementation()!;
+  vi.mocked(controller.request).mockImplementation(async (...args) => {
+    const result = await read(...args);
+    return args[0] === '/matches/m/chat' ? { ...chat, city: 'Buenos Aires', countryCode: 'AR' } : result;
+  });
+  mount(); await ready();
+  expect(screen.queryByText(/Buenos Aires|Argentina/)).toBeNull();
+  expect(document.querySelector('.public-profile-location')).toBeNull();
+  expect(vi.mocked(controller.request).mock.calls.some(c => c[0].includes('/visual-profile') || c[0].includes('/reference/countries'))).toBe(false);
+});

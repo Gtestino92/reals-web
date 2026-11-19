@@ -1,3 +1,4 @@
+import { locationText } from '../profile/formatPublicLocation';
 import { ApiError, object } from '../auth/api';
 import { browserUrl } from '../shared/browserUrl';
 
@@ -5,7 +6,7 @@ const text = (v: unknown): v is string => typeof v === 'string' && v.trim().leng
 const position = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
 export interface VisualProfile {
   myPersonalMessageSubmitted: boolean; partnerPersonalMessageSubmitted: boolean; partnerPersonalMessageRead: boolean; decisionRequiresPartnerPersonalMessageRead: boolean;
-  profileId: string; displayName: string; age: number; bio: string | null; visualExpiresAt: string | null;
+  profileId: string; displayName: string; age: number; city: string | null; countryCode: string | null; bio: string | null; visualExpiresAt: string | null;
   photos: { id: string; url: string; position: number }[];
   affinityIndicators: { categoryId: string; title: string }[];
   profileQuestions: { questionId: string; prompt: string; answer: string; position: number }[];
@@ -31,5 +32,5 @@ export function parseVisualProfile(v: unknown): VisualProfile {
     if (object(row) && text(row.questionId) && text(row.prompt) && text(row.answer) && position(row.position)) profileQuestions.push({ questionId: row.questionId, prompt: row.prompt, answer: row.answer, position: row.position });
   }
   return { myPersonalMessageSubmitted: v.myPersonalMessageSubmitted === true, partnerPersonalMessageSubmitted: v.partnerPersonalMessageSubmitted === true, partnerPersonalMessageRead: v.partnerPersonalMessageRead === true, decisionRequiresPartnerPersonalMessageRead: v.decisionRequiresPartnerPersonalMessageRead === true, profileId: v.profileId, displayName: v.displayName, age: v.age, bio: v.bio?.trim() ? v.bio : null,
-    visualExpiresAt: v.visualExpiresAt ?? null, photos: photos.sort((a,b) => a.position-b.position), affinityIndicators, profileQuestions: profileQuestions.sort((a,b) => a.position-b.position) };
+    city: locationText(v.city), countryCode: locationText(v.countryCode), visualExpiresAt: v.visualExpiresAt ?? null, photos: photos.sort((a,b) => a.position-b.position), affinityIndicators, profileQuestions: profileQuestions.sort((a,b) => a.position-b.position) };
 }

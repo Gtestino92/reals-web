@@ -76,6 +76,7 @@ try {
     await change('.profile-form textarea','Local draft');
     await click('Vista previa de mi perfil'); await wait(visible('Respuesta B'),'public answer');
     check(await evaluate(visible('Bio guardada')), 'confirmed bio '+status+' '+width);
+    check(await evaluate(visible('Córdoba, Argentina')), 'confirmed location '+status+' '+width);
     check(!await evaluate(visible('Local draft')), 'draft excluded');
     check(await evaluate("document.activeElement.textContent==='Vista previa de mi perfil'"),'preview focus');
     check(await evaluate('document.documentElement.scrollWidth<=innerWidth'),'no overflow');

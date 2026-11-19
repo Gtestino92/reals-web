@@ -12,7 +12,7 @@ export function previewProfile(profile: FullProfile, images: Photo[], catalog: Q
   const age = now.getFullYear() - birth.getUTCFullYear() - (now.getMonth() < birth.getUTCMonth() || (now.getMonth() === birth.getUTCMonth() && now.getDate() < birth.getUTCDate()) ? 1 : 0);
   if (!Number.isInteger(age) || age < 18) throw new ApiError('invalid');
   return {
-    displayName: profile.displayName, age, bio: profile.bio,
+    displayName: profile.displayName, age, city: profile.city, countryCode: profile.countryCode, bio: profile.bio,
     photos: images.filter(p => p.moderationStatus === 'APPROVED').sort((a,b) => a.position - b.position).map(({ id, url, position }) => ({ id, url, position })),
     profileQuestions: questionRows(catalog, answers).flatMap(row => row.selectable && row.selectedPosition !== null && row.answer ? [{ questionId: row.question.id, prompt: row.question.prompt, answer: row.answer.answer, position: row.selectedPosition }] : []).sort((a,b) => a.position - b.position).slice(0,3),
     affinityIndicators: [],

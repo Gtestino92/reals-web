@@ -27,6 +27,7 @@ export function AffinityQuestionnaire({ model, navigation }: { model: AffinityMo
   const saved = q ? validAnswer(q, answers)?.answerCode : undefined;
   const selected = draft?.identity === model.identity && draft.questionId === q?.id && draft.semanticVersion === q.semanticVersion && q.options.some(o => o.code === draft.code) ? draft.code : saved;
   const blocked = busy || uncertain;
+  const loading = busy || (!catalog && !error);
   const openQuestion = (questionId: string, source: QuestionContext['source'], categoryId = '', reviewAll = false) => {
     setDraft(null); navigation.open('affinity-question', { questionId, source, categoryId, reviewAll });
   };
@@ -49,12 +50,12 @@ export function AffinityQuestionnaire({ model, navigation }: { model: AffinityMo
     }
   };
   const title = destination === 'affinity-categories' ? 'Explorar por categoría' : destination === 'affinity-review' ? 'Mis respuestas' : q && destination === 'affinity-question' ? catalog?.categories.find(c => c.id === q.categoryId)?.title ?? 'Preguntas de afinidad' : 'Preguntas de afinidad';
-  return <section className="affinities" aria-busy={busy}>
+  return <section className="affinities" aria-busy={loading}>
     <header className="home-heading"><h2 ref={heading} tabIndex={-1}>{title}</h2><button className="login-button login-outlined" onClick={() => navigation.backTo(destination === 'affinities' ? 'home' : destination === 'affinity-question' ? parent : 'affinities')}>{destination === 'affinities' ? 'Volver a Inicio' : 'Volver'}</button></header>
-    {busy && <p className={catalog ? "home-loading-status" : undefined} role="status">{catalog ? 'Actualizando afinidades…' : 'Cargando preguntas…'}</p>}
-    {busy && !catalog && <div className="home-placeholder" aria-hidden="true"><div className="home-card home-placeholder-search"><span/><span/><span/></div></div>}
+    {loading && <p className={catalog ? "home-loading-status" : undefined} role="status">{catalog ? 'Actualizando afinidades…' : 'Cargando preguntas…'}</p>}
+    {loading && !catalog && <div className="home-placeholder" aria-hidden="true"><div className="home-card home-placeholder-search"><span/><span/><span/></div></div>}
     {error && <p role="alert" className="home-error">{error}</p>}
-    {(error || uncertain) && <button className="login-button login-outlined" disabled={busy} onClick={() => void model.refresh()}>Reintentar consulta</button>}
+    {(error || (uncertain && !busy)) && <button className="login-button login-outlined" disabled={busy} onClick={() => void model.refresh()}>Reintentar consulta</button>}
     {p && <>
       <p>{p.answered} de {p.total} respondidas</p>
       <progress aria-label="Progreso de afinidades" value={p.answered} max={p.total || 1}/>
