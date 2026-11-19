@@ -1,4 +1,5 @@
 import { appCheckTokens } from './appCheck';
+import { isLocalVite, missingFirebaseSettings, resolveEnvironment } from '../config/environment';
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { getApps, initializeApp } from 'firebase/app';
 import { browserLocalPersistence, browserSessionPersistence, setPersistence, browserPopupRedirectResolver, createUserWithEmailAndPassword, GoogleAuthProvider, initializeAuth, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut, EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup, getIdTokenResult, updatePassword } from 'firebase/auth';
@@ -19,12 +20,13 @@ export interface AuthService {
   signOut: () => Promise<void>;
 }
 export type FirebaseSetup = { service: AuthService; localVerification: boolean } | { error: string };
-export function localVerificationEnabled(dev: boolean, flag: unknown, hostname: string) {
-  return dev && flag === 'true' && ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+export function localVerificationEnabled(env: ImportMetaEnv, hostname: string) {
+  return isLocalVite(env) && env.VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION === 'true' && ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
 }
 export function configureFirebase(env: ImportMetaEnv = import.meta.env, ownership?: TabOwnershipManager): FirebaseSetup {
-  const keys = ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID', 'VITE_FIREBASE_APP_ID'] as const;
-  if (keys.some(key => typeof env[key] !== 'string' || !env[key].trim() || env[key].includes('YOUR_'))) {
+  try { resolveEnvironment(env); }
+  catch (error) { return { error: error instanceof Error ? error.message : 'Configuración de entorno no válida.' }; }
+  if (missingFirebaseSettings(env).length) {
     return { error: 'Firebase no está configurado. Completá .env.local con la configuración Web del proyecto local y reiniciá Vite. Consultá docs/local-development.md.' };
   }
   try {
@@ -60,7 +62,7 @@ export function configureFirebase(env: ImportMetaEnv = import.meta.env, ownershi
       }
     };
     return {
-      localVerification: localVerificationEnabled(env.DEV, env.VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION, window.location.hostname),
+      localVerification: localVerificationEnabled(env, window.location.hostname),
       service: {
         appCheckToken: appCheckTokens(app, env),
         googleContext: async identity => {

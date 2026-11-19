@@ -10,13 +10,29 @@ const sdk = vi.hoisted(() => ({
 }));
 vi.mock('firebase/app', () => ({ getApps: () => [], initializeApp: sdk.initializeApp }));
 vi.mock('firebase/auth', () => ({ ...sdk, browserLocalPersistence: 'local', browserSessionPersistence: 'session', browserPopupRedirectResolver: 'popup', GoogleAuthProvider: class {} }));
-import { configureFirebase } from './firebase';
+import { configureFirebase, localVerificationEnabled } from './firebase';
 const env = { DEV: true, MODE: 'test', PROD: false, BASE_URL: '/', SSR: false, VITE_FIREBASE_API_KEY: 'fake-key', VITE_FIREBASE_AUTH_DOMAIN: 'fake.firebaseapp.com', VITE_FIREBASE_PROJECT_ID: 'fake', VITE_FIREBASE_APP_ID: 'fake-app' };
 const user: Identity = { uid: 'f', emailVerified: false, getIdToken: vi.fn(), reload: vi.fn() };
 let observer: (user: Identity | null) => void;
 const next = vi.fn();
 const failure = vi.fn();
 const unsubscribe = vi.fn();
+it.each(['dev', 'prod'])('disallows local verification in %s even on a loopback Vite server', VITE_REALS_ENVIRONMENT => {
+  const optedIn = {
+    ...env, VITE_REALS_ENVIRONMENT, VITE_API_BASE_URL: 'https://reals-web.pages.dev',
+    VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION: 'true',
+  };
+  expect(localVerificationEnabled(optedIn, 'localhost')).toBe(false);
+  expect(configureFirebase({ ...optedIn, DEV: false, PROD: true })).toEqual({
+    error: expect.stringContaining('VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION'),
+  });
+  expect(sdk.initializeAuth).not.toHaveBeenCalled();
+});
+it('fails before Firebase initialization when remote routing is missing or unsafe', () => {
+  expect(configureFirebase({ ...env, DEV: false, PROD: true, VITE_REALS_ENVIRONMENT: 'dev' }))
+    .toEqual({ error: expect.stringContaining('VITE_API_BASE_URL') });
+  expect(sdk.initializeApp).not.toHaveBeenCalled();
+});
 function service() {
   const setup = configureFirebase(env);
   if (!('service' in setup)) throw new Error('configuration');

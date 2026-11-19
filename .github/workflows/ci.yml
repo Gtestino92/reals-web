@@ -31,3 +31,13 @@ jobs:
         run: npm test -- --maxWorkers=2
       - name: Build
         run: npm run build
+        env:
+          VITE_REALS_ENVIRONMENT: dev
+          # Existing Web hostname used only as an origin fixture. CI does not serve or deploy dist.
+          VITE_API_BASE_URL: https://reals-web.pages.dev
+          VITE_FIREBASE_API_KEY: synthetic-key
+          VITE_FIREBASE_AUTH_DOMAIN: synthetic.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: synthetic
+          VITE_FIREBASE_APP_ID: synthetic-app-id
+          VITE_FIREBASE_APP_CHECK_PROVIDER: enterprise
+          VITE_FIREBASE_APP_CHECK_SITE_KEY: synthetic-site-key

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient, ApiError, bootstrap } from './api';
 import type { Identity } from './firebase';
 const account = { id: 'user-1', status: 'ACTIVE' };
@@ -11,6 +11,59 @@ function harness(...responses: Response[]) {
   responses.forEach(item => fetcher.mockResolvedValueOnce(item));
   return { fetcher, api: new ApiClient(fetcher), user: identity(), signal: new AbortController().signal };
 }
+describe('remote API routing', () => {
+  function remote(name: 'dev' | 'prod', origin = 'https://reals-web.pages.dev/') {
+    vi.stubEnv('DEV', false);
+    vi.stubEnv('PROD', true);
+    vi.stubEnv('VITE_REALS_ENVIRONMENT', name);
+    vi.stubEnv('VITE_API_BASE_URL', origin);
+    vi.stubEnv('VITE_FIREBASE_APP_CHECK_DEBUG', 'false');
+    vi.stubEnv('VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION', 'false');
+  }
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each(['dev', 'prod'] as const)('keeps the %s destination across both client clones and a token refresh', async name => {
+    remote(name);
+    const { api, fetcher, user, signal } = harness(failure(401, 'INVALID_TOKEN'), response(account));
+    vi.stubEnv('VITE_API_BASE_URL', '');
+    const tokens = vi.fn().mockResolvedValue('synthetic-app-check');
+    const client = api.withAppCheck(tokens).withOwnership();
+    await expect(client.request('/me', signal, user)).resolves.toEqual(account);
+    expect(user.getIdToken).toHaveBeenNthCalledWith(1, false);
+    expect(user.getIdToken).toHaveBeenNthCalledWith(2, true);
+    expect(tokens).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls).toEqual(Array(2).fill(['https://reals-web.pages.dev/api/me', expect.objectContaining({
+      signal, credentials: 'omit', headers: { Authorization: 'Bearer fake-token', 'X-Firebase-AppCheck': 'synthetic-app-check' },
+    })]));
+  });
+
+  it('preserves multipart, admin grant, and Retry-After on a remote request', async () => {
+    remote('dev');
+    const { api, fetcher, user, signal } = harness(new Response('{"code":"RATE_LIMIT_EXCEEDED"}', {
+      status: 429, headers: { 'Retry-After': '5' },
+    }));
+    const body = new FormData();
+    body.append('file', new File(['test'], 'fixture.jpg'));
+    const client = api.withOwnership().withAppCheck(async () => 'synthetic-app-check');
+    await expect(client.request('/admin/photos', signal, user, 'POST', body, undefined, true, 'synthetic-grant'))
+      .rejects.toMatchObject({ kind: 'backend', status: 429, code: 'RATE_LIMIT_EXCEEDED', retryAfterSeconds: 5 });
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith('https://reals-web.pages.dev/api/admin/photos', {
+      method: 'POST', signal, body, credentials: 'omit', cache: 'no-store', redirect: 'error',
+      headers: { Authorization: 'Bearer fake-token', 'X-Firebase-AppCheck': 'synthetic-app-check', 'X-Reals-Admin-Grant': 'synthetic-grant' },
+    });
+  });
+
+  it('rejects missing remote routing and stops an aborted remote request before fetch', async () => {
+    remote('prod', '');
+    const fetcher = vi.fn<typeof fetch>();
+    expect(() => new ApiClient(fetcher)).toThrow('VITE_API_BASE_URL');
+    remote('prod');
+    const controller = new AbortController();
+    const api = new ApiClient(fetcher).withAppCheck(async () => { controller.abort(); return 'obsolete'; });
+    await expect(api.request('/me', controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
 describe('backend contracts', () => {
   it.each(['ACCOUNT_PROVISIONING_LIMIT_EXCEEDED', 'RATE_LIMIT_EXCEEDED'])('parses 429 %s without retrying or refreshing the token', async code => {
     const { api, fetcher, user, signal } = harness(new Response(JSON.stringify({ code, error: 'Too Many Requests', message: 'private diagnostic' }), { status: 429, headers: { 'Retry-After': '120' } }));

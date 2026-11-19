@@ -1,4 +1,5 @@
 import type { AppCheckTokenProvider } from './appCheck';
+import { resolveEnvironment } from '../config/environment';
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { maxRetryAfterSeconds, terminalCodes } from './errors';
 import type { Identity } from './firebase';
@@ -22,9 +23,14 @@ function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 export class ApiClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis), private readonly ownership?: TabOwnershipManager, private readonly appCheckToken?: AppCheckTokenProvider) {}
-  withOwnership(ownership?: TabOwnershipManager) { return new ApiClient(this.fetcher, ownership, this.appCheckToken); }
-  withAppCheck(provider?: AppCheckTokenProvider) { return new ApiClient(this.fetcher, this.ownership, provider); }
+  constructor(
+    private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis),
+    private readonly ownership?: TabOwnershipManager,
+    private readonly appCheckToken?: AppCheckTokenProvider,
+    private readonly environment = resolveEnvironment(import.meta.env),
+  ) {}
+  withOwnership(ownership?: TabOwnershipManager) { return new ApiClient(this.fetcher, ownership, this.appCheckToken, this.environment); }
+  withAppCheck(provider?: AppCheckTokenProvider) { return new ApiClient(this.fetcher, this.ownership, provider, this.environment); }
   async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true, adminGrant?: string): Promise<unknown> {
     this.ownership?.assert();
     if (this.ownership) signal = AbortSignal.any([signal, this.ownership.signal]);
@@ -42,7 +48,7 @@ export class ApiClient {
       const multipart = body instanceof FormData;
       if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
       let response: Response;
-      try { response = await this.fetcher(`/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...(method === 'GET' && /^\/matches\/[^/]+(?:\/visual-profile|\/personal-messages\/partner)?$/.test(path) ? { cache: 'no-store' as const } : {}), ...((path.startsWith('/admin/') || path.startsWith('/admin-auth/')) ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
+      try { response = await this.fetcher(`${this.environment.apiOrigin}/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...(method === 'GET' && /^\/matches\/[^/]+(?:\/visual-profile|\/personal-messages\/partner)?$/.test(path) ? { cache: 'no-store' as const } : {}), ...((path.startsWith('/admin/') || path.startsWith('/admin-auth/')) ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
       catch { signal.throwIfAborted(); throw new ApiError('network'); }
       signal.throwIfAborted();
       if (!response.ok) {
