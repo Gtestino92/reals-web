@@ -1,7 +1,8 @@
 import { MyProfilePreview } from '../profile/MyProfilePreview';
 import { useCallback, useId, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../auth/api';
-import { errorCode, terminalCodes } from '../auth/errors';
+import { errorCode, terminalCodes, verificationErrorMessage, verificationRateLimited } from '../auth/errors';
+import { resendVerificationCooldownMs } from '../auth/session';
 import type { SessionController } from '../auth/session';
 import { countries, fullProfile, hasInteractions, legal, photos } from './contracts';
 import type { Country, Fields, FullProfile, LegalDocument, Photo } from './contracts';
@@ -81,7 +82,8 @@ export function Onboarding({ Home, active = true, controller, management, naviga
   const cropOwned = useRef(false);
   const [photoError,setPhotoError] = useState('');
   const closeCrop = () => { cropOwned.current = false; setCrop(null); };
-  const [sendAt,setSendAt] = useState(0), [checkAt,setCheckAt] = useState(0), [now,setNow] = useState(Date.now());
+  const [sendAt,setSendAt] = useState(() => controller.snapshot.verificationDeliveryError?.resendAt ?? 0), [checkAt,setCheckAt] = useState(0), [now,setNow] = useState(Date.now());
+  const [verificationFeedback, setVerificationFeedback] = useState<{ message: string; error: boolean } | null>(null);
   const owner = useRef<{ abort: AbortController; locked: boolean; background: boolean; operation: AbortController | null; creationNeedsCheck: boolean; activationNeedsCheck: boolean } | null>(null);
   const accountLocked = useRef(false);
   const [dirtyForms, setDirtyForms] = useState({ create: false, details: false, filters: false });
@@ -221,6 +223,38 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller]);
   useEffect(() => { if (sendAt <= Date.now() && checkAt <= Date.now()) return; const timer = window.setInterval(() => setNow(Date.now()),1000); return () => clearInterval(timer); },[sendAt,checkAt]);
+  const verifyEmail = (send: boolean) => {
+    if (busy || blocked || accountBusy || Date.now() < (send ? sendAt : checkAt)) return;
+    void run(async signal => {
+      setVerificationFeedback(null);
+      let value: boolean;
+      try {
+        value = await controller.verifyEmail(send, signal);
+        signal.throwIfAborted();
+      } catch (failure) {
+        if (signal.aborted || (failure instanceof DOMException && failure.name === 'AbortError')) return;
+        if (verificationRateLimited(failure)) {
+          const at = Date.now();
+          setNow(at);
+          if (send) setSendAt(at + resendVerificationCooldownMs);
+          else setCheckAt(at + 10_000);
+        }
+        setVerificationFeedback({ message: verificationErrorMessage(failure, send), error: true });
+        return;
+      }
+      const at = Date.now();
+      setNow(at);
+      if (send) {
+        setSendAt(at + resendVerificationCooldownMs);
+        setVerificationFeedback({ message: 'Te enviamos un nuevo correo de verificación.', error: false });
+      } else {
+        setVerified(value);
+        setCheckAt(at + 10_000);
+        if (value) setMessage('Email verificado.');
+        else setVerificationFeedback({ message: 'Todavía no vemos el email verificado. Abrí el link del correo y volvé a intentar.', error: false });
+      }
+    });
+  };
   const writeProfile = (fields: Fields, mode: 'create' | 'details' | 'filters') => {
     if (blocked || (mode === 'create' && owner.current?.creationNeedsCheck)) return;
     void run(async signal => {
@@ -253,7 +287,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
   const activate = () => {
     if (activationDisabled || cropOwned.current || nestedHomeLock.current || owner.current?.activationNeedsCheck) return;
     void run(async signal => {
-      const emailVerified = await controller.verifyEmail(false);
+      const emailVerified = await controller.verifyEmail(false, signal);
       signal.throwIfAborted();
       if (!emailVerified) throw new ApiError('backend', 409, 'EMAIL_NOT_VERIFIED');
       const result = fullProfile(await controller.request('/me/profile/activation', signal, 'POST'), controller.snapshot.account?.id ?? '');
@@ -268,6 +302,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
   const accountAvailable = !management && !!model && model.profile?.status !== 'ACTIVE';
   useLayoutEffect(() => { onAccountAvailableChange?.(accountAvailable); return () => onAccountAvailableChange?.(false); }, [accountAvailable, onAccountAvailableChange]);
   const creating = !!model?.legal.satisfied && !model.profile;
+  const initialDeliveryError = !verified ? controller.snapshot.verificationDeliveryError?.message : undefined;
   const activationInline = !!error?.activation && !management && model?.legal.satisfied && !!model.profile && model.profile.status !== 'ACTIVE';
   const errorAlert = error && <p id={activationInline ? activationErrorId : undefined} role="alert">{error.message}</p>;
   const checkStatus = (error || blocked) && !busy && <button type="button" aria-describedby={activationInline ? activationErrorId : undefined} disabled={!!crop || ((creating || activationInline) && accountBusy) || (activationInline && (nestedHomeBlocked || nestedManagement))} onClick={() => void run()}>Consultar estado</button>;
@@ -283,6 +318,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
       {model.legal.documents.map(doc => <article key={doc.type}><h3>{({ TERMS_OF_USE: 'Términos de uso', PRIVACY_NOTICE: 'Aviso de privacidad', COMMUNITY_GUIDELINES: 'Normas de la comunidad' } as Record<string,string>)[doc.type] ?? doc.type}</h3><p>Versión {doc.version} · {doc.requiredAction} · {doc.satisfied ? 'Completado' : 'Pendiente'}</p><a href={doc.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Ver documento</a>{!doc.satisfied && <button disabled={disabled} onClick={() => void run(async signal => { await controller.request('/me/legal-document-actions',signal,'POST',{ documentType: doc.type, documentVersion: doc.version, action: doc.requiredAction }); })}>{doc.requiredAction === 'ACCEPTED' ? 'Aceptar' : 'Confirmar lectura'}</button>}</article>)}
     </> : model && success && model.profile?.status === 'ACTIVE' ? <><h2>Tu perfil está activo</h2><p>Ya podés entrar a Inicio y buscar un chat cuando quieras.</p><p>Tus fotos quedaron guardadas. Si más adelante las cambiás, puede que revisemos tu perfil otra vez.</p><button onClick={() => setSuccess(false)}>Ir a Inicio</button></> : model && !model.profile ? <>
       <h2>Crear perfil</h2><p>Completá tus datos principales. Después vas a poder sumar fotos y activar tu perfil.</p>
+      {initialDeliveryError && <p role="alert">{initialDeliveryError} Podés crear tu perfil y pedir otro correo desde la sección de verificación.</p>}
       <ProfileForm onDirtyChange={reportFormDirty.create} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled} saving={savingProfile === 'create'} submit={writeProfile} creationFeedback={<>{errorAlert}{checkStatus}</>} />
     </> : model?.profile ? <>
       {!management && <><h2>Completá tu perfil</h2><p>{model.profile.status === 'DRAFT' ? 'Tu perfil está en borrador' : 'Tu perfil está inactivo'}</p></>}
@@ -290,7 +326,13 @@ export function Onboarding({ Home, active = true, controller, management, naviga
       {model.interactions === true && <aside><h3>Inicio: interacciones vigentes</h3><p>Tenés interacciones en curso. Podés consultarlas y continuarlas desde Actividad.</p></aside>}
       {model.interactions === true && <Home delegateProfileQuestions controller={controller} navigation={setupNavigationEnabled ? navigation : undefined} onNavigationBlockedChange={reportNestedHomeLock} onManagementActiveChange={setNestedManagement} />}
       {model.interactions === null && <aside><h3>Inicio no disponible</h3><p>No pudimos consultar tus interacciones. Su estado es desconocido. Podés seguir completando el perfil o reintentar la consulta de Inicio.</p><button disabled={disabled || !!crop} onClick={() => void run()}>Reintentar Inicio</button></aside>}
-      {!verified && <section id="email-verification" tabIndex={-1}><h3>Verificá tu email</h3><p>Abrí el link del correo de verificación y volvé para continuar.</p><button disabled={disabled || sendAt > now} onClick={() => { if (Date.now() < sendAt) return; void run(async () => { await controller.verifyEmail(true); setSendAt(Date.now()+60000); setMessage('Te enviamos un nuevo correo de verificación.'); }); }}>Reenviar correo{sendAt > now ? ` (${Math.ceil((sendAt-now)/1000)} s)` : ''}</button><button disabled={disabled || checkAt > now} onClick={() => { if (Date.now() < checkAt) return; void run(async () => { const value = await controller.verifyEmail(false); setVerified(value); setCheckAt(Date.now()+10000); setMessage(value ? 'Email verificado.' : 'Todavía no vemos el email verificado. Abrí el link del correo y volvé a intentar.'); }); }}>Ya verifiqué</button></section>}
+      {!verified && <section id="email-verification" aria-label="Verificá tu email" tabIndex={-1}>
+        <h3>Verificá tu email</h3>
+        <p>Abrí el link del correo de verificación y volvé para continuar.</p>
+        <button type="button" disabled={disabled || sendAt > now} onClick={() => verifyEmail(true)}>Reenviar correo{sendAt > now ? ` (${Math.ceil((sendAt-now)/1000)} s)` : ''}</button>
+        <button type="button" disabled={disabled || checkAt > now} onClick={() => verifyEmail(false)}>Ya verifiqué</button>
+        {verificationFeedback ? <p role={verificationFeedback.error ? 'alert' : 'status'}>{verificationFeedback.message}</p> : initialDeliveryError && <p role="alert">{initialDeliveryError}</p>}
+      </section>}
       {(['details','filters'] as const).filter(mode => management === mode).map(mode => <FormSection key={mode} management={!!management} title={mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'}><ProfileForm saving={savingProfile === mode} saved={feedbackProfile === mode} onDirtyChange={reportFormDirty[mode]} key={`${model.profile!.id}-${mode}`} profile={model.profile!} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled || !!crop} mode={mode} submit={writeProfile}/></FormSection>)}
       {management && questionsSection}
       {management !== 'filters' && <PhotoSection>{management && <p>Hasta nueve fotos. Los cambios pueden requerir una nueva revisión del perfil. Revisá los estados de validación y moderación de cada foto.</p>}

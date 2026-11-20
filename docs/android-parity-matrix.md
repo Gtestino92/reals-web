@@ -39,6 +39,18 @@ Web task base `27635b1`. Android `development` `97827fb` references include [Pro
 
 Validation: `npm run test:focused -- src/onboarding/Onboarding.test.tsx src/onboarding/contracts.test.ts src/onboarding/ProfileForm.test.tsx --maxWorkers=2` passed 219 tests. The subsequent `npm run test:focused -- src/onboarding/Onboarding.test.tsx -t 'retains failed activation recovery' --maxWorkers=1` passed the added failure/identity regression. `npm run typecheck`, `npm run check:architecture` (88 modules, zero runtime cycles), and `npm run build` for both `dev` and `prod` with synthetic CI settings passed. The existing Vite chunk-size advisory remains. Headless Chrome checked 390×844 and 1440×900 in light and dark with simulated verified/unverified Firebase identities and a simulated 409. Section order, primary button width, inline error placement, and absence of horizontal overflow passed. Android pixel parity, a physical device, assistive technology and live DEV activation/photo analysis were outside the run.
 
+## Email verification recovery
+
+Reviewed Android [SessionCoordinator](../../reals-app/app/src/main/java/com/reals/app/ui/root/SessionCoordinator.kt), [FirebaseAuthRepository](../../reals-app/app/src/main/java/com/reals/app/data/repository/FirebaseAuthRepository.kt), and [ProfileOperationHandler](../../reals-app/app/src/main/java/com/reals/app/ui/root/ProfileOperationHandler.kt) at `97827fb`. Android attempts delivery on signup and then provisions the session. Resend and check remain explicit, session-owned actions.
+
+| Path | Before → after | Invariant / evidence |
+| --- | --- | --- |
+| Signup delivery and backend bootstrap | **PARTIAL → COMPLETE** for recoverable failure and retry. | [SessionController](../src/auth/session.ts) attempts delivery once during explicit signup. Transient delivery errors let bootstrap continue and leave a safe message in creation, then near verification controls. Retrying bootstrap never repeats the send. Terminal Firebase errors retain the existing session recovery. |
+| Resend and check | **PARTIAL → COMPLETE** for tested feedback and guards. | [Onboarding](../src/onboarding/Onboarding.tsx) displays mapped Firebase errors inline. Success follows confirmed delivery. Firebase rate-limit responses apply the existing local action windows. Checking uses reload and forced token refresh. If token refresh fails after reload, activation stays gated and the check remains available. |
+| Resume, overlapping actions and identity | **COMPLETE** for tested Web ownership paths. | The existing foreground lock excludes overlapping actions. A silent refresh preserves the mounted controls. Session generation and abort checks reject stale results, including before refreshing an old identity's token. Android controls use Compose and Web uses semantic alert/status regions. |
+
+Validation: `npm run test:focused -- src/App.test.tsx src/onboarding/Onboarding.test.tsx --maxWorkers=2` passed 209 tests. `npm run typecheck`, `npm run check:architecture` (88 modules, zero runtime cycles), and `npm run build` for both `dev` and `prod` with synthetic CI settings passed. Tests simulate Firebase and backend responses. Live email delivery and inbox verification remain unverified.
+
 ## Web environment configuration
 
 Audited Android's [flavor and dependency isolation](../../reals-app/app/build.gradle.kts), [App Check installers by source set](../../reals-app/docs/local-development.md#firebase-app-check), and the [backend API contract](../../reals-backend/docs/commons/api.md). This change concerns build configuration and request destinations. Existing visual, navigation, accessibility, lifecycle and session parity is tracked in the relevant product sections below.

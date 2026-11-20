@@ -33,6 +33,22 @@ const messages: Record<string, string> = {
   ACCOUNT_PERMANENTLY_BANNED: 'Tu cuenta está suspendida permanentemente.',
 };
 export const terminalCodes = new Set(['INVALID_TOKEN', 'AUTH_METHOD_NOT_ALLOWED', 'EMAIL_ALREADY_LINKED_TO_DIFFERENT_FIREBASE_USER', 'UNSUPPORTED_AUTH_PROVIDER', 'auth/user-disabled', 'auth/user-token-expired', 'auth/invalid-user-token', 'auth/user-not-found']);
+export function verificationRateLimited(error: unknown): boolean {
+  return ['auth/too-many-requests', 'auth/quota-exceeded'].includes(errorCode(error));
+}
+
+export function verificationErrorMessage(error: unknown, send: boolean): string {
+  const code = errorCode(error);
+  const action = send ? 'enviar el correo de verificación' : 'comprobar la verificación de tu email';
+  if (verificationRateLimited(error)) return send
+    ? 'Hay demasiadas solicitudes de correo de verificación. Esperá antes de pedir otro.'
+    : 'Hay demasiados intentos de verificación. Esperá antes de volver a comprobar tu email.';
+  if (code === 'auth/network-request-failed') return `No pudimos ${action}. Revisá tu conexión y volvé a intentar.`;
+  if (terminalCodes.has(code)) return 'Tu sesión ya no es válida. Volvé a iniciar sesión para verificar tu email.';
+  if (code === 'auth/invalid-email' || code === 'auth/missing-email') return 'Tu cuenta no tiene un email válido para verificar.';
+  if (code === 'auth/operation-not-allowed') return 'La verificación de email no está disponible en este momento. Contactá a soporte.';
+  return `No pudimos ${action}. Volvé a intentar.`;
+}
 // Bound advisory copy, not eligibility. Covers backend provisioning windows up to 365 days.
 export const maxRetryAfterSeconds = 365 * 24 * 60 * 60;
 export function isRateLimitResponse(error: unknown): boolean {

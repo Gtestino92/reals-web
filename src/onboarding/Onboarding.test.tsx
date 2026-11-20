@@ -692,6 +692,102 @@ it('honors Firebase when verification changes during the activation token refres
   expect(writes('POST')).toHaveLength(0);
 });
 it('email resend and reload use Firebase with cooldown', async () => { profile = { ...initialProfile }; Object.defineProperty(user,'emailVerified',{ value:false,configurable:true }); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); fireEvent.click(screen.getByRole('button',{ name:'Reenviar correo' })); await waitFor(() => expect(screen.getByRole('button',{ name:/Reenviar correo/ })).toBeDisabled()); expect(auth.verify).toHaveBeenCalledOnce(); vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user,'emailVerified',{ value:true,configurable:true }); }); fireEvent.click(screen.getByRole('button',{ name:'Ya verifiqué' })); await screen.findByText('Email verificado.'); expect(screen.queryByRole('heading',{ name:'Verificá tu email' })).not.toBeInTheDocument(); });
+
+it.each(['auth/network-request-failed', 'auth/too-many-requests'])('continues signup after initial email failure %s and carries recovery into the draft', async code => {
+  user = { ...user, emailVerified: false };
+  auth.observe = vi.fn(next => { observer = next; next(null); return vi.fn(); });
+  vi.mocked(auth.signUp).mockResolvedValue(user);
+  vi.mocked(auth.verify).mockRejectedValueOnce({ code, message: 'private Firebase diagnostic' });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: '¿No tenés cuenta? Crear cuenta' }));
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'test-password' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  const form = await createForm();
+  const initialError = screen.getByRole('alert');
+  expect(initialError).toHaveTextContent('Podés crear tu perfil');
+  expect(initialError).not.toHaveTextContent('private Firebase diagnostic');
+  expect(screen.queryByText(/Te enviamos un email/)).toBeNull();
+  fireEvent.submit(form);
+  const verification = await screen.findByRole('region', { name: 'Verificá tu email' });
+  expect(within(verification).getByRole('alert')).toBeVisible();
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  const resend = within(verification).getByRole('button', { name: /Reenviar correo/ });
+  expect(auth.verify).toHaveBeenCalledOnce();
+  if (code === 'auth/too-many-requests') {
+    expect(resend).toBeDisabled();
+    expect(within(verification).getByRole('alert')).toHaveTextContent('demasiadas solicitudes');
+  } else {
+    fireEvent.click(resend);
+    await within(verification).findByText('Te enviamos un nuevo correo de verificación.');
+    expect(auth.verify).toHaveBeenCalledTimes(2);
+  }
+});
+
+it('shows resend errors inline and throttles Firebase rate-limit responses', async () => {
+  profile = { ...initialProfile };
+  user = { ...user, emailVerified: false };
+  vi.mocked(auth.verify)
+    .mockRejectedValueOnce({ code: 'auth/network-request-failed', message: 'private Firebase diagnostic' })
+    .mockRejectedValueOnce({ code: 'auth/too-many-requests' });
+  mount();
+  const verification = await screen.findByRole('region', { name: 'Verificá tu email' });
+  const resend = within(verification).getByRole('button', { name: /Reenviar correo/ });
+  fireEvent.click(resend);
+  expect(await within(verification).findByRole('alert')).toHaveTextContent('Revisá tu conexión');
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(screen.queryByText(/private Firebase diagnostic|Te enviamos/)).toBeNull();
+  await waitFor(() => expect(resend).toBeEnabled());
+  fireEvent.click(resend);
+  expect(await within(verification).findByRole('alert')).toHaveTextContent('demasiadas solicitudes');
+  expect(resend).toBeDisabled();
+  expect(resend).toHaveAccessibleName(/Reenviar correo \(60 s\)/);
+  await waitFor(() => expect(within(verification).getByRole('button', { name: 'Ya verifiqué' })).toBeEnabled());
+  fireEvent.click(resend);
+  expect(auth.verify).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the check available when Firebase reload succeeds but forced token refresh fails', async () => {
+  profile = { ...initialProfile };
+  user = { ...user, emailVerified: false };
+  vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user, 'emailVerified', { value: true }); });
+  let fail = true;
+  vi.mocked(user.getIdToken).mockImplementation(async force => {
+    if (force && fail) throw { code: 'auth/network-request-failed', message: 'private Firebase diagnostic' };
+    return 'token';
+  });
+  mount();
+  const verification = await screen.findByRole('region', { name: 'Verificá tu email' });
+  const check = within(verification).getByRole('button', { name: 'Ya verifiqué' });
+  fireEvent.click(check);
+  expect(await within(verification).findByRole('alert')).toHaveTextContent('No pudimos comprobar la verificación');
+  expect(screen.getByRole('button', { name: 'Activar perfil' })).toBeDisabled();
+  expect(screen.queryByText('Email verificado.')).toBeNull();
+  await waitFor(() => expect(check).toBeEnabled());
+  fail = false;
+  fireEvent.click(check);
+  await screen.findByText('Email verificado.');
+  expect(screen.queryByRole('region', { name: 'Verificá tu email' })).toBeNull();
+  expect(user.reload).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(user.getIdToken).mock.calls.filter(([force]) => force)).toHaveLength(2);
+});
+
+it('does not refresh a stale identity token or publish a late check result', async () => {
+  profile = { ...initialProfile };
+  user = { ...user, emailVerified: false };
+  const stale = user;
+  let finish!: () => void;
+  vi.mocked(stale.reload).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Ya verifiqué' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  act(() => observer(null));
+  await screen.findByRole('button', { name: 'Ingresar' });
+  await act(async () => finish());
+  expect(stale.getIdToken).not.toHaveBeenCalledWith(true);
+  expect(screen.queryByText('Email verificado.')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
 it('rejects stale domain results after sign-out', async () => { let finish: ((value: Response) => void) | undefined; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options)); mount(); await waitFor(() => expect(finish).toBeDefined()); confirmSignOut(); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => { finish?.(json({ requirementsSatisfied:true,documents:[] })); }); expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument(); });
 it('shows a definitive backend rejection once by the creation submit and allows correction', async () => {
   const base = fetcher.getMockImplementation()!;

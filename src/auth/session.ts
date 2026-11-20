@@ -4,7 +4,7 @@ import type { Appeal } from './suspension';
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { ApiClient, ApiError, DeletedAccountError, bootstrap, object, parseUser } from './api';
 import type { BackendUser, Profile } from './api';
-import { errorCode, isRateLimitResponse, safeMessage, terminalCodes } from './errors';
+import { errorCode, isRateLimitResponse, safeMessage, terminalCodes, verificationErrorMessage, verificationRateLimited } from './errors';
 import type { AuthService, Identity } from './firebase';
 import type { LoginErrorOwner } from './LoginScreen';
 
@@ -28,8 +28,10 @@ export interface SessionSnapshot {
   resetMessage: string | null;
   resetAt: number | null;
   verificationMessage: string | null;
+  verificationDeliveryError: { message: string; resendAt: number } | null;
 }
-const initial: SessionSnapshot = { adminEligible: false, authContextVersion: 0, adminWarning: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, phase: 'checking', account: null, profile: null, error: null, operation: null, resetMessage: null, resetAt: null, verificationMessage: null };
+const initial: SessionSnapshot = { adminEligible: false, authContextVersion: 0, adminWarning: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false, phase: 'checking', account: null, profile: null, error: null, operation: null, resetMessage: null, resetAt: null, verificationMessage: null, verificationDeliveryError: null };
+export const resendVerificationCooldownMs = 60_000;
 export class SessionController {
   private eligibilityAbort: AbortController | undefined;
   private eligibilitySettled = false;
@@ -118,13 +120,13 @@ export class SessionController {
   private observerEpoch = 0;
   private controller = new AbortController();
   private locked = false;
-  private pendingVerification: Identity | null = null;
+  private emailVerificationNeedsRefresh = false;
   private readonly ownershipSignal: AbortSignal | undefined;
   constructor(private readonly auth: AuthService, private readonly api: ApiClient, private readonly localVerification: boolean, private readonly ownership?: TabOwnershipManager) { this.ownershipSignal = ownership?.signal; }
   private available() { return !this.ownership || (!this.ownershipSignal?.aborted && this.ownership.getSnapshot() === 'active'); }
   private suspend = () => {
     this.observerEpoch++; this.unsubscribe?.(); this.unsubscribe = undefined;
-    this.invalidate(); this.locked = false; this.user = null; this.pendingVerification = null;
+    this.invalidate(); this.locked = false; this.user = null;
     this.snapshot = initial;
   };
   private install(patch: Partial<SessionSnapshot>) { this.snapshot = { ...this.snapshot, ...patch }; this.listeners.forEach(listener => listener()); }
@@ -196,17 +198,32 @@ export class SessionController {
       if (this.current(generation)) { this.locked = false; this.install({ recoveryBusy: null }); }
     }
   };
-  verifyEmail = async (send: boolean) => {
+  verifyEmail = async (send: boolean, signal: AbortSignal) => {
     this.ownership?.assert();
     const generation = this.generation;
     const user = this.user;
-    if (!user) throw new DOMException('Sesión obsoleta', 'AbortError');
-    if (send) await this.auth.verify(user);
-    else { await user.reload(); if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError'); await user.getIdToken(true); }
-    if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
-    return user.emailVerified;
+    const checkOwner = () => {
+      signal.throwIfAborted();
+      if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
+    };
+    if (!user || this.snapshot.phase !== 'ready') throw new DOMException('Sesión obsoleta', 'AbortError');
+    checkOwner();
+    if (this.snapshot.verificationDeliveryError || this.snapshot.verificationMessage) this.install({ verificationDeliveryError: null, verificationMessage: null });
+    try {
+      if (send) await this.auth.verify(user);
+      else {
+        await user.reload();
+        checkOwner();
+        this.emailVerificationNeedsRefresh = true;
+        await user.getIdToken(true);
+        checkOwner();
+        this.emailVerificationNeedsRefresh = false;
+      }
+    } catch (error) { checkOwner(); throw error; }
+    checkOwner();
+    return this.emailVerified;
   };
-  get emailVerified() { return this.user?.emailVerified ?? false; }
+  get emailVerified() { return !this.emailVerificationNeedsRefresh && (this.user?.emailVerified ?? false); }
   get hasPasswordProvider() { return this.user?.providerData?.some(provider => provider.providerId === 'password') ?? null; }
   changePassword = async (current: string, next: string) => {
     if (!this.available() || this.locked || !this.user || !this.hasPasswordProvider || !this.auth.changePassword || this.snapshot.phase !== 'ready') throw new Error('Cambio no disponible.');
@@ -262,11 +279,10 @@ export class SessionController {
       }
     };
   };
-  private invalidate() { this.snapshot = { ...this.snapshot, adminEligible: false }; this.resetEligibility(); this.adminView = false; this.adminViewEpoch++; this.admin.clear(); this.controller.abort(); this.controller = new AbortController(); return ++this.generation; }
+  private invalidate() { this.snapshot = { ...this.snapshot, adminEligible: false }; this.emailVerificationNeedsRefresh = false; this.resetEligibility(); this.adminView = false; this.adminViewEpoch++; this.admin.clear(); this.controller.abort(); this.controller = new AbortController(); return ++this.generation; }
   private current(generation: number) { return this.available() && this.listeners.size > 0 && generation === this.generation; }
   private replace(user: Identity | null) {
     this.invalidate(); this.locked = false; this.user = user;
-    if (this.pendingVerification?.uid !== user?.uid) this.pendingVerification = null;
     this.install({ ...initial, appeal: null, appealUncertain: false, suspensionExpiry: null, suspensionBusy: false, phase: user ? 'loading' : 'login', operation: null, account: null, profile: null, error: null, verificationMessage: null });
     this.ownership?.assert();
     const generation = this.generation;
@@ -320,7 +336,7 @@ export class SessionController {
       if (this.current(generation)) { this.locked = false; this.install({ suspensionBusy: false }); }
     }
   }
-  private async load() {
+  private async load(sendInitialVerification = false) {
     const user = this.user;
     if (!user || this.locked) return;
     this.locked = true;
@@ -330,11 +346,19 @@ export class SessionController {
     const preserved = ['temporarySuspension', 'permanentAppeal'].includes(this.snapshot.phase);
     this.install({ phase: preserved ? this.snapshot.phase : 'loading', suspensionBusy: preserved, operation: this.snapshot.phase === 'authenticating' ? this.snapshot.operation : null, error: null, account: null, profile: null, recoveryBusy: null, recoveryUncertain: false, recoveryTerminal: false });
     try {
-      if (this.pendingVerification?.uid === user.uid) {
-        await this.auth.verify(user);
-        if (!this.current(generation)) return;
-        this.pendingVerification = null;
-        this.install({ verificationMessage: 'Te enviamos un email para verificar tu cuenta.' });
+      if (sendInitialVerification) {
+        try {
+          await this.auth.verify(user);
+          if (!this.current(generation)) return;
+          this.install({ verificationMessage: 'Te enviamos un email para verificar tu cuenta.' });
+        } catch (error) {
+          if (!this.current(generation)) return;
+          if (terminalCodes.has(errorCode(error))) throw error;
+          this.install({ verificationDeliveryError: {
+            message: verificationErrorMessage(error, true),
+            resendAt: verificationRateLimited(error) ? Date.now() + resendVerificationCooldownMs : 0,
+          } });
+        }
       }
       const session = await bootstrap(this.api, user, signal, this.localVerification);
       if (this.current(generation)) {
@@ -382,9 +406,8 @@ export class SessionController {
       if (!this.current(generation)) return;
       if (this.user && this.user.uid !== user.uid) { this.replace(this.user); return; }
       this.user = user;
-      this.pendingVerification = operation === 'signUp' && !this.localVerification && !user.emailVerified ? user : null;
       this.locked = false;
-      void this.load();
+      void this.load(operation === 'signUp' && !this.localVerification && !user.emailVerified);
     }).catch(error => {
       if (!this.current(generation)) return;
       this.locked = false;
@@ -414,7 +437,7 @@ export class SessionController {
     this.locked = true;
     this.install({ phase: 'signingOut', operation: null, account: null, profile: null, error: null });
     void revoke.then(() => { if (!this.current(generation)) return; return this.auth.signOut(); }).then(() => {
-      if (this.current(generation)) { this.user = null; this.pendingVerification = null; this.install({ ...initial, phase: 'login', adminWarning: this.snapshot.adminWarning ?? null }); }
+      if (this.current(generation)) { this.user = null; this.install({ ...initial, phase: 'login', adminWarning: this.snapshot.adminWarning ?? null }); }
     }).catch(error => {
       if (this.current(generation)) this.install({ phase: 'recoverable', error: { message: safeMessage(error), owner: 'shared' } });
     }).finally(() => { if (this.current(generation)) this.locked = false; });
