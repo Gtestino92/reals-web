@@ -558,7 +558,200 @@ it.each(['EMAIL_NOT_VERIFIED','PROFILE_PHOTOS_REQUIRED','PROFILE_PERSON_PHOTO_RE
 });
 it('email resend and reload use Firebase with cooldown', async () => { profile = { ...initialProfile }; Object.defineProperty(user,'emailVerified',{ value:false,configurable:true }); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); fireEvent.click(screen.getByRole('button',{ name:'Reenviar correo' })); await waitFor(() => expect(screen.getByRole('button',{ name:/Reenviar correo/ })).toBeDisabled()); expect(auth.verify).toHaveBeenCalledOnce(); vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user,'emailVerified',{ value:true,configurable:true }); }); fireEvent.click(screen.getByRole('button',{ name:'Ya verifiqué' })); await screen.findByText('Email verificado.'); expect(screen.queryByRole('heading',{ name:'Verificá tu email' })).not.toBeInTheDocument(); });
 it('rejects stale domain results after sign-out', async () => { let finish: ((value: Response) => void) | undefined; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options)); mount(); await waitFor(() => expect(finish).toBeDefined()); confirmSignOut(); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => { finish?.(json({ requirementsSatisfied:true,documents:[] })); }); expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument(); });
-it('keeps failed creation input and reconciles before another attempt', async () => { const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => options?.method === 'POST' ? Promise.reject(new TypeError('offline')) : original(input,options)); mount(); const form = await createForm(); fireEvent.submit(form); await screen.findByRole('alert'); expect(screen.getByLabelText('Nombre visible')).toHaveValue('Ana'); expect(writes('POST')).toHaveLength(1); });
+it('shows a definitive backend rejection once by the creation submit and allows correction', async () => {
+  const base = fetcher.getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' && options?.method === 'POST' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
+  mount();
+  const form = await createForm();
+  const create = within(form).getByRole('button', { name: 'Crear perfil' });
+  fireEvent.click(create);
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(within(form).getByRole('button', { name: 'Guardando…' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Cuenta' })).toBeDisabled();
+  fireEvent.submit(form);
+  await act(async () => finish(json({ code: 'VALIDATION_ERROR', message: 'Untrusted response text' }, 400)));
+
+  const alert = within(form).getByRole('alert');
+  const check = within(form).getByRole('button', { name: 'Consultar estado' });
+  expect(screen.getAllByRole('alert')).toEqual([alert]);
+  expect(alert).toHaveTextContent('VALIDATION_ERROR');
+  expect(alert).not.toHaveTextContent('Untrusted response text');
+  expect(alert.nextElementSibling).toBe(check);
+  expect(check.nextElementSibling).toBe(create);
+  expect(create).toBeEnabled();
+  expect(within(form).getByLabelText('Nombre visible')).toHaveValue('Ana');
+  expect(writes('POST')).toHaveLength(1);
+
+  fetcher.mockImplementation(base);
+  fireEvent.change(within(form).getByLabelText('Ciudad'), { target: { value: 'Rosario' } });
+  fireEvent.click(create);
+  await screen.findByRole('heading', { name: 'Completá tu perfil' });
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(writes('POST')).toHaveLength(2);
+});
+
+it.each([
+  ['network loss', () => Promise.reject(new TypeError('offline')), 'No pudimos confirmar el resultado'],
+  ['malformed response', () => Promise.resolve(json({ unexpected: true }, 201)), 'La respuesta del servidor no es válida'],
+  ['unconfirmed success', () => Promise.resolve(json(initialProfile, 201)), 'La respuesta del servidor no es válida'],
+  ['profile conflict', () => Promise.resolve(json({ code: 'PROFILE_ALREADY_EXISTS' }, 409)), 'PROFILE_ALREADY_EXISTS'],
+] as const)('keeps %s inline and requires an explicit check before another creation attempt', async (_scenario, post, message) => {
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' && options?.method === 'POST' ? post() : base(path, options));
+  mount();
+  const form = await createForm();
+  const create = within(form).getByRole('button', { name: 'Crear perfil' });
+  fireEvent.click(create);
+  const alert = await within(form).findByRole('alert');
+  const check = within(form).getByRole('button', { name: 'Consultar estado' });
+  expect(alert).toHaveTextContent(message);
+  expect(screen.getAllByRole('alert')).toEqual([alert]);
+  expect(alert.nextElementSibling).toBe(check);
+  expect(check.nextElementSibling).toBe(create);
+  expect(create).toBeDisabled();
+  expect(check).toBeEnabled();
+
+  // A successful silent read confirming absence must not release the write gate.
+  await act(async () => window.document.dispatchEvent(new Event('visibilitychange')));
+  expect(create).toBeDisabled();
+  expect(within(form).getByRole('button', { name: 'Consultar estado' })).toBe(check);
+  fireEvent.submit(form);
+  expect(writes('POST')).toHaveLength(1);
+
+  fetcher.mockImplementation(base);
+  fireEvent.click(check);
+  await waitFor(() => expect(create).toBeEnabled());
+  expect(within(form).queryByRole('alert')).toBeNull();
+  expect(within(form).getByLabelText('Nombre visible')).toHaveValue('Ana');
+  expect(writes('POST')).toHaveLength(1);
+});
+
+it('keeps the draft through a failed resume and supersedes a late resume with an explicit creation check', async () => {
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' && options?.method === 'POST' ? Promise.reject(new TypeError('offline')) : base(path, options));
+  mount();
+  const form = await createForm();
+  fireEvent.click(within(form).getByRole('button', { name: 'Crear perfil' }));
+  await within(form).findByRole('alert');
+  const check = within(form).getByRole('button', { name: 'Consultar estado' });
+  const name = within(form).getByLabelText('Nombre visible');
+  const reads: { signal: AbortSignal; resolve: (response: Response) => void }[] = [];
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' && options?.method === 'GET' ? new Promise(resolve => { reads.push({ signal: options.signal!, resolve }); }) : base(path, options));
+
+  check.focus();
+  act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(reads).toHaveLength(1));
+  expect(check).toHaveFocus();
+  expect(screen.queryByText('Actualizando estado…')).toBeNull();
+  await act(async () => reads[0]!.resolve(json({ code: 'TEMPORARILY_UNAVAILABLE' }, 503)));
+  expect(within(form).getByRole('alert')).toHaveTextContent('TEMPORARILY_UNAVAILABLE');
+  expect(check).toHaveFocus();
+  expect(within(form).getByLabelText('Nombre visible')).toBe(name);
+  expect(name).toHaveValue('Ana');
+  expect(within(form).getByRole('button', { name: 'Crear perfil' })).toBeDisabled();
+
+  act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(reads).toHaveLength(2));
+  fireEvent.click(check);
+  expect(reads[1]!.signal.aborted).toBe(true);
+  await waitFor(() => expect(reads).toHaveLength(3));
+  fireEvent.submit(form);
+  expect(writes('POST')).toHaveLength(1);
+  profile = { ...initialProfile };
+  fetcher.mockImplementation(base);
+  await act(async () => reads[2]!.resolve(json(profile)));
+  await act(async () => reads[1]!.resolve(json({ code: 'PROFILE_NOT_FOUND' }, 404)));
+  await screen.findByRole('heading', { name: 'Completá tu perfil' });
+  expect(screen.queryByRole('form', { name: 'Crear perfil' })).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(writes('POST')).toHaveLength(1);
+});
+
+it('reconciles a successful creation whose first status read failed without reposting', async () => {
+  const base = fetcher.getMockImplementation()!;
+  let failNextRead = false;
+  fetcher.mockImplementation((path, options) => {
+    if (path === '/api/me/profile' && options?.method === 'POST') failNextRead = true;
+    else if (path === '/api/me/profile' && failNextRead) {
+      failNextRead = false;
+      return Promise.reject(new TypeError('offline'));
+    }
+    return base(path, options);
+  });
+  mount();
+  const form = await createForm();
+  fireEvent.click(within(form).getByRole('button', { name: 'Crear perfil' }));
+  expect(await within(form).findByRole('alert')).toHaveTextContent('No pudimos confirmar el resultado');
+  expect(within(form).getByRole('button', { name: 'Crear perfil' })).toBeDisabled();
+  fireEvent.click(within(form).getByRole('button', { name: 'Consultar estado' }));
+  await screen.findByRole('heading', { name: 'Completá tu perfil' });
+  expect(writes('POST')).toHaveLength(1);
+});
+
+it('drops an obsolete creation recovery and draft when the account changes', async () => {
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' && options?.method === 'POST' ? Promise.reject(new TypeError('offline')) : base(path, options));
+  mount();
+  const form = await createForm();
+  fireEvent.submit(form);
+  await within(form).findByRole('alert');
+  let finish!: (response: Response) => void;
+  let signal: AbortSignal | null | undefined;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' ? new Promise(resolve => { finish = resolve; signal = options?.signal; }) : base(path, options));
+  fireEvent.click(within(form).getByRole('button', { name: 'Consultar estado' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  act(() => observer(null));
+  await screen.findByRole('button', { name: 'Ingresar' });
+
+  fetcher.mockImplementation((path, options) => path === '/api/me' ? Promise.resolve(json({ id: 'other', status: 'ACTIVE' })) : base(path, options));
+  act(() => observer({ ...user, uid: 'other-firebase-user' }));
+  const replacement = await screen.findByRole('form', { name: 'Crear perfil' });
+  await act(async () => finish(json(initialProfile)));
+  expect(signal?.aborted).toBe(true);
+  expect(replacement).not.toBe(form);
+  expect(within(replacement).getByLabelText('Nombre visible')).toHaveValue('');
+  expect(within(replacement).getByRole('button', { name: 'Crear perfil' })).toBeEnabled();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(writes('POST')).toHaveLength(1);
+});
+
+it.each([
+  ['Cerrar sesión', 'Cerrar sesión'],
+  ['Eliminar cuenta', 'Programar eliminación'],
+])('keeps Cuenta below creation, collapsed until opened, and confirms %s', async (action, confirm) => {
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => path === '/api/me' && options?.method === 'DELETE' ? Promise.resolve(new Response(null, { status: 200 })) : base(path, options));
+  mount();
+  const form = await createForm();
+  const account = screen.getByRole('region', { name: 'Cuenta' });
+  const entry = within(account).getByRole('button', { name: 'Cuenta' });
+  expect(form.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(entry).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Eliminar cuenta' })).toBeNull();
+
+  fireEvent.click(entry);
+  expect(entry).toHaveAttribute('aria-expanded', 'true');
+  const trigger = within(account).getByRole('button', { name: action });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const dialog = screen.getByRole('dialog', { name: action });
+  const cancel = within(dialog).getByRole('button', { name: 'Cancelar' });
+  expect(cancel).toHaveFocus();
+  fireEvent.click(cancel);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(trigger).toHaveFocus();
+  expect(auth.signOut).not.toHaveBeenCalled();
+  expect(writes('DELETE')).toHaveLength(0);
+
+  fireEvent.click(trigger);
+  fireEvent.click(within(screen.getByRole('dialog', { name: action })).getByRole('button', { name: confirm }));
+  await screen.findByRole('button', { name: 'Ingresar' });
+  expect(auth.signOut).toHaveBeenCalledOnce();
+  expect(writes('DELETE')).toHaveLength(action === 'Eliminar cuenta' ? 1 : 0);
+  expect(writes('POST')).toHaveLength(0);
+});
 it.each([false,true])('uploads cropped multipart with add/replace contract (replace=%s)', async replace => {
   profile = { ...initialProfile }; if (replace) list = [initialPhoto];
   const original = fetcher.getMockImplementation()!;

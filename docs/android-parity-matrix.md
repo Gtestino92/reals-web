@@ -1,5 +1,25 @@
 # Android-first migration and First Chat parity
 
+## Initial profile creation footer
+
+Web base `c8b9d45`. Reviewed Android `development` at `97827fb`, including [CreateProfileScreen](../../reals-app/app/src/main/java/com/reals/app/ui/profile/CreateProfileScreen.kt), its country and preference controls, [DeleteAccountSection](../../reals-app/app/src/main/java/com/reals/app/ui/profile/DeleteAccountSection.kt), and the Ready → Missing routing and create ownership in [RealsApp](../../reals-app/app/src/main/java/com/reals/app/ui/root/RealsApp.kt) and [ProfileOperationHandler](../../reals-app/app/src/main/java/com/reals/app/ui/root/ProfileOperationHandler.kt). Reviewed Android validation, repository and account-dialog tests, the screenshot gallery (including the collapsed Cuenta card in [2.jpeg](../../reals-app/docs/assets/2.jpeg)), and the [profile API contract](../../reals-backend/docs/commons/openapi.yaml#L499). The gallery does not depict initial creation.
+
+| Behavior | Before → after | Evidence and remaining differences |
+| --- | --- | --- |
+| Footer order and feedback | **PARTIAL → COMPLETE** for distance → validation/API feedback → create, with a single API alert and its status action in the footer. | [ProfileForm](../src/onboarding/ProfileForm.tsx), [Onboarding](../src/onboarding/Onboarding.tsx) and focused tests verify DOM order, field descriptions, first-invalid focus, and pending/disabled states. Web uses semantic alerts and can retain distinct local validation and API recovery feedback together. |
+| Pending, empty, and recovery states | **PARTIAL → COMPLETE** for tested creation and status-check paths. | Web retains its existing country loading, draft, and confirmed profile transitions. Web checks server state after the POST and exposes a read-only recovery action when a write cannot be confirmed. |
+| Cuenta and navigation | **COMPLETE** for the collapsed card after the form and confirmed sign-out/recoverable deletion. **PLATFORM-LIMITED** for Compose scrolling and Android system Back. | [AccountSection](../src/home/AccountSection.tsx) uses the existing browser expansion and modal dialogs. Tests cover cancel, focus return, confirm, and no account write on cancel. |
+| Styling, input controls, gestures and responsive layout | **PARTIAL** overall. | Existing Web field groups, theme tokens, single/two-column breakpoints, explicit initial choices, native date/country controls and preference interactions carry forward. Footer order applies at both breakpoints. Live mobile/desktop, screen-reader and Android rendering remain unverified. |
+
+| Mutation or response path | Invariant |
+| --- | --- |
+| Client validation, POST, definitive rejection | Validation focuses the first invalid field and sends no request. One owned foreground operation may write. A definitive rejection with confirmed absence keeps the draft editable and shows one backend alert. |
+| Uncertain POST or failed reconciliation | Network loss, malformed or inconsistent responses, conflict with no confirmed profile, and failed post-write reads keep creation disabled. Consultar estado only reads. A confirmed profile retires the creation form. |
+| Resume and explicit recovery | Silent reads retain the same draft and focus. A background 404 cannot release the creation gate. A foreground check can supersede a silent read and release the gate after confirmed absence. Repeated visibility events cannot interrupt a write. Failed reads retain the draft and inline recovery. See [resume review](resume-glitch.md). |
+| Account actions, sign-out and identity replacement | The account dialog lock excludes a concurrent write or check. Abort and session ownership discard late responses, drafts and creation feedback from the previous account. |
+
+Validation: `npm run test:focused -- src/onboarding/ProfileForm.test.tsx src/onboarding/Onboarding.test.tsx --maxWorkers=2` passed 159 tests. `npm run typecheck`, `npm run check:architecture` (88 modules, zero runtime cycles), and `npm run build` for both `dev` and `prod` with the CI fixture configuration passed. Vite reported the existing chunk-size advisory. Test requests use simulated HTTP and identity. The full test suite and live browser/device checks were outside this run.
+
 ## Web environment configuration
 
 Audited Android's [flavor and dependency isolation](../../reals-app/app/build.gradle.kts), [App Check installers by source set](../../reals-app/docs/local-development.md#firebase-app-check), and the [backend API contract](../../reals-backend/docs/commons/api.md). This change concerns build configuration and request destinations. Existing visual, navigation, accessibility, lifecycle and session parity is tracked in the relevant product sections below.

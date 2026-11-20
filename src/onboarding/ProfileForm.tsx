@@ -1,9 +1,10 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { defaults, genders, genderLabels, intentions, intentionLabels, normalize, preferenceLabels, validate } from './contracts';
 import type { Country, Fields, FullProfile } from './contracts';
 import { AgeRangeSlider } from './AgeRangeSlider';
 
-export function ProfileForm({ profile, catalog, countryError, retryCountries, busy, submit, mode = 'create', onDirtyChange, saved = false, saving = false }: { saving?: boolean; saved?: boolean; onDirtyChange?: ((dirty: boolean) => void) | undefined; profile?: FullProfile; catalog: Country[]; countryError: string; retryCountries: () => void; busy: boolean; submit: (fields: Fields, mode: 'create' | 'details' | 'filters') => void; mode?: 'create' | 'details' | 'filters' }) {
+export function ProfileForm({ profile, catalog, countryError, retryCountries, busy, submit, mode = 'create', onDirtyChange, saved = false, saving = false, creationFeedback }: { creationFeedback?: ReactNode; saving?: boolean; saved?: boolean; onDirtyChange?: ((dirty: boolean) => void) | undefined; profile?: FullProfile; catalog: Country[]; countryError: string; retryCountries: () => void; busy: boolean; submit: (fields: Fields, mode: 'create' | 'details' | 'filters') => void; mode?: 'create' | 'details' | 'filters' }) {
   const [saveDismissed, setSaveDismissed] = useState(false);
   useLayoutEffect(() => { setSaveDismissed(false); }, [saved, busy]);
   const form = useRef<HTMLFormElement>(null);
@@ -20,6 +21,7 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
   const dirty = keys.some(key => JSON.stringify(fields[key]) !== JSON.stringify(baseline[key]));
   useLayoutEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
   const [errors, setErrors] = useState<string[]>([]);
+  const validationSummary = errors.length > 0 && <div id={errorId} role="alert">{errors.map(x => <p key={x}>{x}</p>)}</div>;
   useLayoutEffect(() => {
     if (errors.length) form.current?.querySelector<HTMLElement>('[aria-invalid=true]')?.focus();
   }, [errors]);
@@ -47,8 +49,7 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
     if (!issues.length) submit(clean,mode);
   }}>
     <fieldset className="form-controls" disabled={busy}>
-      {mode === 'create' && <button className="profile-submit" type="submit">{busy ? 'Guardando…' : 'Crear perfil'}</button>}
-      {errors.length > 0 && <div id={errorId} role="alert">{errors.map(x => <p key={x}>{x}</p>)}</div>}
+      {mode !== 'create' && validationSummary}
       {mode !== 'filters' && <fieldset className="profile-group">
         <legend>Sobre vos</legend>
         <div className="profile-fields">
@@ -88,5 +89,10 @@ export function ProfileForm({ profile, catalog, countryError, retryCountries, bu
         <p className="profile-save-feedback" role="status">{saved && !busy && !saveDismissed && <><span aria-hidden="true">✓ </span>Cambios guardados.</>}</p>
       </>}
     </fieldset>
+    {mode === 'create' && <>
+      {validationSummary}
+      {creationFeedback}
+      <button className="profile-submit" type="submit" disabled={busy}>{saving ? 'Guardando…' : 'Crear perfil'}</button>
+    </>}
   </form>;
 }
