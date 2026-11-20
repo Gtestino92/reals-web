@@ -2,9 +2,10 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [development, main]
   push:
-    branches: [main]
+    branches: [development, main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,10 +30,11 @@ jobs:
         run: npm run typecheck
       - name: Test
         run: npm test -- --maxWorkers=2
-      - name: Build
-        run: npm run build
+      - name: Build dev and prod
+        run: |
+          VITE_REALS_ENVIRONMENT=dev npm run build
+          VITE_REALS_ENVIRONMENT=prod npm run build
         env:
-          VITE_REALS_ENVIRONMENT: dev
           # Existing Web hostname used only as an origin fixture. CI does not serve or deploy dist.
           VITE_API_BASE_URL: https://reals-web.pages.dev
           VITE_FIREBASE_API_KEY: synthetic-key

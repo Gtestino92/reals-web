@@ -44,7 +44,7 @@ Manual regression: start `npm run dev -- --host 127.0.0.1` without a phone; conn
 
 ## Continuous integration
 
-[CI](../.github/workflows/ci.yml) runs on pull requests targeting `main` (opened, reopened, or updated) and pushes to `main`. Its single job, `Web validation` (job ID `validation`), runs on Ubuntu with Node.js 24, compatible with the `^24.15.0` engine requirement in `package.json`. The official `actions/setup-node` action caches npm's download cache using `package-lock.json`; dependencies are installed afresh with `npm ci`.
+[CI](../.github/workflows/ci.yml) runs on pull requests targeting `development` or `main` and on pushes to either branch. Manual dispatch can select a branch once this workflow is present on the repository's default branch. The `Web validation` job runs on Ubuntu with Node.js 24 and installs dependencies with `npm ci`.
 
 The job runs these commands in order and stops if a step fails:
 
@@ -53,12 +53,13 @@ npm ci
 npm run check:architecture
 npm run typecheck
 npm test -- --maxWorkers=2
-npm run build
+VITE_REALS_ENVIRONMENT=dev npm run build
+VITE_REALS_ENVIRONMENT=prod npm run build
 ```
 
-To inspect results, open the repository's **Actions** tab, select **CI**, then open a run and its **Web validation** job to view step logs. On a pull request, open **Checks** or follow **Details** beside the check. After the first successful run, require the exact status-check name **`Web validation`** (GitHub Actions) in the branch-protection rule for `main`. Keep this job name stable so the required check continues to match.
+To inspect results, open the CI run and its **Web validation** job, or open **Checks** on the pull request. After the first successful hosted run, require **`Web validation`** on both integration branches where branch protection or repository rules are available.
 
-The workflow has only `contents: read` permission and needs no custom secrets or backend connection. Its Build step supplies the [synthetic configuration in CI](../.github/workflows/ci.yml) to exercise the same Reals `dev` validation as Pages. For local build checks, use those fixture settings or a valid remote configuration and set both local-only flags to `false` if enabled in `.env.local`. See [deployment settings](deployment.md). GitHub-hosted execution must be confirmed by the first run.
+The workflow has only `contents: read` permission and needs no custom secrets or backend connection. The build step supplies [synthetic configuration](../.github/workflows/ci.yml) for both environments. For local build checks, use those fixture settings or a valid remote configuration and set both local-only flags to `false` if enabled in `.env.local`. See [deployment settings](deployment.md). GitHub-hosted execution must be confirmed by the first run.
 
 ### CodeQL analysis scope
 
@@ -68,7 +69,7 @@ the root `tools/**` directory from analysis. This is an analysis exclusion, not 
 workflow trigger filter: changes under tools still run CI, and the existing full
 regression suite continues testing those helpers. JavaScript/TypeScript and
 GitHub Actions remain analyzed with the default query suite. CodeQL runs for PRs
-targeting `main`, pushes to `main`, weekly, and manually.
+targeting `development` or `main`, pushes to either branch, weekly, and manually.
 
 Activation: the repository currently uses CodeQL **default setup** (verified
 read-only while preparing this change). A standalone configuration file does

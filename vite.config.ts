@@ -9,7 +9,10 @@ export default defineConfig({
     {
       name: 'reals-environment',
       apply: 'build',
-      configResolved({ env }) { validateBuildEnvironment(env); },
+      configResolved({ env }) {
+        // Cloudflare metadata comes from the host process, outside Vite's mode-specific env files.
+        validateBuildEnvironment(env, process.env);
+      },
     },
     react(),
     androidTunnelPlugin(),
