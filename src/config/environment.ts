@@ -59,8 +59,17 @@ export function appCheckSettings(env: EnvironmentVariables) {
   return { provider, siteKey };
 }
 
-export function validateBuildEnvironment(env: EnvironmentVariables): void {
-  resolveEnvironment(env, true);
+export function validateBuildEnvironment(env: EnvironmentVariables, pages: EnvironmentVariables = {}): void {
+  const { name } = resolveEnvironment(env, true);
+  if ([pages.CF_PAGES, pages.CF_PAGES_BRANCH, pages.CF_PAGES_COMMIT_SHA, pages.CF_PAGES_URL].some(value => value !== undefined)) {
+    if (pages.CF_PAGES !== '1') throw new Error('Cloudflare Pages builds require CF_PAGES=1.');
+    const branch = pages.CF_PAGES_BRANCH;
+    if (branch !== 'development' && branch !== 'main') {
+      throw new Error('CF_PAGES_BRANCH must be development or main for a Cloudflare Pages build.');
+    }
+    const expected = branch === 'development' ? 'dev' : 'prod';
+    if (name !== expected) throw new Error(`Cloudflare Pages branch ${branch} requires VITE_REALS_ENVIRONMENT=${expected}.`);
+  }
   const missing = missingFirebaseSettings(env);
   if (missing.length) throw new Error(`Configure the Firebase Web app for the selected environment: ${missing.join(', ')}.`);
   if (!appCheckSettings(env)) throw new Error('Set VITE_FIREBASE_APP_CHECK_PROVIDER=enterprise and configure VITE_FIREBASE_APP_CHECK_SITE_KEY for the selected Web app.');

@@ -2,9 +2,9 @@ name: CodeQL Advanced
 
 on:
   push:
-    branches: [main]
+    branches: [development, main]
   pull_request:
-    branches: [main]
+    branches: [development, main]
   schedule:
     - cron: '21 20 * * 2'
   workflow_dispatch:
