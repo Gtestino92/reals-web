@@ -553,8 +553,143 @@ it('updates details and filters using separate contracts', async () => { profile
   fireEvent.click(screen.getByText('Preferencias de búsqueda',{ selector:'summary' })); const filters = screen.getByRole('form',{ name:'Preferencias de búsqueda' }); fireEvent.change(within(filters).getByLabelText('Intención'),{ target:{ value:'FRIENDSHIP' } }); fireEvent.submit(filters); await waitFor(() => expect(profile?.intention).toBe('FRIENDSHIP')); expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body))).not.toHaveProperty('city');
 });
 it('reorders all placements and deletes by ID with confirmation', async () => { profile = { ...initialProfile }; list = [initialPhoto,{ ...initialPhoto,id:'second',position:2 }]; vi.spyOn(window,'confirm').mockReturnValue(true); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); reorderWithKeyboard(1,2); await waitFor(() => expect(list[0]?.position).toBe(2)); await waitFor(() => expect(window.document.querySelector('.onboarding')).toHaveAttribute('aria-busy', 'false')); expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body)).placements).toEqual([{ photoId:'second',position:1 },{ photoId:'photo',position:2 }]); fireEvent.click(screen.getByRole('button',{ name:'Eliminar foto 2' })); await waitFor(() => expect(list).toHaveLength(1)); expect(writes('DELETE')[0]?.[0]).toBe('/api/me/profile/photos/photo'); });
-it.each(['EMAIL_NOT_VERIFIED','PROFILE_PHOTOS_REQUIRED','PROFILE_PERSON_PHOTO_REQUIRED','PROFILE_FULL_BODY_PHOTO_REQUIRED','PROFILE_PHOTO_MODERATION_NOT_APPROVED','PROFILE_AUTHENTICITY_VERIFICATION_REQUIRED','LEGAL_ACTION_REQUIRED','PROFILE_NOT_ACTIVATABLE'])('retains draft after activation rejection %s', async code => {
-  profile = { ...initialProfile }; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/activation') ? Promise.resolve(json({ code },409)) : original(input,options)); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); fireEvent.click(screen.getByRole('button',{ name:'Activar perfil' })); await screen.findByRole('alert'); expect(screen.queryByRole('heading',{ name:'Inicio' })).not.toBeInTheDocument(); expect(profile.status).toBe('DRAFT');
+it.each([
+  ['PROFILE_PHOTOS_REQUIRED', 'Profile must have at least 2 validated photos', 'Necesitás al menos 2 fotos validadas.'],
+  ['PROFILE_PHOTOS_REQUIRED', 'Profile must have at least 6 validated photos', 'Necesitás al menos 6 fotos validadas.'],
+  ['PROFILE_PERSON_PHOTO_REQUIRED', 'Profile must have at least 1 validated person photos', 'Necesitás al menos 1 foto validada donde se te vea con claridad.'],
+  ['PROFILE_FULL_BODY_PHOTO_REQUIRED', 'Profile must have at least 3 validated full-body photos', 'Necesitás al menos 3 fotos validadas de cuerpo completo.'],
+  ['PROFILE_PHOTOS_REQUIRED', 'Profile must have at least 9 validated person photos', 'Necesitás más fotos validadas para activar el perfil.'],
+  ['PROFILE_PHOTOS_REQUIRED', 'Profile must have at least 9007199254740992 validated photos', 'Necesitás más fotos validadas para activar el perfil.'],
+  ['PROFILE_PHOTOS_REQUIRED', '<b>3 fotos</b>', 'Necesitás más fotos validadas para activar el perfil.'],
+  ['PROFILE_PERSON_PHOTO_REQUIRED', undefined, 'Necesitás más fotos validadas donde se te vea con claridad.'],
+  ['PROFILE_FULL_BODY_PHOTO_REQUIRED', undefined, 'Necesitás más fotos validadas de cuerpo completo.'],
+  ['PROFILE_PHOTO_MODERATION_NOT_APPROVED', undefined, 'Hay fotos pendientes de aprobación o rechazadas. Revisá sus estados.'],
+  ['EMAIL_NOT_VERIFIED', undefined, 'Verificá tu email antes de activar el perfil.'],
+  ['PROFILE_AUTHENTICITY_VERIFICATION_REQUIRED', undefined, 'Se requiere verificar la autenticidad de tu perfil antes de activarlo.'],
+  ['LEGAL_ACTION_REQUIRED', undefined, 'Revisá los documentos legales vigentes antes de continuar.'],
+  ['PROFILE_NOT_ACTIVATABLE', undefined, 'El perfil no se puede activar en su estado actual. Actualizá el estado.'],
+  ['UNEXPECTED_CODE', '<i>server detail</i>', 'No pudimos activar tu perfil. Consultá el estado y volvé a intentar.'],
+])('shows activation rejection %s (%s) once in the final section', async (code, message, expected) => {
+  profile = { ...initialProfile };
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile/activation' ? Promise.resolve(json({ code, message }, 409)) : base(path, options));
+  mount();
+  const section = await screen.findByRole('region', { name: 'Activación del perfil' });
+  const activate = within(section).getByRole('button', { name: 'Activar perfil' });
+  expect(activate).toBeEnabled();
+  fireEvent.click(activate);
+  const alert = await within(section).findByRole('alert');
+  expect(screen.getAllByRole('alert')).toEqual([alert]);
+  expect(alert).toHaveTextContent(expected);
+  expect(activate).toHaveAccessibleDescription(expected);
+  expect(within(section).getByRole('button', { name: 'Consultar estado' })).toBeEnabled();
+  expect(screen.queryByRole('heading', { name: 'Verificá tu email' })).toBeNull();
+  expect(writes('POST')).toHaveLength(1);
+  expect(profile.status).toBe('DRAFT');
+});
+
+it.each(['network', 'malformed', 'server failure'] as const)('requires reconciliation after an uncertain activation (%s)', async outcome => {
+  profile = { ...initialProfile };
+  const base = fetcher.getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile/activation'
+    ? outcome === 'network' ? Promise.reject(new TypeError('offline')) : Promise.resolve(outcome === 'malformed' ? json({ unexpected: true }) : json({ code: 'UNAVAILABLE' }, 503))
+    : base(path, options));
+  mount();
+  const section = await screen.findByRole('region', { name: 'Activación del perfil' });
+  const activate = within(section).getByRole('button', { name: 'Activar perfil' });
+  fireEvent.click(activate);
+  await within(section).findByRole('alert');
+  const check = within(section).getByRole('button', { name: 'Consultar estado' });
+  expect(activate).toBeDisabled();
+  check.focus();
+  await act(async () => window.document.dispatchEvent(new Event('visibilitychange')));
+  expect(activate).toBeDisabled();
+  expect(check).toHaveFocus();
+  fireEvent.click(activate);
+  expect(writes('POST')).toHaveLength(1);
+
+  let lateSignal: AbortSignal | null | undefined;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' ? new Promise(resolve => { finish = resolve; lateSignal = options?.signal; }) : base(path, options));
+  act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(finish).toBeDefined());
+  fetcher.mockImplementation(base);
+  fireEvent.click(check);
+  expect(lateSignal?.aborted).toBe(true);
+  await waitFor(() => expect(activate).toBeEnabled());
+  await act(async () => finish(json({ ...initialProfile, status: 'ACTIVE' })));
+  expect(screen.getByRole('region', { name: 'Activación del perfil' })).toBe(section);
+  expect(within(section).queryByRole('alert')).toBeNull();
+  expect(writes('POST')).toHaveLength(1);
+});
+
+it('accepts an active profile discovered after a lost activation response without reposting', async () => {
+  profile = { ...initialProfile, status: 'INACTIVE' };
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => {
+    if (path !== '/api/me/profile/activation') return base(path, options);
+    profile = { ...initialProfile, status: 'ACTIVE' };
+    return Promise.reject(new TypeError('offline after write'));
+  });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Activar perfil' }));
+  await screen.findByRole('heading', { name: 'Inicio' });
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(writes('POST')).toHaveLength(1);
+});
+
+it('retains failed activation recovery through resume and drops it on account replacement', async () => {
+  profile = { ...initialProfile };
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile/activation' ? Promise.reject(new TypeError('offline')) : base(path, options));
+  mount();
+  const section = await screen.findByRole('region', { name: 'Activación del perfil' });
+  const activate = within(section).getByRole('button', { name: 'Activar perfil' });
+  fireEvent.click(activate);
+  await within(section).findByRole('alert');
+  const check = within(section).getByRole('button', { name: 'Consultar estado' });
+  const photos = screen.getByRole('button', { name: 'Fotos' });
+  fireEvent.click(photos);
+  check.focus();
+
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' ? Promise.resolve(json({ code: 'UNAVAILABLE' }, 503)) : base(path, options));
+  await act(async () => window.document.dispatchEvent(new Event('visibilitychange')));
+  expect(screen.getByRole('button', { name: 'Fotos' })).toBe(photos);
+  expect(photos).toHaveAttribute('aria-expanded', 'false');
+  expect(check).toHaveFocus();
+  expect(activate).toBeDisabled();
+  expect(screen.getAllByRole('alert')).toEqual([within(section).getByRole('alert')]);
+
+  let finish!: (response: Response) => void;
+  let signal: AbortSignal | null | undefined;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile' ? new Promise(resolve => { finish = resolve; signal = options?.signal; }) : base(path, options));
+  fireEvent.click(check);
+  await waitFor(() => expect(finish).toBeDefined());
+  act(() => observer(null));
+  await screen.findByRole('button', { name: 'Ingresar' });
+  profile = { ...initialProfile, id: 'other-profile', userId: 'other' };
+  fetcher.mockImplementation((path, options) => path === '/api/me' ? Promise.resolve(json({ id: 'other', status: 'ACTIVE' })) : base(path, options));
+  act(() => observer({ ...user, uid: 'other-firebase-user' }));
+  const replacement = await screen.findByRole('region', { name: 'Activación del perfil' });
+  await act(async () => finish(json({ ...initialProfile, status: 'ACTIVE' })));
+  expect(signal?.aborted).toBe(true);
+  expect(replacement).not.toBe(section);
+  expect(within(replacement).getByRole('button', { name: 'Activar perfil' })).toBeEnabled();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(writes('POST')).toHaveLength(1);
+});
+
+it('honors Firebase when verification changes during the activation token refresh', async () => {
+  profile = { ...initialProfile };
+  vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user, 'emailVerified', { value: false }); });
+  mount();
+  const activate = await screen.findByRole('button', { name: 'Activar perfil' });
+  fireEvent.click(activate);
+  expect(await within(screen.getByRole('region', { name: 'Activación del perfil' })).findByRole('alert')).toHaveTextContent('Verificá tu email antes de activar el perfil.');
+  expect(screen.getByRole('heading', { name: 'Verificá tu email' })).toBeVisible();
+  expect(user.getIdToken).toHaveBeenCalledWith(true);
+  expect(activate).toBeDisabled();
+  expect(writes('POST')).toHaveLength(0);
 });
 it('email resend and reload use Firebase with cooldown', async () => { profile = { ...initialProfile }; Object.defineProperty(user,'emailVerified',{ value:false,configurable:true }); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); fireEvent.click(screen.getByRole('button',{ name:'Reenviar correo' })); await waitFor(() => expect(screen.getByRole('button',{ name:/Reenviar correo/ })).toBeDisabled()); expect(auth.verify).toHaveBeenCalledOnce(); vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user,'emailVerified',{ value:true,configurable:true }); }); fireEvent.click(screen.getByRole('button',{ name:'Ya verifiqué' })); await screen.findByText('Email verificado.'); expect(screen.queryByRole('heading',{ name:'Verificá tu email' })).not.toBeInTheDocument(); });
 it('rejects stale domain results after sign-out', async () => { let finish: ((value: Response) => void) | undefined; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options)); mount(); await waitFor(() => expect(finish).toBeDefined()); confirmSignOut(); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => { finish?.(json({ requirementsSatisfied:true,documents:[] })); }); expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument(); });
@@ -1146,14 +1281,43 @@ it('rejects detached drop/picker callbacks after sign-out', async () => {
 it.each([
   ['NOT_STARTED','Sin iniciar'], ['PENDING','En proceso'], ['VERIFIED','Verificada'],
   ['REJECTED','No aprobada'], ['NEEDS_REVIEW','Requiere revisión'], ['STALE','Requiere una nueva verificación'],
-])('presents authenticity %s in Spanish without changing activation eligibility', async (status,label) => {
+])('keeps authenticity state %s out of setup without changing activation eligibility', async (status) => {
   profile = { ...initialProfile,authenticityVerificationStatus:status };
   mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
-  expect(screen.getByText(`Autenticidad: ${label}`)).toBeInTheDocument();
-  expect(screen.queryByText(`Autenticidad: ${status}`)).not.toBeInTheDocument();
-  expect(screen.getByText(/La validación de fotos revisa cada imagen/)).toHaveTextContent('proceso separado');
+  expect(screen.queryByText(/Autenticidad:/)).toBeNull();
+  expect(screen.queryByText(/La validación de fotos revisa cada imagen/)).toBeNull();
   expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled();
   expect(fetcher.mock.calls.some(x => String(x[0]).includes('/authenticity-verification'))).toBe(false);
+});
+it.each([
+  { status: 'DRAFT', verified: false, copy: 'Tu perfil está en borrador' },
+  { status: 'DRAFT', verified: true, copy: 'Tu perfil está en borrador' },
+  { status: 'INACTIVE', verified: false, copy: 'Tu perfil está inactivo' },
+])('orders setup for $status (verified=$verified)', async ({ status, verified, copy }) => {
+  profile = { ...initialProfile, status };
+  user = { ...user, emailVerified: verified, ...(verified && { providerData: [{ providerId: 'google.com', uid: 'g', displayName: null, email: null, phoneNumber: null, photoURL: null }] }) };
+  mount();
+  const state = await screen.findByText(copy);
+  const email = screen.queryByRole('heading', { name: 'Verificá tu email' });
+  const photos = screen.getByRole('button', { name: 'Fotos' });
+  const questions = screen.queryByRole('heading', { name: 'Preguntas del perfil' });
+  const preview = screen.queryByRole('button', { name: 'Vista previa de mi perfil' });
+  const activate = screen.getByRole('button', { name: 'Activar perfil' });
+  const account = screen.getByRole('button', { name: 'Cuenta' });
+  const order = [state, email, photos, questions, screen.getByText('Datos del perfil', { selector: 'summary' }),
+    screen.getByText('Preferencias de búsqueda', { selector: 'summary' }), preview, activate, account].filter(node => node !== null);
+  for (let i = 1; i < order.length; i++) {
+    expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  }
+  expect(photos).toHaveAttribute('aria-expanded', 'true');
+  expect(account).toHaveAttribute('aria-expanded', 'false');
+  expect(!!email).toBe(!verified);
+  expect(!!questions).toBe(status === 'DRAFT');
+  expect(!!preview).toBe(status === 'DRAFT');
+  if (preview) expect(within(preview.parentElement!).getByText(/La vista previa es privada.*no activa ni publica/)).toBeVisible();
+  if (verified) expect(activate).toBeEnabled();
+  else expect(activate).toBeDisabled();
+  expect(screen.queryByText(/Estado: (DRAFT|INACTIVE)|cuatro fotos validadas/)).toBeNull();
 });
 it.each([true,false])('renders verification section and its link only for unverified restored users (verified=%s)', async verified => {
   profile = { ...initialProfile }; Object.defineProperty(user,'emailVerified',{ value:verified,configurable:true });

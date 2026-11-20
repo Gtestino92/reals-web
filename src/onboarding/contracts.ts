@@ -7,14 +7,6 @@ export const intentions = ['DATE', 'FRIENDSHIP', 'CASUAL'] as const;
 export const genderLabels = ['Hombre', 'Mujer', 'No binario', 'Otra identidad'];
 export const preferenceLabels = ['Hombres', 'Mujeres', 'Personas no binarias', 'Otras identidades'];
 export const intentionLabels = ['Citas', 'Amistad', 'Algo casual'];
-export const authenticityLabels: Record<string, string> = {
-  NOT_STARTED: 'Sin iniciar',
-  PENDING: 'En proceso',
-  VERIFIED: 'Verificada',
-  REJECTED: 'No aprobada',
-  NEEDS_REVIEW: 'Requiere revisión',
-  STALE: 'Requiere una nueva verificación',
-};
 export interface Fields {
   displayName: string; birthDate: string; gender: string; lookingForGenders: string[]; intention: string;
   city: string; countryCode: string; bio: string; preferredMinAge: number; preferredMaxAge: number; maxDistanceKm: number;
