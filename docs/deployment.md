@@ -14,11 +14,11 @@ For local use, copy [`.env.example`](../.env.example) to `.env.local`, leave the
 
 Branch `feature/*` and `fix/*` from `development` and open PRs targeting `development`. Promote a tested release from `development` to `main` through a separate PR. The **Web validation** check runs architecture checks, typecheck, tests and both synthetic `dev` and `prod` builds on PRs and pushes to either integration branch. Where the repository plan and visibility support it, require PRs and a successful **Web validation** check on both branches with branch protection or repository rules. Restrict direct pushes and review who can bypass the rules. [CI details](testing.md#continuous-integration) · [GitHub protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
 
-Cloudflare Pages builds automatically when its configured integration branch advances. GitHub Actions runs validation only. A push can trigger Pages while the push checks are still running, so GitHub branch protection must enforce passing PR checks **before** a change reaches the branch.
+When automatic deployments are enabled, Cloudflare Pages builds as its configured integration branch advances. GitHub Actions runs validation only. A push can trigger Pages while the push checks are still running, so GitHub branch protection must enforce passing PR checks **before** a change reaches the branch.
 
 ## Cloudflare Pages settings
 
-Switch the existing project's **production branch** from `main` to `development`. Its **Production** configuration scope will serve **Reals `dev`** at the same Pages URL, using the existing development Firebase Web app and registration. Set automatic Preview branch deployments to **None**. Keep repository `Gtestino92/reals-web`, Node.js 24, build command `npm ci && npm run build` and output directory `dist`. When production is ready, configure a separate Pages project with `main` as its production branch, its own backend origin and its production Firebase configuration. [Pages branch deployment controls](https://developers.cloudflare.com/pages/configuration/branch-build-controls/) · [Pages build configuration](https://developers.cloudflare.com/pages/configuration/build-configuration/)
+The existing project's **production branch** is already set to `development`. Its **Production** configuration scope is for **Reals `dev`** at the same Pages URL, using the existing development Firebase Web app and registration. Automatic deployments are paused while the Railway integration is finalized. Ensure automatic Preview branch deployments are set to **None** before resuming. Keep repository `Gtestino92/reals-web`, Node.js 24, build command `npm ci && npm run build` and output directory `dist`. When production is ready, configure a separate Pages project with `main` as its production branch, its own backend origin and its production Firebase configuration. [Pages branch deployment controls](https://developers.cloudflare.com/pages/configuration/branch-build-controls/) · [Pages build configuration](https://developers.cloudflare.com/pages/configuration/build-configuration/)
 
 | Pages Production scope variable | Existing development project | Future production project |
 | --- | --- | --- |
@@ -36,12 +36,11 @@ Keep Cloudflare's injected `CF_PAGES*` metadata intact. The build requires `CF_P
 
 All `VITE_*` values are public browser data. Keep service accounts, passwords, private keys and debug credentials out of these variables. GitHub CI uses synthetic Firebase values and an HTTPS syntax fixture. Its bundles are for validation only.
 
-## Migration order
+## Remaining rollout steps
 
-1. Verify `origin/development` exists and points to the intended baseline. If absent, create it once from the intended `origin/main` baseline in GitHub and verify it before touching Pages. Reuse an existing branch.
-2. Once `development` exists, set automatic Preview branch deployments to **None** on the existing Pages project. Open the workflow PR against `development`, wait for **Web validation** to pass on GitHub, and enforce required PR checks on both branches where supported before merging. Hold production promotion while the existing project still deploys from `main`.
-3. Once the Railway development backend, CORS and dependencies are ready, switch the existing project's production branch to `development` and apply the development variables above before letting it deploy. If these changes cannot be made together, pause automatic production deployments for the handoff and re-enable them once both the branch and its variables are correct. Keep the existing development URL and Firebase settings.
-4. Verify the Pages build and deployed browser against the development backend. Set up the independent production project when its backend and Firebase configuration are ready, then promote a verified release via a `development` → `main` PR.
+1. Use the existing `development` branch for the workflow PR, wait for **Web validation** to pass on GitHub, and enforce required PR checks on both branches where supported before merging.
+2. Once the Railway development backend, CORS and dependencies are ready, verify the development variables above and resume automatic deployments from `development`. Keep the existing development URL and Firebase settings.
+3. Verify the Pages build and deployed browser against the development backend. Set up the independent production project when its backend and Firebase configuration are ready, then promote a verified release via a `development` → `main` PR.
 
 ## Remaining integration
 

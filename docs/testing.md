@@ -69,7 +69,7 @@ the root `tools/**` directory from analysis. This is an analysis exclusion, not 
 workflow trigger filter: changes under tools still run CI, and the existing full
 regression suite continues testing those helpers. JavaScript/TypeScript and
 GitHub Actions remain analyzed with the default query suite. CodeQL runs for PRs
-targeting `main`, pushes to `main`, weekly, and manually.
+targeting `development` or `main`, pushes to either branch, weekly, and manually.
 
 Activation: the repository currently uses CodeQL **default setup** (verified
 read-only while preparing this change). A standalone configuration file does
