@@ -60,8 +60,8 @@ describe('Reals environment selection', () => {
 });
 
 describe('public builds', () => {
-  it.each(['dev', 'prod'])('accepts complete %s build settings', name => {
-    expect(() => validateBuildEnvironment({ ...deployment, VITE_REALS_ENVIRONMENT: name })).not.toThrow();
+  it.each(['dev', 'prod'])('accepts synthetic %s CI build settings without Pages metadata', name => {
+    expect(() => validateBuildEnvironment({ ...deployment, VITE_REALS_ENVIRONMENT: name }, { CI: 'true', GITHUB_ACTIONS: 'true' })).not.toThrow();
   });
 
   it.each([
@@ -73,5 +73,44 @@ describe('public builds', () => {
     ['VITE_FIREBASE_APP_CHECK_DEBUG', 'true'], ['VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION', 'true'],
   ])('fails closed for invalid %s', (key, value) => {
     expect(() => validateBuildEnvironment({ ...deployment, [key]: value })).toThrow(key);
+  });
+});
+
+describe('Cloudflare Pages builds', () => {
+  it.each([
+    ['development', 'dev'],
+    ['main', 'prod'],
+  ])('accepts %s with Reals %s', (branch, name) => {
+    expect(() => validateBuildEnvironment({ ...deployment, VITE_REALS_ENVIRONMENT: name }, {
+      CF_PAGES: '1', CF_PAGES_BRANCH: branch,
+    })).not.toThrow();
+  });
+
+  it.each([
+    ['development', 'prod', 'dev'],
+    ['main', 'dev', 'prod'],
+  ])('rejects %s with Reals %s regardless of Vite mode', (branch, name, expected) => {
+    const pages = { CF_PAGES: '1', CF_PAGES_BRANCH: branch };
+    const env = { ...deployment, VITE_REALS_ENVIRONMENT: name };
+    expect(() => validateBuildEnvironment(env, pages)).toThrow(`VITE_REALS_ENVIRONMENT=${expected}`);
+    expect(() => validateBuildEnvironment({ ...env, ...local }, pages)).toThrow(`VITE_REALS_ENVIRONMENT=${expected}`);
+  });
+
+  it.each([undefined, '', 'Development', 'main ', 'feature/preview', 'refs/heads/main'])('rejects missing or unsupported Pages branch %j', branch => {
+    expect(() => validateBuildEnvironment(deployment, { CF_PAGES: '1', CF_PAGES_BRANCH: branch })).toThrow('CF_PAGES_BRANCH');
+  });
+
+  it.each([undefined, '', '0', 'true', ' 1 '])('rejects incomplete or malformed Pages marker %j', marker => {
+    expect(() => validateBuildEnvironment(deployment, { CF_PAGES: marker, CF_PAGES_BRANCH: 'development' })).toThrow('CF_PAGES=1');
+  });
+
+  it.each(['CF_PAGES_COMMIT_SHA', 'CF_PAGES_URL'])('recognizes incomplete Pages metadata from %s alone', key => {
+    expect(() => validateBuildEnvironment(deployment, { [key]: 'fixture' })).toThrow('CF_PAGES=1');
+  });
+
+  it.each(['local', '', 'DEV', 'dev '])('rejects malformed or local Reals selection %j on Pages', name => {
+    expect(() => validateBuildEnvironment({ ...deployment, ...local, VITE_REALS_ENVIRONMENT: name }, {
+      CF_PAGES: '1', CF_PAGES_BRANCH: 'development',
+    })).toThrow('VITE_REALS_ENVIRONMENT');
   });
 });
