@@ -26,6 +26,26 @@ function fillRequired() {
 }
 const submitForm = () => fireEvent.submit(screen.getByRole('form'));
 
+it('puts creation validation and submit after the distance preference', () => {
+  const { submit } = mount();
+  const form = screen.getByRole('form', { name: 'Crear perfil' });
+  const create = within(form).getByRole('button', { name: 'Crear perfil' });
+  const distance = within(form).getByRole('slider', { name: /Distancia máxima/ });
+  expect(distance.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(form.lastElementChild).toBe(create);
+
+  fireEvent.click(create);
+  const summary = within(form).getByRole('alert');
+  expect(summary.nextElementSibling).toBe(create);
+  expect(distance.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const name = within(form).getByLabelText('Nombre visible');
+  expect(name).toHaveFocus();
+  expect(name).toHaveAttribute('aria-invalid', 'true');
+  expect(name).toHaveAttribute('aria-describedby', summary.id);
+  expect(name).toHaveAccessibleDescription(/Nombre visible/);
+  expect(submit).not.toHaveBeenCalled();
+});
+
 it.each(['create','filters'] as const)('focuses only missing intention in %s while interested genders stay valid', mode => {
   const { submit } = mount(mode === 'create' ? {} : { profile:existing, mode });
   if (mode === 'create') fillRequired();

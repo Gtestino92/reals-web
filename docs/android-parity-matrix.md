@@ -1,5 +1,56 @@
 # Android-first migration and First Chat parity
 
+## Initial profile creation footer
+
+Web base `c8b9d45`. Reviewed Android `development` at `97827fb`, including [CreateProfileScreen](../../reals-app/app/src/main/java/com/reals/app/ui/profile/CreateProfileScreen.kt), its country and preference controls, [DeleteAccountSection](../../reals-app/app/src/main/java/com/reals/app/ui/profile/DeleteAccountSection.kt), and the Ready → Missing routing and create ownership in [RealsApp](../../reals-app/app/src/main/java/com/reals/app/ui/root/RealsApp.kt) and [ProfileOperationHandler](../../reals-app/app/src/main/java/com/reals/app/ui/root/ProfileOperationHandler.kt). Reviewed Android validation, repository and account-dialog tests, the screenshot gallery (including the collapsed Cuenta card in [2.jpeg](../../reals-app/docs/assets/2.jpeg)), and the [profile API contract](../../reals-backend/docs/commons/openapi.yaml#L499). The gallery does not depict initial creation.
+
+| Behavior | Before → after | Evidence and remaining differences |
+| --- | --- | --- |
+| Footer order and feedback | **PARTIAL → COMPLETE** for distance → validation/API feedback → create, with a single API alert and its status action in the footer. | [ProfileForm](../src/onboarding/ProfileForm.tsx), [Onboarding](../src/onboarding/Onboarding.tsx) and focused tests verify DOM order, field descriptions, first-invalid focus, and pending/disabled states. Web uses semantic alerts and can retain distinct local validation and API recovery feedback together. |
+| Pending, empty, and recovery states | **PARTIAL → COMPLETE** for tested creation and status-check paths. | Web retains its existing country loading, draft, and confirmed profile transitions. Web checks server state after the POST and exposes a read-only recovery action when a write cannot be confirmed. |
+| Cuenta and navigation | **COMPLETE** for the collapsed card after the form and confirmed sign-out/recoverable deletion. **PLATFORM-LIMITED** for Compose scrolling and Android system Back. | [AccountSection](../src/home/AccountSection.tsx) uses the existing browser expansion and modal dialogs. Tests cover cancel, focus return, confirm, and no account write on cancel. |
+| Styling, input controls, gestures and responsive layout | **PARTIAL** overall. | Existing Web field groups, theme tokens, single/two-column breakpoints, explicit initial choices, native date/country controls and preference interactions carry forward. Footer order applies at both breakpoints. Live mobile/desktop, screen-reader and Android rendering remain unverified. |
+
+| Mutation or response path | Invariant |
+| --- | --- |
+| Client validation, POST, definitive rejection | Validation focuses the first invalid field and sends no request. One owned foreground operation may write. A definitive rejection with confirmed absence keeps the draft editable and shows one backend alert. |
+| Uncertain POST or failed reconciliation | Network loss, malformed or inconsistent responses, conflict with no confirmed profile, and failed post-write reads keep creation disabled. Consultar estado only reads. A confirmed profile retires the creation form. |
+| Resume and explicit recovery | Silent reads retain the same draft and focus. A background 404 cannot release the creation gate. A foreground check can supersede a silent read and release the gate after confirmed absence. Repeated visibility events cannot interrupt a write. Failed reads retain the draft and inline recovery. See [resume review](resume-glitch.md). |
+| Account actions, sign-out and identity replacement | The account dialog lock excludes a concurrent write or check. Abort and session ownership discard late responses, drafts and creation feedback from the previous account. |
+
+Validation: `npm run test:focused -- src/onboarding/ProfileForm.test.tsx src/onboarding/Onboarding.test.tsx --maxWorkers=2` passed 159 tests. `npm run typecheck`, `npm run check:architecture` (88 modules, zero runtime cycles), and `npm run build` for both `dev` and `prod` with the CI fixture configuration passed. Vite reported the existing chunk-size advisory. Test requests use simulated HTTP and identity. The full test suite and live browser/device checks were outside this run.
+
+## Post-creation setup and activation
+
+Web task base `27635b1`. Android `development` `97827fb` references include [ProfileStatusScreen](../../reals-app/app/src/main/java/com/reals/app/ui/profile/ProfileStatusScreen.kt), [ProfilePhotosSection](../../reals-app/app/src/main/java/com/reals/app/ui/profile/ProfilePhotosSection.kt), [ProfileOperationHandler](../../reals-app/app/src/main/java/com/reals/app/ui/root/ProfileOperationHandler.kt), [ProfileReadPolicy](../../reals-app/app/src/main/java/com/reals/app/ui/root/ProfileReadPolicy.kt), and Android email, profile management, photo progress and resume tests. Backend `development` `18906a6` references include the [activation API](../../reals-backend/docs/commons/openapi.yaml#L534), [ProfileService](../../reals-backend/src/main/kotlin/com/reals/backend/service/ProfileService.kt) and [photo requirement messages](../../reals-backend/src/main/kotlin/com/reals/backend/service/photo/ProfilePhotoService.kt#L134).
+
+| Behavior | Before → after | Evidence and differences |
+| --- | --- | --- |
+| Setup hierarchy and responsive styling | **PARTIAL → COMPLETE** for the requested Web order. | [Onboarding](../src/onboarding/Onboarding.tsx) shows distinct status copy, conditional email, expanded Fotos, optional questions where supported, details, preferences, private preview where supported, activation and collapsed Cuenta. Android nests verification and activation within Photos and presents its activation button for Draft. Web keeps the backend-supported Inactive activation flow. |
+| Email, photo operations and activation errors | **PARTIAL → COMPLETE** for tested UI and recovery paths. | Firebase controls email visibility and refreshes the token. Web keeps photo operations and the backend's activation decision. Exact 409 photo message formats yield server-supplied counts. Unknown formats use Spanish fallback copy. Static authenticity status and local minimum-count guidance were removed. |
+| Preview, questions, focus and navigation | **COMPLETE** for the tested supported-status entry and return flows. **PLATFORM-LIMITED** for Android system Back and dialog presentation. | Draft preview uses saved data, is private, and preserves History, focus, and parent drafts. Inactive does not support owner preview or profile questions under the existing policy. |
+
+| Mutation or response path | Invariant |
+| --- | --- |
+| Verification and activation | Firebase resend/check cooldowns and fresh token remain in the session flow. A reload reporting unverified prevents the POST. The owned foreground operation excludes overlapping writes and respects crop, account and nested navigation locks. |
+| Definitive rejection / confirmed activation | Show one action-scoped alert and leave the confirmed profile authoritative. A confirmed active profile exits setup even when the activation response was lost. |
+| Uncertain write / failed read | Network, malformed or inconsistent responses, server failures and failed reconciliation retain a blocked activation lane. Consultar estado performs a read. A silent refresh with a non-active profile cannot unlock another POST. |
+| Resume, supersession and identity | Same-owner silent reads retain DOM, focus and expansion, while the explicit check may abort and supersede a delayed read. Sign-out or account replacement aborts pending work and drops the previous result. See [resume review](resume-glitch.md). |
+
+Validation: `npm run test:focused -- src/onboarding/Onboarding.test.tsx src/onboarding/contracts.test.ts src/onboarding/ProfileForm.test.tsx --maxWorkers=2` passed 219 tests. The subsequent `npm run test:focused -- src/onboarding/Onboarding.test.tsx -t 'retains failed activation recovery' --maxWorkers=1` passed the added failure/identity regression. `npm run typecheck`, `npm run check:architecture` (88 modules, zero runtime cycles), and `npm run build` for both `dev` and `prod` with synthetic CI settings passed. The existing Vite chunk-size advisory remains. Headless Chrome checked 390×844 and 1440×900 in light and dark with simulated verified/unverified Firebase identities and a simulated 409. Section order, primary button width, inline error placement, and absence of horizontal overflow passed. Android pixel parity, a physical device, assistive technology and live DEV activation/photo analysis were outside the run.
+
+## Email verification recovery
+
+Reviewed Android [SessionCoordinator](../../reals-app/app/src/main/java/com/reals/app/ui/root/SessionCoordinator.kt), [FirebaseAuthRepository](../../reals-app/app/src/main/java/com/reals/app/data/repository/FirebaseAuthRepository.kt), and [ProfileOperationHandler](../../reals-app/app/src/main/java/com/reals/app/ui/root/ProfileOperationHandler.kt) at `97827fb`. Android attempts delivery on signup and then provisions the session. Resend and check remain explicit, session-owned actions.
+
+| Path | Before → after | Invariant / evidence |
+| --- | --- | --- |
+| Signup delivery and backend bootstrap | **PARTIAL → COMPLETE** for recoverable failure and retry. | [SessionController](../src/auth/session.ts) attempts delivery once during explicit signup. Transient delivery errors let bootstrap continue and leave a safe message in creation, then near verification controls. Retrying bootstrap never repeats the send. Terminal Firebase errors retain the existing session recovery. |
+| Resend and check | **PARTIAL → COMPLETE** for tested feedback and guards. | [Onboarding](../src/onboarding/Onboarding.tsx) displays mapped Firebase errors inline. Success follows confirmed delivery. Firebase rate-limit responses apply the existing local action windows. Checking uses reload and forced token refresh. If token refresh fails after reload, activation stays gated and the check remains available. |
+| Resume, overlapping actions and identity | **COMPLETE** for tested Web ownership paths. | The existing foreground lock excludes overlapping actions. A silent refresh preserves the mounted controls. Session generation and abort checks reject stale results, including before refreshing an old identity's token. Android controls use Compose and Web uses semantic alert/status regions. |
+
+Validation: `npm run test:focused -- src/App.test.tsx src/onboarding/Onboarding.test.tsx --maxWorkers=2` passed 209 tests. `npm run typecheck`, `npm run check:architecture` (88 modules, zero runtime cycles), and `npm run build` for both `dev` and `prod` with synthetic CI settings passed. Tests simulate Firebase and backend responses. Live email delivery and inbox verification remain unverified.
+
 ## Web environment configuration
 
 Audited Android's [flavor and dependency isolation](../../reals-app/app/build.gradle.kts), [App Check installers by source set](../../reals-app/docs/local-development.md#firebase-app-check), and the [backend API contract](../../reals-backend/docs/commons/api.md). This change concerns build configuration and request destinations. Existing visual, navigation, accessibility, lifecycle and session parity is tracked in the relevant product sections below.

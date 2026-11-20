@@ -117,12 +117,31 @@ it('registration sends verification email when local helper disabled', async () 
   ready(); mount(); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
   await screen.findByText('Te enviamos un email para verificar tu cuenta.'); expect(auth.verify).toHaveBeenCalledWith(user);
 });
-it('verification email failure preserves session and can retry', async () => {
-  vi.mocked(auth.verify).mockRejectedValueOnce(new Error()).mockResolvedValue(undefined);
-  ready(); mount(); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
-  await screen.findByRole('alert'); expect(auth.signOut).not.toHaveBeenCalled();
+it('retries a failed bootstrap without repeating the initial verification send', async () => {
+  vi.mocked(auth.verify).mockRejectedValue({ code: 'auth/network-request-failed' });
+  fetcher.mockRejectedValueOnce(new TypeError('backend offline'));
+  ready(); mount(true); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  await screen.findByRole('alert');
+  expect(auth.signOut).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); await screen.findByText('Sin perfil: falta completar el registro.');
-  expect(auth.verify).toHaveBeenCalledTimes(2);
+  await act(async () => observer(user));
+  expect(auth.verify).toHaveBeenCalledOnce();
+  expect(screen.queryByText('Te enviamos un email para verificar tu cuenta.')).toBeNull();
+});
+
+it('discards a late signup verification result when the identity changes', async () => {
+  let finish!: () => void;
+  vi.mocked(auth.verify).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  ready(); mount(true); login(); credentials();
+  fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  await act(async () => observer({ ...user, uid: 'replacement' }));
+  await screen.findByText('Sin perfil: falta completar el registro.');
+  await act(async () => finish());
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(auth.verify).toHaveBeenCalledOnce();
+  expect(screen.queryByText('Te enviamos un email para verificar tu cuenta.')).toBeNull();
 });
 it('local registration skips standard email and completes helper refresh', async () => {
   ready(); fetcher.mockResolvedValueOnce(json(null, 204));
