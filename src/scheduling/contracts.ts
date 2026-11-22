@@ -1,15 +1,11 @@
 import { ApiError, object } from '../auth/api';
+import { parseOffsetTimestamp } from '../shared/offsetTimestamp';
 
 const invalid = (): never => { throw new ApiError('invalid'); };
 const text = (v: unknown): string => typeof v === 'string' && v.trim() ? v : invalid();
 const integer = (v: unknown): number => typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : invalid();
 export function timestamp(v: unknown): string {
-  if (typeof v !== 'string') return invalid();
-  const match = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)(?::(\d\d)(?:\.\d+)?)?(?:Z|([+-])(\d\d):(\d\d))$/.exec(v);
-  if (!match || !Number.isFinite(Date.parse(v))) return invalid();
-  const [, year, month, day, hour, minute, second, , offsetHour, offsetMinute] = match;
-  const calendar = new Date(`${year}-${month}-${day}T00:00:00Z`);
-  if (calendar.toISOString().slice(0, 10) !== `${year}-${month}-${day}` || Number(hour)>23 || Number(minute)>59 || Number(second ?? 0)>59 || Number(offsetHour ?? 0)>23 || Number(offsetMinute ?? 0)>59) return invalid();
+  if (typeof v !== 'string' || parseOffsetTimestamp(v) === null) return invalid();
   return v;
 }
 const nullableDate = (v: unknown) => v === null ? null : timestamp(v);

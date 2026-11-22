@@ -1,7 +1,7 @@
 ﻿import { afterEach, expect, it, vi } from 'vitest';
 import { ApiError } from '../auth/api';
 import { SchedulingSession } from './SchedulingSession';
-import { setup, proposal, time } from './fixtures';
+import { setup, proposal, scheduledStep, time } from './fixtures';
 const slot='2026-11-15T16:00:00Z';
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();});
 async function ready() {vi.useFakeTimers();vi.setSystemTime(time);const f=setup(),finish=vi.fn(),model=new SchedulingSession(f.controller,'c','m',finish);await model.refresh();return {...f,model,finish};}
@@ -145,4 +145,100 @@ it('does not let a poll bypass unresolved uncertain-write reconciliation',async(
  failed=false;const slow=deferred<unknown>();request.mockReturnValueOnce(slow.promise);const recovery=model.poll();expect(model.getSnapshot()).toMatchObject({activity:'reconciling',busy:true,uncertain:true});
  const count=request.mock.calls.length;await model.act('submit');expect(request.mock.calls).toHaveLength(count);slow.resolve(await read('/connections/c',new AbortController().signal));await recovery;
  expect(model.getSnapshot().uncertain).toBe(false);expect(request.mock.calls.filter(c=>c[2]==='POST')).toHaveLength(1);
+});
+
+it.each([
+  { connectionId:'other' },
+  { matchId:'other' },
+  { type:'SECOND_CHAT_AVAILABLE' },
+  { type:'SECOND_CHAT_READ_ONLY' },
+  { secondChat:{...scheduledStep().secondChat, availableAt:'2026-11-15T15:30:00Z'} },
+])('rejects incompatible Home metadata on a confirmed poll (%j)', async override => {
+  const {model,state,request}=await ready();
+  expect(request.mock.calls.some(([path])=>path==='/me/home')).toBe(false);
+  state.n={...state.n,status:'CONFIRMED',confirmedDateTime:slot};
+  state.c.state='SECOND_CHAT_SCHEDULED';
+  state.home.nextSteps=[scheduledStep()];
+  await model.poll();
+  expect(model.getSnapshot().calendarActivity?.secondChat?.durationMinutes).toBe(75);
+  state.home.nextSteps=[{...scheduledStep(),...override}];
+  await model.poll();
+  expect(model.getSnapshot()).toMatchObject({verified:true,calendarActivity:null});
+});
+
+it.each(['SECOND_CHAT_AVAILABLE','SECOND_CHAT','CLOSED'])('removes metadata when the connection moves to %s', async stateName => {
+  const {model,state,request}=await ready();
+  state.n={...state.n,status:'CONFIRMED',confirmedDateTime:slot};
+  state.c.state='SECOND_CHAT_SCHEDULED';
+  state.home.nextSteps=[scheduledStep()];
+  await model.poll();
+  expect(model.getSnapshot().calendarActivity).not.toBeNull();
+  request.mockClear();
+  state.c.state=stateName;
+  await model.poll();
+  expect(model.getSnapshot().calendarActivity).toBeNull();
+  expect(request.mock.calls.some(([path])=>path==='/me/home')).toBe(false);
+});
+
+it('retains the confirmed schedule when Home omits durationMinutes', async () => {
+  const {model,state}=await ready();
+  const step=scheduledStep();
+  const {availableAt,entryClosesAt,expiresAt,myAttendanceStatus}=step.secondChat;
+  state.n={...state.n,status:'CONFIRMED',confirmedDateTime:slot};
+  state.c.state='SECOND_CHAT_SCHEDULED';
+  state.home.nextSteps=[{...step,secondChat:{availableAt,entryClosesAt,expiresAt,myAttendanceStatus}}];
+  await model.poll();
+  expect(model.getSnapshot()).toMatchObject({
+    verified:true, negotiation:{status:'CONFIRMED'}, calendarActivity:null, calendarReadFailed:true,
+  });
+});
+
+it('rejects late Home metadata after a newer foreground read or session replacement', async () => {
+  const {model,state,request,controller}=await ready(), read=request.getMockImplementation()!;
+  state.n={...state.n,status:'CONFIRMED',confirmedDateTime:slot};
+  state.c.state='SECOND_CHAT_SCHEDULED';
+  state.home.nextSteps=[scheduledStep()];
+  await model.poll();
+  const home={...state.home};
+  for(const replaceSession of [false,true]){
+    const late=deferred<unknown>();
+    request.mockImplementation((path,...args)=>path==='/me/home' ? late.promise : read(path,...args));
+    request.mockClear();
+    const poll=model.poll();
+    await vi.waitFor(()=>expect(request).toHaveBeenCalledWith('/me/home',expect.any(AbortSignal)));
+    if(replaceSession) {
+      controller.snapshot={...controller.snapshot,authContextVersion:2};
+      model.dispose();
+    } else {
+      model.pause();
+      state.home.nextSteps=[];
+      request.mockImplementation(read);
+      await model.poll();
+    }
+    late.resolve(home);
+    await poll;
+    expect(model.getSnapshot().calendarActivity).toBeNull();
+  }
+});
+
+it('waits for authoritative Home after an ambiguous but committed acceptance', async () => {
+  const {model,state,request}=await ready(), read=request.getMockImplementation()!;
+  state.p=[proposal()];
+  await model.poll();
+  request.mockImplementation(async(path,signal,method,body)=>{
+    if(method==='POST'){
+      state.n={...state.n,status:'CONFIRMED',confirmedDateTime:slot};
+      state.c.state='SECOND_CHAT_SCHEDULED';
+      throw new ApiError('network');
+    }
+    if(path==='/me/home')throw new ApiError('network');
+    return read(path,signal,method,body);
+  });
+  await model.act('accept','p1');
+  expect(model.getSnapshot()).toMatchObject({verified:false,uncertain:true,calendarActivity:null});
+  state.home.nextSteps=[scheduledStep()];
+  request.mockImplementation(read);
+  await model.poll();
+  expect(model.getSnapshot()).toMatchObject({verified:true,uncertain:false,calendarActivity:{connectionId:'c',matchId:'m'}});
+  expect(request.mock.calls.filter(([, ,method])=>method==='POST')).toHaveLength(1);
 });

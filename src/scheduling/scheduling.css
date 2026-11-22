@@ -13,6 +13,7 @@
 .scheduling li button { margin-block: .5rem; }
 .scheduling button { min-height: 48px; white-space: normal; }
 .scheduling dialog { max-width: min(32rem,90vw); }
+.scheduling-confirmed .google-calendar-action { margin-block-start: .75rem; }
 .scheduling-activity { display: grid; gap: .5rem; }
 
 .scheduling option.scheduling-conflict { color: var(--color-error); }

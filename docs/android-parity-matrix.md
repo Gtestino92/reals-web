@@ -1854,3 +1854,21 @@ Base `bfddcaa`. Read-only Android comparison: `ProfileStatusScreen`, `RealsApp` 
 These paths are COMPLETE in focused simulated tests. Hosted Dev latency and physical browser Back/Forward remain to be checked.
 
 Web Preferences admission overlaps the profile, queue and legal reads. Controls still require all confirmations. An active queue cancels sibling reads and returns to Home. Focused tests hold all four requests open to verify concurrency and the admission gate.
+### Google Calendar for a confirmed second chat
+
+Audited Android `SchedulingScreen` / `ScheduledCard`, `SchedulingCoordinator`, `RealsRootViewModel`, `HomeCards`, `HomeRouter`, `HomeSecondChatAvailability` and the scheduling coordinator, availability and responsive layout tests (Android `97827fb`). Android offers confirmation, Activity navigation and a time-gated primary chat action. It has no equivalent Calendar action. The [backend Home contract](../../reals-backend/docs/commons/api.md) supplies the confirmed timestamp, entry cutoff, absolute expiry and duration.
+
+| Behavior | Parity and validation |
+| --- | --- |
+| Confirmation card, waiting card and primary controls | COMPLETE for the scoped flow. `Scheduling.tsx` and `SecondChatCard.tsx` keep the existing confirmation, profile, Back and entry controls. The Web-only outlined Calendar link supports keyboard and pointer activation. Synthetic Chromium inspected 390px and 1440px layouts in light and dark themes. |
+| Participant roles and lifecycle | COMPLETE for the requested Web extension. The accepting participant reconciles through the existing post-write read. The proposer sees the same action after polling, resume or a verified Scheduling entry. Activity uses its authoritative scheduled Waiting item. Focused tests cover uncertain writes, delayed/failed resume, stale metadata, start and terminal states. |
+| Calendar handoff | PLATFORM-LIMITED. The explicit native link requests a separate browsing context and prefills a template. Google controls sign-in, rendering and saving. Chromium verified the link, decoded URL and original page preservation with external navigation intercepted. |
+
+| Response or transition | Calendar invariant |
+| --- | --- |
+| Initial read, poll, foreground, retry | A scheduled connection and confirmed negotiation must agree with one identified scheduled `/me/home` item. Match both IDs and the start instant. Install metadata with the Scheduling snapshot under its existing abort and generation checks. |
+| Accept, automatic agreement, uncertain recovery | Reuse the required Home reconciliation. A POST response alone cannot publish the link, and an unresolved write keeps it hidden. No Calendar mutation or saved-event state. |
+| Healthy resume, failed reads, replacement | Keep the same-owner card and link during a healthy background read. Failed verification removes the link and preserves the existing recovery path. Aborted reads, superseded generations and replaced sessions cannot publish metadata. |
+| Start boundary, available/active, terminal | Both surfaces use their existing clocks for presentation and recheck the start on activation. Lifecycle projection and closed/read-only state remain server-owned. |
+
+Validation on `feature/google-calendar-second-chat` at `58d848b`. Full Vitest passed 1,944 tests across 73 files. Final focused Vitest passed 123 tests, including the additional omitted-duration regression. Typecheck, architecture, synthetic Dev and Prod builds, and diff and UTF-8 checks passed. Synthetic Chromium passed 28 checks across four viewport/theme scenarios, including actual Scheduling polling and the Activity handoff. Screenshots are under ignored `artifacts/google-calendar/`. Physical devices, live accounts and the Google form remain unverified.

@@ -30,3 +30,45 @@ it('formats contextual backend dates without an invented entry/attendance bounda
 it('shows read-only retention copy without an entry or new attendance claim',()=>{vi.useFakeTimers();vi.setSystemTime(at('14:10:00'));const item=homeSecondFixture();item.type='SECOND_CHAT_READ_ONLY';Object.assign(item.secondChat!,{chatId:'c',chatStatus:'FINISHED',readOnlyUntil:'2026-11-13T15:00:00Z'});render(<SecondChatCard item={item} disabled={false} onOpen={vi.fn()} onDismiss={vi.fn(async()=>{})}/>);expect(screen.getByRole('button',{name:'Ver segundo chat'})).toBeEnabled();expect(screen.getByText(/Disponible solo para lectura hasta/)).toBeVisible();expect(screen.queryByText(/Entrada permitida/)).not.toBeInTheDocument();});
 
 it('does not expose direct entry for an unknown backend chat status',()=>{const item=homeSecondFixture();item.secondChat!.chatStatus='FUTURE';expect(secondHomePresentation(item,at('12:01:00'))).toMatchObject({state:'Unavailable',canOpen:false,canDismiss:false});expect(activityPresentation(home([item]),at('12:01:00')).priorities).toHaveLength(0);});
+
+it('offers a safe Calendar template only while waiting and leaves it available after use', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(at('11:59:59'));
+  const item = homeSecondFixture();
+  item.secondChat!.durationMinutes = 75;
+  const props = { item, disabled:false, onOpen:vi.fn(), onDismiss:vi.fn(async()=>{}) };
+  const view = render(<SecondChatCard {...props}/>);
+  const link = screen.getByRole('link', { name:'Agregar a Google Calendar' });
+  expect(link).toHaveAttribute('target','_blank');
+  expect(link).toHaveAttribute('rel','noopener noreferrer');
+  expect(link).toHaveAttribute('href',expect.stringContaining('20261113T120000Z%2F20261113T131500Z'));
+  const click = new MouseEvent('click', { bubbles:true, cancelable:true });
+  expect(fireEvent(link,click)).toBe(true);
+  expect(props.onOpen).not.toHaveBeenCalled();
+  expect(props.onDismiss).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name:'Agregar a Google Calendar' })).toBe(link);
+  view.rerender(<SecondChatCard {...props} disabled/>);
+  expect(screen.queryByRole('link')).toBeNull();
+  view.rerender(<SecondChatCard {...props}/>);
+  vi.setSystemTime(at('12:00:00'));
+  expect(fireEvent.click(screen.getByRole('link'))).toBe(false);
+  act(()=>{vi.advanceTimersByTime(1000);});
+  expect(screen.queryByRole('link')).toBeNull();
+  expect(screen.getByRole('button',{name:'Entrar al segundo chat'})).toBeEnabled();
+});
+
+it.each(['SECOND_CHAT_AVAILABLE','SECOND_CHAT_READ_ONLY','SECOND_CHAT_EXPIRED'])('has no Calendar link for %s', type => {
+  vi.useFakeTimers();
+  vi.setSystemTime(at('11:59:59'));
+  render(<SecondChatCard item={{...homeSecondFixture(),type}} disabled={false} onOpen={vi.fn()} onDismiss={vi.fn(async()=>{})}/>);
+  expect(screen.queryByRole('link')).toBeNull();
+});
+
+it.each(['AVAILABLE','ACTIVE','CANCELLED','CLOSED','FINISHED','ABANDONED','EXPIRED'])('hides a stale scheduled Calendar link when chat status is %s', chatStatus => {
+  vi.useFakeTimers();
+  vi.setSystemTime(at('11:59:59'));
+  const item=homeSecondFixture();
+  item.secondChat!.chatStatus=chatStatus;
+  render(<SecondChatCard item={item} disabled={false} onOpen={vi.fn()} onDismiss={vi.fn(async()=>{})}/>);
+  expect(screen.queryByRole('link')).toBeNull();
+});
