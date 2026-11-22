@@ -56,8 +56,11 @@ export class SchedulingSession {
     const next=await this.snapshot(signal);
     if(home)parseHome(await this.controller.request('/me/home',signal));
     if(signal.aborted||!this.current()||ticket!==this.generation)return false;
+    // A scheduled connection can close. An older pending snapshot cannot
+    // reopen its negotiation or restore a proposal message.
+    if (this.state.negotiation?.status==='CONFIRMED' && next.connection.state!=='CLOSED' && next.negotiation?.status!=='CONFIRMED') return false;
     const changed=this.state.negotiation?.roundNumber!==next.negotiation?.roundNumber;
-    this.install({...next,verified:true,uncertain:false,...(changed?{draft:[]}:{}),terminal:next.connection.state==='CLOSED'&&next.negotiation?.status!=='FAILED'});
+    this.install({...next,verified:true,uncertain:false,...(changed?{draft:[]}:{}),...(next.negotiation?.status==='CONFIRMED'?{message:''}:{}),terminal:next.connection.state==='CLOSED'&&next.negotiation?.status!=='FAILED'});
     return true;
   }
   // Only healthy background reads are preemptible. Recovery of an uncertain
@@ -71,11 +74,12 @@ export class SchedulingSession {
     this.background=owned;
     const signal=owned?AbortSignal.any([this.lifetime.signal,owned.signal]):this.lifetime.signal;
     const ticket=this.generation;
+    const wasVerified=this.state.verified;
     this.gate=true;
     this.install(silent?{activity:'polling'}:{activity:this.state.uncertain?'reconciling':this.state.connection?'refreshing':'loading',busy:true,verified:false});
     try {
-      await this.reconcile(this.state.uncertain,signal);
-      if(this.current()&&ticket===this.generation&&!silent)this.install({error:''});
+      const installed=await this.reconcile(this.state.uncertain,signal);
+      if(this.current()&&ticket===this.generation&&!silent)this.install(installed?{error:''}:{verified:wasVerified});
     } catch(error) {
       if(ticket===this.generation&&!signal.aborted)this.failure(error);
     } finally {
@@ -127,7 +131,7 @@ export class SchedulingSession {
       this.install({activity:'reconciling',uncertain:true,verified:false});
       if(!await this.reconcile(true)||ticket!==this.generation)return;
       const status=this.state.negotiation?.status;
-      this.install({message:status==='CONFIRMED'?'Horario confirmado.':status==='FAILED'?'No hubo acuerdo.':operation==='submit'?'Enviamos tus horarios.':operation==='accept'?'Aceptamos el horario.':this.state.negotiation?.roundNumber!==round?'Ambas listas fueron rechazadas. Se abri\u00f3 una nueva ronda.':'Rechazaste las opciones recibidas.'});
+      this.install({message:status==='CONFIRMED'?'':status==='FAILED'?'No hubo acuerdo.':operation==='submit'?'Enviamos tus horarios.':operation==='accept'?'Aceptamos el horario.':this.state.negotiation?.roundNumber!==round?'Ambas listas fueron rechazadas. Se abri\u00f3 una nueva ronda.':'Rechazaste las opciones recibidas.'});
     } catch(error) {
       if(!this.current()||ticket!==this.generation)return;
       const known=error instanceof ApiError&&error.kind==='backend'&&error.status>=400&&error.status<500;

@@ -1,6 +1,17 @@
 import { useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import type { Photo } from './contracts';
+import { PhotoLoading, usePhotoRequest } from '../visual/ProfileImage';
+import { photoIdentity } from '../visual/photoIdentity';
+
+function ManagedPhoto({ photo, position }: { photo: Photo; position: number }) {
+  const { status, ...request } = usePhotoRequest(photo.url);
+  return <span className="managed-photo" data-image-state={status}>
+    {status !== 'failed' && <img {...request} alt={`Foto ${position} del perfil`} draggable={false} referrerPolicy="no-referrer"/>}
+    {status === 'loading' && <PhotoLoading/>}
+    {status === 'failed' && <span className="managed-photo-error">No se pudo cargar la foto.</span>}
+  </span>;
+}
 
 export function PhotoSlot({ position, photo, disabled, managementDisabled = disabled, reorderDisabled = managementDisabled, picked = false, target = false, instructions, onSelect, onDelete }: {
   position: number; photo: Photo | undefined; disabled: boolean; managementDisabled?: boolean; reorderDisabled?: boolean;
@@ -23,7 +34,7 @@ export function PhotoSlot({ position, photo, disabled, managementDisabled = disa
     <div className="photo-frame">
       {photo ? <>
         <button type="button" className="photo-reorder-handle" data-reorder-photo={photo.id} aria-label={`Reordenar foto ${position}`} aria-describedby={instructions} aria-pressed={picked} disabled={reorderDisabled}>
-          <img src={photo.url} alt={`Foto ${position} del perfil`} draggable={false} referrerPolicy="no-referrer" onError={event => { event.currentTarget.alt = 'No se pudo cargar la foto. Actualizá el estado o revisá el acceso al almacenamiento.'; }}/>
+          <ManagedPhoto key={photoIdentity(photo.id,photo.url)} photo={photo} position={position}/>
         </button>
         {onDelete && <button className="photo-delete" type="button" disabled={managementDisabled} aria-label={`Eliminar foto ${position}`} onClick={onDelete}><span aria-hidden="true">×</span></button>}
         {(rejected || review) && <span className={`photo-moderation ${rejected ? 'photo-rejected' : ''}`} role="note" aria-label={rejected ? `Foto ${position} rechazada. Debe ser reemplazada.` : `Foto ${position} pendiente de revisión`} title={rejected ? 'Reemplazá esta foto.' : 'Esperá la revisión; el estado se consulta al volver a Reals.'}>{rejected ? 'Rechazada' : 'En revisión'}</span>}

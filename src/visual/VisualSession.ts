@@ -16,6 +16,7 @@ export class VisualSession {
   private listeners = new Set<()=>void>();
   private lifetime = new AbortController();
   private read: AbortController | null = null;
+  private background = false;
   private writing = false;
   private serial = 0;
   private reconcile: Operation | null = null;
@@ -26,25 +27,33 @@ export class VisualSession {
   getSnapshot = () => this.state;
   private current() { return !this.lifetime.signal.aborted && sessionContext(this.controller)===this.context && this.controller.getSnapshot().phase==='ready'; }
   private install(patch: Partial<State>) { if(this.current()){this.state={...this.state,...patch};this.listeners.forEach(fn=>fn());} }
-  start() { if(this.lifetime.signal.aborted) { this.lifetime=new AbortController(); this.read=null; this.writing=false; this.serial++; } }
+  start() { if(this.lifetime.signal.aborted) { this.lifetime=new AbortController(); this.read=null; this.background=false; this.writing=false; this.serial++; } }
   dispose() {this.serial++;this.lifetime.abort();this.read?.abort();this.state={...this.state,profile:null,message:null,messageLoaded:false};}
   private end(reason: VisualOutcome = 'completed') {if(!this.current()||this.state.terminal)return;this.install({profile:null,message:null,messageLoaded:false,terminal:true,pending:null,busy:false,concealed:true});this.finish(reason);}
   private denied(error: unknown) { return error instanceof ApiError && ([401,403,404].includes(error.status) || ['VISUAL_CONTENT_NOT_AVAILABLE','VISUAL_REVIEW_EXPIRED'].includes(error.code)); }
   private request(path: string, signal: AbortSignal, method='GET', body?: unknown) {return this.controller.request(`/matches/${encodeURIComponent(this.matchId)}${path}`,signal,method,body);}
-  conceal = () => {if(!this.writing){this.read?.abort();this.read=null;this.serial++;}this.install({busy:this.writing?this.state.busy:false,concealed:!!this.state.profile?.visualExpiresAt&&Date.parse(this.state.profile.visualExpiresAt)<=Date.now()});};
+  conceal = () => {if(!this.writing){this.read?.abort();this.read=null;this.background=false;this.serial++;}this.install({busy:this.writing?this.state.busy:false,concealed:!!this.state.profile?.visualExpiresAt&&Date.parse(this.state.profile.visualExpiresAt)<=Date.now()});};
   resume = () => {
     const expiry=this.state.profile?.visualExpiresAt;
     // Same-session snapshot may remain visible during ordinary revalidation,
     // just as during polling. Locally expired content waits for authority.
     if(this.current()) this.install({concealed:!!expiry&&Date.parse(expiry)<=Date.now()});
-    return this.refresh();
+    return this.refresh(false, true);
   };
-  refresh = async (retryImages = false) => {
-    if(!this.current()||document.visibilityState!=='visible'||this.writing||this.read||this.state.terminal) return;
+  private cancelBackground() {
+    if (!this.background) return;
+    this.read?.abort(); this.read=null; this.background=false; this.serial++;
+  }
+  refresh = async (retryImages = false, background = false) => {
+    if(!this.current()||document.visibilityState!=='visible'||this.writing||this.state.terminal) return;
+    if (this.read && (!this.background || background)) return;
+    this.cancelBackground();
     const read=new AbortController(), ticket=++this.serial;this.read=read;
     const signal=AbortSignal.any([read.signal,this.lifetime.signal]);
     const current=()=>this.current()&&ticket===this.serial&&!signal.aborted;
-    this.install({busy:true,error:'',concealed:!!this.state.profile?.visualExpiresAt&&Date.parse(this.state.profile.visualExpiresAt)<=Date.now()});
+    const concealed=!!this.state.profile?.visualExpiresAt&&Date.parse(this.state.profile.visualExpiresAt)<=Date.now();
+    this.background=background&&!!this.state.profile&&!concealed&&!this.state.uncertain;
+    if (!this.background) this.install({busy:true,concealed});
     let autoRead=false;
     try {
       const match=await this.request('',signal);
@@ -62,22 +71,25 @@ export class VisualSession {
 
       }
       this.reconcile=null;
-      autoRead=profile.partnerPersonalMessageSubmitted&&profile.partnerPersonalMessageRead&&!this.state.messageLoaded&&!this.autoMessageAttempted;
-      this.install({imageRetry:this.state.imageRetry+(retryImages?1:0),profile,busy:false,concealed:!!profile.visualExpiresAt&&Date.parse(profile.visualExpiresAt)<=Date.now(),uncertain:false,error:'',...(!profile.partnerPersonalMessageSubmitted?{message:null,messageLoaded:false}: {})});
+      const sameProfile=this.state.profile?.profileId===profile.profileId;
+      if (!sameProfile) this.autoMessageAttempted=false;
+      autoRead=profile.partnerPersonalMessageSubmitted&&profile.partnerPersonalMessageRead&&(!sameProfile||!this.state.messageLoaded)&&!this.autoMessageAttempted;
+      this.install({imageRetry:this.state.imageRetry+(retryImages?1:0),profile,busy:false,concealed:!!profile.visualExpiresAt&&Date.parse(profile.visualExpiresAt)<=Date.now(),uncertain:false,error:'',...(!sameProfile?{notice:''}:{}),...(!sameProfile||!profile.partnerPersonalMessageSubmitted?{message:null,messageLoaded:false,messageError:false}: {})});
     } catch(error) {
       if(current()) {
         const denied=this.denied(error);
         if(denied) { this.install({error:'El contenido visual ya no est\u00e1 disponible.'}); this.end(error instanceof ApiError&&error.code==='VISUAL_REVIEW_EXPIRED'?'expired':'unavailable'); }
         else this.install({busy:false,uncertain:true,...(error instanceof ApiError&&error.kind==='invalid'?{profile:null,message:null,messageLoaded:false}:{}),error:'No pudimos actualizar el descubrimiento. Revis\u00e1 tu conexi\u00f3n y us\u00e1 Reintentar.'});
       }
-    } finally { if(ticket===this.serial)this.read=null; }
+    } finally { if(ticket===this.serial){this.read=null;this.background=false;} }
     if(autoRead&&current()){this.autoMessageAttempted=true;void this.act('read');}
   };
   act = async (operation: Operation, draft='') => {
     const p=this.state.profile;
-    if(document.visibilityState!=='visible'||!this.current()||this.writing||this.read||this.state.terminal||this.state.uncertain||!p||this.state.concealed|| (p.visualExpiresAt&&Date.parse(p.visualExpiresAt)<=Date.now()))return;
+    if(document.visibilityState!=='visible'||!this.current()||this.writing||(this.read&&!this.background)||this.state.terminal||this.state.uncertain||!p||this.state.concealed|| (p.visualExpiresAt&&Date.parse(p.visualExpiresAt)<=Date.now()))return;
     if(operation==='save'&&(p.myPersonalMessageSubmitted||!validMessage(draft)))return;
     if(operation==='read'&&(!p.partnerPersonalMessageSubmitted||this.state.messageLoaded))return;
+    this.cancelBackground();
     this.writing=true;this.install({pending:operation,error:'',messageError:false,notice:''});
     const lifetime=this.lifetime, signal=lifetime.signal;
     const current=()=>this.current()&&this.lifetime===lifetime&&!signal.aborted;

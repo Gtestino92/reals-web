@@ -1,11 +1,61 @@
 ﻿import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Scheduling } from './Scheduling';
-import { setup, proposal, time } from './fixtures';
+import { setup, negotiation, proposal, time } from './fixtures';
 import { visualProfile } from '../visual/fixtures';
 import { ApiError } from '../auth/api';
 function view(f=setup()) {const back=vi.fn(),browse=vi.fn(),blocked=vi.fn();const props={controller:f.controller,connectionId:'c',matchId:'m',partnerName:'María',onBack:back,onFinished:back,onBlocked:blocked,browse:false,onBrowse:browse,onCloseBrowse:back};const v=render(<Scheduling {...props}/>);return {...f,...v,props,back,browse,blocked};}
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();});
+
+it('replaces proposal feedback with the confirmed time from polling and rejects older pending snapshots', async () => {
+  const f=view(), read=f.request.getMockImplementation()!;
+  const oldConnection=f.state.c, oldNegotiation=f.state.n;
+  f.request.mockImplementation(async(path,signal,method,body)=>{
+    if (method==='POST') { f.state.p=[proposal({userId:'me'})]; return f.state.p; }
+    return read(path,signal,method,body);
+  });
+  await screen.findByRole('heading',{name:'Proponé tus horarios'});
+  fireEvent.click(screen.getByRole('button',{name:'Agregar opción'}));
+  fireEvent.click(screen.getByRole('button',{name:'Enviar horarios'}));
+  await screen.findByText('Enviamos tus horarios.');
+  expect(screen.getByRole('heading',{name:'Esperando a María'})).toBeVisible();
+  const confirmed=proposal().proposedDateTime;
+  f.state.n=negotiation({status:'CONFIRMED',confirmedDateTime:confirmed});
+  f.state.c={...oldConnection,state:'SECOND_CHAT_SCHEDULED'};
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  const heading=screen.getByRole('heading',{name:'Horario confirmado'});
+  expect(heading.parentElement?.querySelector('time')).toHaveAttribute('datetime',confirmed);
+  expect(screen.queryByText('Enviamos tus horarios.')).toBeNull();
+  f.state.n=oldNegotiation; f.state.c=oldConnection;
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  expect(screen.getByRole('heading',{name:'Horario confirmado'})).toBe(heading);
+  expect(screen.queryByText('Enviamos tus horarios.')).toBeNull();
+});
+
+it('keeps a failed acceptance actionable and shows one confirmation after a successful retry', async () => {
+  const f=setup(), read=f.request.getMockImplementation()!;
+  f.state.p=[proposal()];
+  let fail=true;
+  f.request.mockImplementation(async(path,signal,method,body)=>{
+    if (method==='POST') {
+      if (fail) throw new ApiError('backend',409,'SCHEDULING_SLOT_CONFLICT');
+      f.state.n=negotiation({status:'CONFIRMED',confirmedDateTime:proposal().proposedDateTime});
+      f.state.c={...f.state.c,state:'SECOND_CHAT_SCHEDULED'};
+      return f.state.n;
+    }
+    return read(path,signal,method,body);
+  });
+  view(f);
+  const accept=await screen.findByRole('button',{name:'Aceptar opción 1'});
+  fireEvent.click(accept);
+  expect(await screen.findByRole('alert')).toHaveTextContent(/superpone/);
+  expect(screen.queryByRole('heading',{name:'Horario confirmado'})).toBeNull();
+  fail=false;
+  fireEvent.click(accept);
+  await screen.findByRole('heading',{name:'Horario confirmado'});
+  expect(screen.getAllByText(/Horario confirmado/)).toHaveLength(1);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
 it('renders selector with seven days, half hours, ordered removals and profile navigation',async()=>{
  const f=view();await screen.findByRole('heading',{name:'Proponé tus horarios'});expect(screen.getByLabelText('Día').children).toHaveLength(7);expect(screen.getByLabelText('Minutos').children).toHaveLength(2);
  fireEvent.click(screen.getByRole('button',{name:'Agregar opción'}));expect(screen.getByRole('button',{name:'Enviar horarios'})).toBeEnabled();fireEvent.click(screen.getByRole('button',{name:'Quitar opción 1'}));expect(screen.getByRole('button',{name:'Enviar horarios'})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Ver perfil'}));expect(f.browse).toHaveBeenCalledOnce();
@@ -76,4 +126,31 @@ it('keeps partner identity and actions stable while the initial profile is delay
   expect(screen.getByRole('heading', { name: 'María, 29' })).toBe(heading);
   expect(screen.getByRole('button', { name: 'Volver' })).toBe(back);
   expect(document.querySelector('.partner-profile-loading')).toBeNull();
+});
+
+it('preserves the selected partner photo on resume and clears it on access denial', async () => {
+  const f=setup(),read=f.request.getMockImplementation()!;
+  let renew=false, denied=false;
+  f.request.mockImplementation(async(path,...args)=>{
+    if(!path.endsWith('/visual-profile')) return read(path,...args);
+    if(denied) throw new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE');
+    const profile=visualProfile();
+    return {...profile,photos:profile.photos.map(photo=>({...photo,url:photo.url+'&X-Amz-Signature='+(renew?'renewed':'initial')}))};
+  });
+  const v=view(f);
+  await screen.findByRole('heading',{name:'Proponé tus horarios'});
+  v.rerender(<Scheduling {...v.props} browse/>);
+  const selected=await screen.findByRole('button',{name:'Ver foto 2 de 4'});
+  fireEvent.click(selected); selected.focus();
+  const image=screen.getByRole('img',{name:/Foto 2/});
+  fireEvent.load(image);
+  renew=true;
+  await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
+  expect(screen.getByRole('img',{name:/Foto 2/})).toBe(image);
+  expect(image.getAttribute('src')).toContain('initial');
+  expect(selected).toHaveFocus();
+  denied=true;
+  await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
+  expect(image).not.toBeInTheDocument();
+  expect(screen.getByRole('alert')).toBeVisible();
 });

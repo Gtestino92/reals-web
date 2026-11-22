@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { ApiClient } from '../auth/api';
+import { ApiClient, ApiError } from '../auth/api';
 import { SessionController } from '../auth/session';
 import { defaults, fullProfile } from '../onboarding/contracts';
 import { questionCatalog, savedAnswer } from './questions/fixtures';
@@ -95,6 +95,44 @@ it('retains the complete snapshot on failed background reads and recovers withou
   expect(screen.getByText('No hay fotos aprobadas disponibles.')).toBe(content);
   fireEvent.click(screen.getByRole('button', { name:'Reintentar' }));
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull()); expect(content).toBeVisible();
+});
+
+it('distinguishes delayed, failed and ready images, waits for a renewed URL, and removes access on denial', async () => {
+  const { controller, request } = setup(), base = request.getMockImplementation()!;
+  const url = (signature:string) => 'https://example.test/owner.jpg?X-Amz-Signature=' + signature;
+  let signature = 'old';
+  let delayed: ReturnType<typeof deferred> | undefined;
+  request.mockImplementation((path, signal) => path === '/me/profile/photos' ? delayed?.promise ?? Promise.resolve([
+    { id:'photo', position:1, url:url(signature), validationStatus:'VALIDATED', moderationStatus:'APPROVED', isPersonPhoto:true, isFullBody:false }
+  ]) : base(path, signal));
+  render(<MyProfilePreview controller={controller} onBack={()=>{}}/>);
+  const image = await screen.findByRole('img',{name:/Foto 1/});
+  const frame = image.closest('figure');
+  expect(frame).toHaveAttribute('data-image-state','loading');
+  expect(screen.queryByRole('button',{name:'Reintentar foto'})).toBeNull();
+  expect(screen.getByRole('heading',{name:/Confirmed,/})).toBeVisible();
+  fireEvent.error(image);
+  expect(frame).toHaveAttribute('data-image-state','failed');
+  delayed = deferred();
+  fireEvent.click(screen.getByRole('button',{name:'Reintentar foto'}));
+  expect(screen.queryByRole('img',{name:/Foto 1/})).toBeNull();
+  signature = 'renewed';
+  const batch = delayed; delayed = undefined;
+  await act(async()=>batch.resolve(await request('/me/profile/photos',new AbortController().signal)));
+  const renewed = screen.getByRole('img',{name:/Foto 1/});
+  expect(renewed).toHaveAttribute('src',url('renewed'));
+  fireEvent.load(renewed);
+  expect(frame).toHaveAttribute('data-image-state','loaded');
+  for (const value of ['again','latest']) {
+    signature = value;
+    await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
+    expect(screen.getByRole('img',{name:/Foto 1/})).toBe(renewed);
+    expect(renewed).toHaveAttribute('src',url('renewed'));
+  }
+  request.mockRejectedValueOnce(new ApiError('backend',403));
+  await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
+  expect(renewed).not.toBeInTheDocument();
+  expect(screen.getByRole('alert')).toBeVisible();
 });
 
 it.each([['Buenos Aires', 'AR', 'Buenos Aires, Argentina'], ['', '', null]])('shows only confirmed owner location %s without extra reads', async (city, countryCode, label) => {

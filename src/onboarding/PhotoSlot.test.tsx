@@ -21,3 +21,26 @@ it('does not advertise a disabled target or accept its files', () => {
   expect(target).not.toHaveAttribute('data-drop-active'); expect(transfer.dropEffect).toBe('none');
   fireEvent.drop(target,{ dataTransfer:transfer }); expect(onSelect).not.toHaveBeenCalled();
 });
+
+it('keeps a ready image across signature renewal and distinguishes loading from moderation and failure', () => {
+  const photo={id:'p1',position:1,url:'https://example.test/photo?X-Amz-Signature=old',validationStatus:'VALIDATED',moderationStatus:'NEEDS_REVIEW',isPersonPhoto:true,isFullBody:false};
+  const props={position:1,disabled:false,onSelect:vi.fn()};
+  const {rerender}=render(<PhotoSlot {...props} photo={photo}/>);
+  const image=screen.getByRole('img',{name:'Foto 1 del perfil'});
+  expect(image.parentElement).toHaveAttribute('data-image-state','loading');
+  const moderation=screen.getByRole('note',{name:'Foto 1 pendiente de revisión'});
+  fireEvent.load(image);
+  rerender(<PhotoSlot {...props} photo={{...photo,url:photo.url.replace('old','renewed')}}/>);
+  expect(screen.getByRole('img',{name:'Foto 1 del perfil'})).toBe(image);
+  expect(image).toHaveAttribute('src',photo.url);
+  expect(image.parentElement).toHaveAttribute('data-image-state','loaded');
+  expect(moderation).toBeVisible();
+  fireEvent.error(image);
+  const retry=screen.getByRole('img',{name:'Foto 1 del perfil'});
+  expect(retry).toHaveAttribute('src',photo.url.replace('old','renewed'));
+  fireEvent.error(retry);
+  expect(screen.getByText('No se pudo cargar la foto.')).toBeVisible();
+  expect(moderation).toBeVisible();
+  rerender(<PhotoSlot {...props} photo={undefined}/>);
+  expect(screen.queryByRole('img',{name:'Foto 1 del perfil'})).toBeNull();
+});

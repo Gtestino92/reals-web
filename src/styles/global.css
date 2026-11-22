@@ -10,3 +10,24 @@ body {
   font-size: var(--type-body-size);
   line-height: var(--type-body-line-height);
 }
+
+:is(.placeholder-line, .placeholder-photo, .placeholder-control, .home-placeholder span, .visual-photo-loading) {
+  position: relative;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :is(.placeholder-line, .placeholder-photo, .placeholder-control, .home-placeholder span, .visual-photo-loading)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(100deg, transparent 18%, color-mix(in srgb, var(--color-on-surface) 8%, transparent) 48%, transparent 78%);
+    animation: placeholder-shimmer 2.4s ease-in-out infinite;
+  }
+}
+
+@keyframes placeholder-shimmer {
+  0% { transform: translateX(-100%); }
+  70%, 100% { transform: translateX(100%); }
+}

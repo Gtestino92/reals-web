@@ -64,6 +64,49 @@ it('aborts background reads and foreground refresh supersedes them',async()=>{
 
 // AWS-style signatures are synthetic and are never sent by these DOM tests.
 const signed = (resource: string, signature: string) => `https://media.example/${resource}?X-Amz-Date=20261112T120000Z&X-Amz-Signature=${signature}%2Fraw&versionId=v1`;
+it('keeps decision controls, photo and draft through scroll and a slow poll, then retires them on server transition', async () => {
+  const {controller,request}=setup(), pending=deferred(), finish=vi.fn();
+  render(<VisualReview controller={controller} matchId="m" onBack={()=>{}} onFinished={finish}/>);
+  const approve=await screen.findByRole('button',{name:'Aprobar'});
+  const draft=screen.getByRole('textbox',{name:'Mensaje personal'});
+  fireEvent.change(draft,{target:{value:'Un borrador'}});
+  draft.focus();
+  const image=screen.getAllByRole('img')[0]!;
+  fireEvent.load(image);
+  const count=request.mock.calls.length;
+  fireEvent.scroll(window); fireEvent.scroll(document); fireEvent.scroll(window);
+  expect(request).toHaveBeenCalledTimes(count);
+  request.mockReturnValueOnce(pending.promise);
+  act(()=>window.dispatchEvent(new Event('online')));
+  fireEvent.scroll(window);
+  expect(screen.getByRole('button',{name:'Aprobar'})).toBe(approve);
+  expect(approve).toBeEnabled();
+  expect(draft).toHaveFocus();
+  expect(draft).toHaveValue('Un borrador');
+  expect(screen.getAllByRole('img')[0]).toBe(image);
+  await act(async()=>pending.resolve({id:'m',userAId:'me',userBId:'them',state:'EXPIRED'}));
+  expect(finish).toHaveBeenCalledWith('expired');
+  expect(approve).not.toBeInTheDocument();
+  expect(image).not.toBeInTheDocument();
+});
+
+it('lets a decision supersede a healthy read and discards its obsolete result', async () => {
+  const {controller,request}=setup(), pending=deferred(), mutation=deferred(), finish=vi.fn();
+  const base=request.getMockImplementation()!;
+  request.mockImplementation((...args)=>args[2]==='POST'?mutation.promise:base(...args));
+  render(<VisualReview controller={controller} matchId="m" onBack={()=>{}} onFinished={finish}/>);
+  const approve=await screen.findByRole('button',{name:'Aprobar'});
+  request.mockReturnValueOnce(pending.promise);
+  act(()=>window.dispatchEvent(new Event('online')));
+  const signal=request.mock.calls.at(-1)![1];
+  fireEvent.click(approve);
+  expect(signal.aborted).toBe(true);
+  expect(approve).toBeDisabled();
+  await act(async()=>pending.resolve({id:'m',userAId:'me',userBId:'them',state:'EXPIRED'}));
+  expect(finish).not.toHaveBeenCalled();
+  await act(async()=>mutation.resolve({id:'m',state:'VISUAL_APPROVED'}));
+  expect(finish).toHaveBeenCalledExactlyOnceWith('completed');
+});
 async function rotatingPhotos() {
  vi.useFakeTimers();
  const {controller,request}=setup();
@@ -172,9 +215,9 @@ it('guards a pending save synchronously and confirms a single successful immutab
  const {controller,request}=setup(),pending=deferred();const base=request.getMockImplementation()!;let saved=false;request.mockImplementation(async(...args)=>{if(args[2]==='PUT'){await pending.promise;saved=true;return undefined;}if(args[0].endsWith('/visual-profile'))return visualProfile({myPersonalMessageSubmitted:saved});return base(...args);});render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');fireEvent.change(screen.getByLabelText('Mensaje personal'),{target:{value:'Hola'}});const save=screen.getByRole('button',{name:'Guardar mensaje'});fireEvent.click(save);fireEvent.click(save);expect(screen.getByRole('button',{name:'Aprobar'})).toBeDisabled();await act(async()=>pending.resolve(undefined));await screen.findByText('Ya guardaste tu mensaje personal. No se puede modificar.');expect(request.mock.calls.filter(c=>c[2]==='PUT')).toHaveLength(1);
 });
 
-it('keeps concealed images mounted when the expiry timer fires in a hidden tab',async()=>{
+it('removes protected images when the expiry timer fires in a hidden tab',async()=>{
  vi.useFakeTimers();const {controller,request}=setup();const base=request.getMockImplementation()!;request.mockImplementation(async(...args)=>args[0].endsWith('/visual-profile')?visualProfile({visualExpiresAt:new Date(Date.now()+1000).toISOString()}):base(...args));render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await act(async()=>{});const img=screen.getAllByRole('img')[0]!;
- vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));await act(async()=>vi.advanceTimersByTime(1000));expect(request).toHaveBeenCalledTimes(2);expect(img).toBeInTheDocument();expect(img).not.toBeVisible();expect(img.closest('.visual-content')).not.toHaveAttribute('hidden');expect(img.closest('.visual-content')).toHaveAttribute('inert');
+ vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');act(()=>document.dispatchEvent(new Event('visibilitychange')));await act(async()=>vi.advanceTimersByTime(1000));expect(request).toHaveBeenCalledTimes(2);expect(img).not.toBeInTheDocument();expect(document.querySelector('.visual-content')).toHaveAttribute('inert');
  request.mockRejectedValueOnce(new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE'));vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');await act(async()=>document.dispatchEvent(new Event('visibilitychange')));expect(img).not.toBeInTheDocument();
 });
 
@@ -190,8 +233,8 @@ it('offers an immediate accessible exit after initial loading failure',async()=>
  const {controller,request}=setup(),back=vi.fn();request.mockRejectedValueOnce(new ApiError('network'));render(<VisualReview controller={controller} matchId="m" onBack={back}/>);await screen.findByRole('alert');fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));expect(back).toHaveBeenCalledOnce();expect(screen.queryByRole('dialog')).toBeNull();
 });
 it('omits unsent partner message and reveals it only after an authoritative submitted flag',async()=>{
- const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');expect(screen.queryByRole('heading',{name:'Mensaje personal de la otra persona'})).toBeNull();expect(screen.queryByText('No dejó un mensaje personal.')).toBeNull();expect(screen.getByRole('button',{name:'Aprobar'})).toBeEnabled();
- request.mockResolvedValueOnce({id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'}).mockResolvedValueOnce(visualProfile({partnerPersonalMessageSubmitted:true}));act(()=>window.dispatchEvent(new Event('online')));await screen.findByRole('heading',{name:'Mensaje personal de la otra persona'});expect(screen.getByRole('button',{name:'Leer mensaje'})).toBeEnabled();expect(request.mock.calls.some(c=>c[0].endsWith('/partner'))).toBe(false);
+ const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');expect(screen.queryByRole('heading',{name:'Mensaje personal de María'})).toBeNull();expect(screen.queryByText('No dejó un mensaje personal.')).toBeNull();expect(screen.getByRole('button',{name:'Aprobar'})).toBeEnabled();
+ request.mockResolvedValueOnce({id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'}).mockResolvedValueOnce(visualProfile({partnerPersonalMessageSubmitted:true}));act(()=>window.dispatchEvent(new Event('online')));await screen.findByRole('heading',{name:'Mensaje personal de María'});expect(screen.getByRole('button',{name:'Leer mensaje'})).toBeEnabled();expect(request.mock.calls.some(c=>c[0].endsWith('/partner'))).toBe(false);
 });
 it('uses a noninteractive structural placeholder only during initial loading',async()=>{
  const {controller,request}=setup(),pending=deferred();request.mockReturnValueOnce(pending.promise);const view=render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);expect(screen.getByRole('status')).toHaveTextContent('Cargando descubrimiento…');expect(view.container.querySelector('.placeholder-photo')).toHaveAttribute('class','placeholder-photo');expect(screen.queryByRole('button',{name:'Aprobar'})).toBeNull();await act(async()=>pending.resolve({id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'}));await screen.findByText('María');expect(view.container.querySelector('.profile-placeholder')).toBeNull();
