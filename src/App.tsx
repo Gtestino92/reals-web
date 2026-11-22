@@ -14,6 +14,7 @@ import { SessionController } from './auth/session';
 import { Onboarding } from './onboarding/Onboarding';
 import seal from './assets/reals-seal.png';
 import { Home, AdminEntry } from './home/Home';
+import { ActivityNotifications, useActivityNotifications } from './notifications/useActivityNotifications';
 
 const AdminGate = lazy(() => import('./admin/AdminGate'));
 
@@ -101,6 +102,7 @@ function ReadySession({ controller }: { controller: SessionController }) {
   const homeReady = state.profile?.status === 'ACTIVE' || managementActive;
   const chatShell = chatActive && homeReady;
   const displayingAdmin = administrative && viewReady && access.phase === 'allowed';
+  const notifications = useActivityNotifications(controller, state.account?.id, administrative || intent || entryBusy);
   regularVisible.current = !displayingAdmin;
   challengeActive.current = intent || (administrative && !displayingAdmin);
   useLayoutEffect(() => {
@@ -139,7 +141,7 @@ function ReadySession({ controller }: { controller: SessionController }) {
   };
 
   const regularNavigation = administrative ? { ...navigation, destination: 'home' as const } : navigation;
-  return <><div hidden={displayingAdmin}><main className={chatShell ? 'chat-page' : 'login-page'}><section className={chatShell ? 'chat-shell' : 'login-panel'} aria-label={chatShell ? 'Conversación activa' : undefined} aria-labelledby={chatShell ? undefined : 'session-heading'}>
+  return <ActivityNotifications.Provider value={notifications}><div hidden={displayingAdmin}><main className={chatShell ? 'chat-page' : 'login-page'}><section className={chatShell ? 'chat-shell' : 'login-panel'} aria-label={chatShell ? 'Conversación activa' : undefined} aria-labelledby={chatShell ? undefined : 'session-heading'}>
     {!chatShell && <header className="login-header session-header"><div className="login-brand"><img className="login-seal" src={seal} alt="" width="54" height="54" /><h1 id="session-heading">Reals</h1><div className="brand-divider" aria-hidden="true"><span /></div></div>{!homeReady && state.adminEligible && <div className="session-admin-entry"><AdminEntry onClick={requestAdmin} pending={entryBusy || intent} disabled={guarded} /></div>}</header>}
     {homeReady ? <Home active={!displayingAdmin} onAdmin={state.adminEligible ? requestAdmin : undefined} adminPending={entryBusy || intent} onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={regularNavigation} onNavigationBlockedChange={reportRegularBlocked} onManagementActiveChange={setManagementActive} onChatActiveChange={setChatActive} onCompleteProfile={() => controller.retry()} /> : <Onboarding Home={Home} active={!displayingAdmin} onAdminNavigationBlockedChange={reportAdminBlocked} controller={controller} navigation={regularNavigation} onNavigationBlockedChange={reportRegularBlocked} onAccountAvailableChange={setSetupAccountAvailable} />}
     {entryBusy && <p role="status">Consultando acceso administrativo…</p>}
@@ -151,5 +153,5 @@ function ReadySession({ controller }: { controller: SessionController }) {
   </section></main></div>
     {displayingAdmin && AdminScreen && <AdminScreen controller={controller} onReturn={() => navigation.backTo('home')} onRevoked={cancel} onNavigationBlockedChange={reportBlocked} />}
     {!displayingAdmin && (intent || administrative) && <Suspense fallback={<p role="status">Consultando acceso administrativo…</p>}><AdminGate controller={controller} modalOnly prepared={intent} onReturn={cancel} onVerified={enter} returnFocus={adminTrigger.current} /></Suspense>}
-  </>;
+  </ActivityNotifications.Provider>;
 }

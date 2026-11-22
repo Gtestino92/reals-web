@@ -13,6 +13,8 @@ import { ChatIcon } from './ChatIcon';
 import { replyPreview, ReplyQuote } from './ReplyQuote';
 
 import { ConfirmDialog, ChatMenu } from './ChatControls';
+import { activityId } from '../notifications/activityPolicy';
+import { usePresentedActivity } from '../notifications/usePresentedActivity';
 type DialogAction = 'mutual' | 'cancel' | 'safety' | 'block';
 export function FirstChat({ controller, matchId, chatId, onHome }: { controller: SessionController; matchId: string; chatId: string; onHome: (message?: string, closed?: boolean) => void }) {
   const dirty = useRef(false), knownClosed = useRef(false), terminalMessage = useRef('');
@@ -44,6 +46,7 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
   }, [state.messages.length]);
   useEffect(() => { const warn = (e: BeforeUnloadEvent) => { if (dirty.current) { e.preventDefault(); } }; window.addEventListener('beforeunload',warn); return () => window.removeEventListener('beforeunload',warn); }, [draft,state.outgoing]);
   const chat = state.chat, p = policy(chat,state.exits,now+state.offset), me = session.me, eligible = reactable(state.messages,me), g = chat?.guidance;
+  usePresentedActivity(root, chat?.status === 'ACTIVE' && !knownClosed.current ? activityId('FIRST_CHAT', matchId, chatId) : null);
   const partner = chat?.partner.displayName.trim();
   const disabled = state.busy || state.blocked, ordinary = p.ordinary && !disabled && !state.outgoing;
   const decisionPanel=chat?.status==='ACTIVE' && chat.myDecision==='PENDING' && chat.partnerDecision==='APPROVED';

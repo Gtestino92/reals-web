@@ -50,3 +50,56 @@ needed for this refactor.
 Validation and the limited Android comparison are recorded in the existing
 [parity matrix](android-parity-matrix.md). Existing broader parity gaps remain
 outside this maintenance task.
+
+## Web activity notifications
+
+`ReadySession` owns one coordinator under the authenticated account/profile key
+and the existing tab gate. `useHome` forwards successful validated Home
+installations and Scheduling forwards its existing validated reconciliation
+after rendering. The coordinator owns the unread projection, the tab title and
+favicon, and two read-only endpoints through `SessionController`. Its responses
+have no path to operational Home, matchmaking, restoration, navigation, or
+screen errors. The existing five-second foreground Home status poll remains in
+place. It remembers previously advertised boundaries even if another device
+clears or advances the shared marker. A successful full Home read retires
+boundaries through the triggering status's server time. The full read reuses
+that status sample, so a marker-triggered reconciliation adds no status GET.
+
+| Context | Additional polling |
+| --- | --- |
+| Visible Home, Activity, or searching | Zero. Use the operational Home projection. |
+| Hidden queue | One status GET per 10 seconds. |
+| Hidden ordinary activity or management/interaction surfaces outside Home | One status GET per 30 seconds. |
+| Otherwise eligible within five minutes of a known second chat or during its entry window | One status GET per 10 seconds. |
+| Active chat, Administration, disabled Web preference, restricted/signed-out session, non-owning tab, or setup with no Home | Zero. |
+
+On eligible ticks, pending costs at most one additional GET when a version
+changes, an advertised or known activity boundary is crossed, recovery is due,
+or the last projection is about two minutes old. Pending has an independent
+parser and does not clear the shared dirty flag. The coordinator remembers a
+future refresh marker across status reads so another device consuming it does
+not erase the local wake-up. Mode transitions reuse the recent check time,
+operational reads and scheduling writes preempt complementary reads, and
+eligible resume checks status promptly. Transient failures preserve the usable
+projection and respect Retry-After when supplied.
+
+| Installation or mutation path | Invariant |
+| --- | --- |
+| Initial/reloaded projection | A new or re-enabled account/browser preference establishes a seen baseline. A reload retains saved unread IDs only while authoritative activity remains relevant. |
+| Operational and complementary success | Validated records and projection are reconciled together. Complementary reads install only into the notification model. A scheduling projection without a Home version preserves the last observed version and yields to a newer projection. |
+| Activity replacement, expiry or invalidation | At most one supported stage per match. Authoritative absence or replacement removes old records. A projected second-chat availability stage with eligible attendance can show immediately even if the preceding status predates the start. Known deadlines may hide indicators and prompt reads. They cannot authorize entry or change the business lifecycle. |
+| Presentation | Each loaded destination acknowledges its own ID while the document and surface are visible. Appointment cards acknowledge when their appointment text intersects the viewport. A successful local confirmation acknowledges before its Home reconciliation feeds notifications. |
+| Hidden/foreground transitions, failed or obsolete reads | Resume preserves mounted DOM, selection, focus, scroll and drafts. One complementary read is owned at a time. Aborted, late, malformed and failed replies cannot clear good state. Automatic first-chat opening still uses operational Home and requires a visible document. |
+| Disable, sign-out, restricted session, identity or ownership replacement | Disabling clears visible indicators, retires polling, and resets the baseline. Session teardown aborts owned work and restores the original title and icon attributes. SessionController retains App Check, authentication and tab ownership checks. |
+
+Storage uses `reals:web-notifications:v1:<accountId>` per browser origin.
+It holds the Web preference, up to 100 current IDs with seen bits, and up to
+100 short-lived acknowledgments for presentations that precede the next Home
+projection. No Home payloads or partner data are stored. A storage failure keeps
+the owning session's in-memory data. Android settings keep their existing API.
+
+The timer targets are best effort. Hidden documents can be throttled, frozen or
+discarded, and a closed PWA cannot run this coordinator. Favicon updates use the
+existing 32px PNG and Canvas. Image decoding or deployment CSP can prevent
+the dynamic icon while the title still updates. The installed PWA icon uses
+the existing manifest. See the [Android comparison and test limits](android-parity-matrix.md#web-activity-notifications).

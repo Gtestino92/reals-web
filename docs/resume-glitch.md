@@ -54,6 +54,12 @@ Source review covers the authenticated root, every destination in `useHomeNaviga
 | Affinity PATCH/DELETE versus background read | Abort the owned healthy read before write; serial rejects late read, install complete authoritative answer list; uncertain failure blocks later writes. |
 | Identity/sign-out/unmount | Old identity is never eligible to render; abort only owned resources/listeners and reject late results. |
 
+Web activity notifications follow the same split. A complementary response can
+update the tab and Activity indicators while the operational DOM stays mounted.
+After a hidden interval, an automatic first-chat open waits for operational
+foreground verification. A delayed or failed verification retains the current
+Home surface. See [notification ownership and polling](frontend-architecture.md#web-activity-notifications).
+
 ## Validation and open limits
 
 Results are appended after validation. This is a source audit of all screen families, with regression testing concentrated on the changed behavior; it is not exhaustive real-device certification. Follow-up: exercise each inventory row under real tab switching, slow/offline network, internal mode switches and bfcache on supported devices; measure any remaining unnecessary foreground gates without weakening domain/access policies. Country/city work remains paused and no backend/Android files are changed.

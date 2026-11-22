@@ -9,6 +9,8 @@ import { deadline, useVisualNow } from './deadline';
 import { ProfileImage } from './ProfileImage';
 import { ProfilePlaceholder } from './ProfilePlaceholder';
 import { ChatIcon } from '../chat/ChatIcon';
+import { activityId } from '../notifications/activityPolicy';
+import { usePresentedActivity } from '../notifications/usePresentedActivity';
 import './visual.css';
 
 export function VisualReview({ controller, matchId, onBack, onFinished = onBack, onBlocked, navigation }: { controller: SessionController; matchId: string; onBack: () => void; onFinished?: (reason: VisualOutcome) => void; onBlocked?: (value: boolean) => void; navigation?: HomeNavigation }) {
@@ -40,6 +42,8 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
   const expired=!!expiry&&Date.parse(expiry)<=now;
   const disabled=state.busy||!!state.pending||state.uncertain||state.concealed||expired||!profile;
   const concealed=state.concealed||expired||!visible;
+  const profileCard = useRef<HTMLElement>(null);
+  usePresentedActivity(profileCard, profile && !concealed ? activityId('VISUAL_REVIEW', matchId) : null);
   const draftProfile=useRef<string | undefined>(undefined);
   useLayoutEffect(()=>{
     if (profile && draftProfile.current !== profile.profileId) {
@@ -76,7 +80,7 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
     {(!profile||concealed)&&returnAction}
     <div className={`visual-content${concealed ? ' visual-concealed' : ''}`} style={{ visibility: concealed ? 'hidden' : 'visible' }} inert={concealed} aria-hidden={concealed}>
     {profile&&!concealed&&<>
-      <article className="home-card visual-profile">
+      <article ref={profileCard} className="home-card visual-profile">
         <header><h3>{profile.displayName}</h3><p>{profile.age} años</p><PublicProfileLocation city={profile.city} countryCode={profile.countryCode}/></header>
         {!profile.photos.length&&<p role="status">No hay fotos aprobadas disponibles.</p>}
         {photo(0)}{profile.bio&&<section className="visual-insert"><h4>Bio</h4><p>{profile.bio}</p></section>}{photo(1)}

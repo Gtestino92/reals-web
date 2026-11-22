@@ -6,6 +6,9 @@ import { visualProfile } from '../visual/fixtures';
 import { ApiError } from '../auth/api';
 import { SecondChatCard } from '../home/SecondChatCard';
 import { homeSecondFixture } from '../home/secondHome.fixtures';
+import { ActivityNotifications, useActivityNotifications } from '../notifications/useActivityNotifications';
+import { loadPreferences, savePreferences } from '../notifications/activityStorage';
+import { activityId } from '../notifications/activityPolicy';
 function view(f=setup()) {const back=vi.fn(),browse=vi.fn(),blocked=vi.fn();const props={controller:f.controller,connectionId:'c',matchId:'m',partnerName:'María',onBack:back,onFinished:back,onBlocked:blocked,browse:false,onBrowse:browse,onCloseBrowse:back};const v=render(<Scheduling {...props}/>);return {...f,...v,props,back,browse,blocked};}
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();localStorage.clear();});
 const calendarLink = () => screen.queryByRole('link', { name: /^(Agregar a Google Calendar|Volver a agregar al calendario)$/ });
@@ -75,6 +78,32 @@ it('keeps a failed acceptance actionable and shows one confirmation after a succ
   expect(back).not.toHaveBeenCalled();
   expect(f.request.mock.calls.filter(([path])=>path==='/me/home')).toHaveLength(1);
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('observes a locally accepted appointment after its presentation without generating unread activity', async () => {
+  const f = setup(), read = f.request.getMockImplementation()!;
+  const slot = proposal().proposedDateTime;
+  f.state.p = [proposal()];
+  savePreferences('me', { enabled: true, records: [], presented: [] });
+  f.request.mockImplementation(async (path, signal, method, body) => {
+    if (method === 'POST') {
+      f.state.n = negotiation({ status: 'CONFIRMED', confirmedDateTime: slot });
+      f.state.c = { ...f.state.c, state: 'SECOND_CHAT_SCHEDULED' };
+      f.state.home.nextSteps = [scheduledStep()];
+      return f.state.n;
+    }
+    return read(path, signal, method, body);
+  });
+  function View() {
+    const notifications = useActivityNotifications(f.controller, 'me', false);
+    return <ActivityNotifications.Provider value={notifications}><Scheduling controller={f.controller} connectionId="c" matchId="m"
+      partnerName="María" onBack={vi.fn()} onFinished={vi.fn()} onBlocked={vi.fn()} browse={false} onBrowse={vi.fn()} onCloseBrowse={vi.fn()}/></ActivityNotifications.Provider>;
+  }
+  render(<View/>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Aceptar opción 1' }));
+  expect(await screen.findByRole('heading', { name: 'Horario confirmado' })).toBeVisible();
+  expect(loadPreferences('me').records).toContainEqual([activityId('SECOND_CHAT_SCHEDULED', 'c', slot), true]);
+  expect(document.title).toBe('Reals');
 });
 
 it('opens with a verified Calendar action on navigation and removes it when the start is reached', async () => {

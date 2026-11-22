@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TabOwnershipManager } from './tabs/TabOwnershipManager';
 const sdk = vi.hoisted(() => ({
@@ -13,6 +13,10 @@ vi.mock('firebase/auth', () => ({
   sendEmailVerification: vi.fn(), signOut: vi.fn(), EmailAuthProvider: { credential: vi.fn() }, reauthenticateWithCredential: vi.fn(), updatePassword: vi.fn(),
 }));
 import { App } from './App';
+import { ApiClient } from './auth/api';
+import type { AuthService, Identity } from './auth/firebase';
+import { emptyHome } from './home/fixtures';
+import { loadPreferences, storageKey } from './notifications/activityStorage';
 const owners: TabOwnershipManager[] = [];
 const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
 function mount() {
@@ -34,7 +38,7 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: (_name: string, options: LockOptions, callback: () => Promise<void>) => Promise.resolve().then(() => { options.signal?.throwIfAborted(); return callback(); }) } });
 });
 afterEach(() => {
-  owners.splice(0).forEach(owner => owner.stop()); vi.unstubAllGlobals(); vi.unstubAllEnvs();
+  owners.splice(0).forEach(owner => owner.stop()); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.useRealTimers();
   if (originalLocks) Object.defineProperty(navigator, 'locks', originalLocks);
   else Reflect.deleteProperty(navigator, 'locks');
 });
@@ -75,4 +79,75 @@ it('local opt-in fails closed when required ownership APIs are unavailable', asy
   vi.stubGlobal('isSecureContext', false);
   render(<App />);
   expect(await screen.findByRole('alert')).toHaveTextContent('Web Locks'); expect(sdk.onAuthStateChanged).not.toHaveBeenCalled();
+});
+
+it('retires pending activity reads on ownership transfer and isolates the next authenticated account', async () => {
+  document.title = 'Original';
+  const ownership = new TabOwnershipManager(); owners.push(ownership);
+  let grant = '', release = () => {};
+  vi.stubGlobal('BroadcastChannel', class {
+    onmessage?: (event: MessageEvent) => void;
+    postMessage(message: { type: string; grant?: string }) {
+      if (message.type === 'owner' && message.grant) {
+        grant = message.grant;
+        release = () => this.onmessage?.(new MessageEvent('message', { data: { type: 'release', grant } }));
+      }
+    }
+    close() {}
+  });
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  let account = 'owner-a', version = 0, hold = false;
+  let complete: ((value: Response) => void) | undefined;
+  const request = vi.fn<typeof fetch>().mockImplementation(async path => {
+    const serverTime = new Date().toISOString();
+    const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
+    switch (path) {
+      case '/api/me': return json({ id: account, status: 'ACTIVE' });
+      case '/api/me/profile': return json({ id: `profile-${account}`, userId: account, displayName: account, status: 'ACTIVE' });
+      case '/api/me/home/status': return json({ version, dirty: false, nextRefreshAt: null, serverTime });
+      case '/api/me/home': return json(emptyHome());
+      case '/api/me/home/pending':
+        return hold ? new Promise<Response>(resolve => { complete = resolve; }) :
+          json({ version, serverTime, pendingActions: [{ type: 'VISUAL_REVIEW', matchId: 'a' }], nextSteps: [], passiveNotices: [] });
+      case '/api/reference/affinity-questions': return json({ catalogVersion: 'empty', categories: [], questions: [] });
+      case '/api/me/profile/affinity-answers': return json({ answers: [] });
+      default: throw new Error('Unexpected endpoint');
+    }
+  });
+  const identity = (): Identity => ({ uid: account, emailVerified: true, getIdToken: vi.fn().mockResolvedValue('test'), reload: vi.fn() });
+  const auth: AuthService = { observe: vi.fn(next => { next(identity()); return vi.fn(); }), signIn: vi.fn(),
+    signUp: vi.fn(), google: vi.fn(), verify: vi.fn(), signOut: vi.fn() };
+  const view = render(<App ownership={ownership} firebase={{ service: auth, localVerification: false }} api={new ApiClient(request)}/>);
+  try {
+    await screen.findByText('Hola, owner-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    visibility.mockReturnValue('hidden'); version++;
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(30_000); });
+    expect(document.title).toBe('(1) Reals');
+    hold = true; version++;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    const signal = request.mock.calls.filter(([path]) => path === '/api/me/home/pending').at(-1)?.[1]?.signal;
+    expect(complete).toBeDefined();
+    expect(signal?.aborted).toBe(false);
+    act(release);
+    expect(signal?.aborted).toBe(true);
+    expect(document.title).toBe('Original');
+    expect(screen.getByRole('button', { name: 'Usar Reals acá' })).toBeVisible();
+    const count = request.mock.calls.length;
+    await act(async () => {
+      complete?.(new Response(JSON.stringify({ version, serverTime: new Date().toISOString(), pendingActions: [], nextSteps: [], passiveNotices: [] })));
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(request.mock.calls).toHaveLength(count);
+    expect(loadPreferences('owner-a').records).toEqual([['["VISUAL_REVIEW","a"]', false]]);
+    vi.useRealTimers();
+    account = 'owner-b'; visibility.mockReturnValue('visible');
+    fireEvent.click(screen.getByRole('button', { name: 'Usar Reals acá' }));
+    expect(await screen.findByText('Hola, owner-b')).toBeVisible();
+    expect(document.title).toBe('Reals');
+    expect(loadPreferences('owner-b').records).toEqual([]);
+  } finally {
+    view.unmount();
+    localStorage.removeItem(storageKey('owner-a')); localStorage.removeItem(storageKey('owner-b'));
+  }
 });
