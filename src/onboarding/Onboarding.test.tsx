@@ -1822,3 +1822,36 @@ it('enables confirmed photo controls while the details country catalog is pendin
   await act(async () => catalog(json([{ code: 'AR', displayName: 'Argentina' }])));
   expect(city).toBeEnabled();
 });
+
+it.each([false, true])('starts all Preferences admission reads together and handles an active queue (%s)', async inQueue => {
+  profile = { ...initialProfile, status: 'ACTIVE' };
+  mount();
+  const entry = await screen.findByRole('button', { name: 'Preferencias' });
+  await waitFor(() => expect(entry).toBeEnabled());
+  const original = fetcher.getMockImplementation()!;
+  const paths = ['/api/me/profile', '/api/matchmaking/queue', '/api/me/legal-status', '/api/legal/documents/current'];
+  const held = new Map<string, { signal: AbortSignal; finish: (response: Response) => void }>();
+  fetcher.mockImplementation((input, options) => {
+    const path = String(input);
+    if (!paths.includes(path) || held.has(path)) return original(input, options);
+    return new Promise(finish => held.set(path, { signal: options!.signal!, finish }));
+  });
+  fireEvent.click(entry);
+  await waitFor(() => expect(held.size).toBe(paths.length));
+  const form = () => screen.queryByRole('form', { name: 'Preferencias de búsqueda' });
+  expect(form()).toBeNull();
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
+  await act(async () => held.get('/api/matchmaking/queue')!.finish(json({ userId: 'u', inQueue })));
+  if (inQueue) {
+    await screen.findByRole('heading', { name: 'Inicio' });
+    expect(held.get('/api/me/profile')!.signal.aborted).toBe(true);
+    return;
+  }
+  await act(async () => {
+    held.get('/api/me/profile')!.finish(json(profile));
+    held.get('/api/me/legal-status')!.finish(json({ requirementsSatisfied: satisfied, documents: [document()] }));
+  });
+  expect(form()).toBeNull();
+  await act(async () => held.get('/api/legal/documents/current')!.finish(json({ documents: [document()] })));
+  expect(form()).toBeVisible();
+});
