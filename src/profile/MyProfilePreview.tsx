@@ -18,7 +18,7 @@ export function previewProfile(profile: FullProfile, images: Photo[], catalog: Q
     affinityIndicators: [],
   };
 }
-interface Snapshot { identity: string; profile: PublicProfile; status: string }
+interface Snapshot { identity: string; profile: PublicProfile; status: string; epoch: number }
 export function MyProfilePreview({ controller, onBack }: { controller: SessionController; onBack: () => void }) {
   const session = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const identity = session.phase === 'ready' && session.account && session.profile && ['ACTIVE','DRAFT'].includes(session.profile.status) ? `${session.account.id}/${session.profile.id}` : '';
@@ -44,8 +44,14 @@ export function MyProfilePreview({ controller, onBack }: { controller: SessionCo
         ]);
         if (`${profile.userId}/${profile.id}` !== identity || !['ACTIVE','DRAFT'].includes(profile.status)) throw new ApiError('invalid');
         const publicProfile = previewProfile(profile, images, catalog, answers);
-        if (current()) { setSnapshot({ identity, profile: publicProfile, status: profile.status }); setError(''); }
-      } catch { if (current()) { setError('No pudimos actualizar la vista previa. Revisá tu conexión y reintentá.'); abort.abort(); } }
+        if (current()) { setSnapshot({ identity, profile: publicProfile, status: profile.status, epoch }); setError(''); }
+      } catch (failure) {
+        if (current()) {
+          if (failure instanceof ApiError && (failure.kind === 'invalid' || [401, 403, 404].includes(failure.status))) setSnapshot(null);
+          setError('No pudimos actualizar la vista previa. Revisá tu conexión y reintentá.');
+          abort.abort();
+        }
+      }
     };
     void load();
     const resume = () => { if (document.visibilityState === 'visible') void load(); };
@@ -53,7 +59,7 @@ export function MyProfilePreview({ controller, onBack }: { controller: SessionCo
     return () => { disposed = true; request?.abort(); document.removeEventListener('visibilitychange', resume); };
   }, [controller, identity, epoch]);
   const visible = snapshot?.identity === identity && identity ? snapshot : null;
-  return <section className="visual-review" aria-busy={!!identity && !visible && !error}>
+  return <section className="visual-review owner-preview" aria-busy={!!identity && !visible && !error}>
     <header className="home-heading"><h2 ref={heading} tabIndex={-1}>Vista previa de mi perfil</h2><button className="login-button login-outlined" onClick={onBack}>Volver</button></header>
     {!identity && <p role="status">La vista previa no está disponible para esta sesión.</p>}
     {!!identity && error && <><p role="alert">{error}{visible && ' Se muestra la última versión confirmada.'}</p><button className="login-button login-outlined" onClick={() => setEpoch(e => e+1)}>Reintentar</button></>}
@@ -61,7 +67,7 @@ export function MyProfilePreview({ controller, onBack }: { controller: SessionCo
     {visible && <>
       {visible.status !== 'ACTIVE' && <p className="home-description">Tu perfil está en borrador. Esta vista previa no lo activa.</p>}
       <h3>{visible.profile.displayName}, {visible.profile.age}</h3>
-      <PublicProfileView profile={visible.profile} selected={selected} onSelect={setSelected} retryEpoch={epoch} onRetry={() => setEpoch(e => e+1)}/>
+      <PublicProfileView profile={visible.profile} selected={selected} onSelect={setSelected} retryEpoch={visible.epoch} onRetry={() => setEpoch(e => e+1)}/>
     </>}
   </section>;
 }

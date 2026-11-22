@@ -35,11 +35,18 @@
 .photo-slot input[hidden] { display: none; }
 .photo-slot button { max-width: 100%; overflow-wrap: anywhere; }
 .photo-grid img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 0; }
+.managed-photo { position: relative; display: grid; width: 100%; height: 100%; place-items: center; background: var(--color-surface-variant); }
+.managed-photo .visual-photo-loading { position: absolute; inset: 0; display: grid; place-items: center; }
+.managed-photo .visual-photo-loading svg { max-width: 50%; }
+.managed-photo-error { padding: 4px; font-size: .75rem; }
 .photo-grid p { font-size: .875rem; }
 .crop-dialog { max-width: min(480px,94vw); max-height: 92dvh; overflow: auto; background: var(--color-surface); color: var(--color-on-surface); border: 1px solid var(--color-outline); border-radius: var(--radius-card); }
 .crop-dialog::backdrop { background: #000b; }
 .crop-viewport { position: relative; width: min(280px,100%); aspect-ratio: 4 / 5; overflow: hidden; margin: auto; touch-action: none; background: #222; }
 .crop-viewport canvas { display: block; width: 100%; height: 100%; user-select: none; }
+.crop-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.crop-actions .login-button { width: auto; margin: 0; padding-inline: 12px; }
+.crop-actions .login-primary { margin-inline-start: auto; background: var(--color-primary); color: var(--color-on-primary); border-color: var(--color-primary); }
 .login-panel:has(.onboarding) { max-width: 820px; }
 .profile-form .form-controls { margin: 0; }
 .profile-form .profile-group { margin: 20px 0 0; padding: 0; }
@@ -56,6 +63,12 @@
 .profile-form .check { gap: 10px; min-height: var(--control-min-height); padding: 8px 10px; border: 1px solid var(--color-outline-variant); border-radius: var(--radius-row); font-weight: 400; }
 .profile-form .check:has(input:checked) { background: var(--color-secondary-container); }
 .onboarding .profile-submit { display: block; width: 100%; min-height: var(--control-min-height); margin: 20px 0 0; background: var(--color-primary); color: var(--color-on-primary); border-color: var(--color-primary); font-weight: 600; }
+.profile-setup > .home-heading h2 { margin: 0; }
+.profile-setup > .home-heading button { margin-inline-start: auto; }
+.onboarding .setup-activation { border: 0; border-block-start: 1px solid var(--color-secondary); border-radius: 0; margin-block: 28px 20px; padding: 24px 0 0; }
+.setup-activation h3 { margin: 0; font-family: var(--font-display); font-size: var(--type-screen-title-size); font-weight: 400; color: var(--color-primary); }
+.setup-activation-progress { margin: 4px 0 0; min-height: var(--type-body-line-height); }
+.setup-account { margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--color-outline-variant); }
 .country-feedback p { margin: 0; color: var(--color-on-surface-variant); font-size: .875rem; }
 @media (min-width: 600px) {
   .profile-fields, .preference-options { grid-template-columns: repeat(2,minmax(0,1fr)); }

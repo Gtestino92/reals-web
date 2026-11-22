@@ -6,7 +6,9 @@ import { useLayoutEffect, useCallback, useEffect, useMemo, useRef, useState, use
 import type { SessionController } from '../auth/session';
 import { VisualSession, sessionContext, validMessage } from './VisualSession';
 import { deadline, useVisualNow } from './deadline';
+import { ProfileImage } from './ProfileImage';
 import { ProfilePlaceholder } from './ProfilePlaceholder';
+import { ChatIcon } from '../chat/ChatIcon';
 import './visual.css';
 
 export function VisualReview({ controller, matchId, onBack, onFinished = onBack, onBlocked, navigation }: { controller: SessionController; matchId: string; onBack: () => void; onFinished?: (reason: VisualOutcome) => void; onBlocked?: (value: boolean) => void; navigation?: HomeNavigation }) {
@@ -26,11 +28,11 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
   useEffect(()=>{
     model.start();void model.refresh();
     const resume=()=>{if(document.visibilityState==='visible')void model.resume();else model.conceal();};
-    const poll=setInterval(()=>{if(document.visibilityState==='visible')void model.refresh();},30000);
+    const poll=setInterval(()=>{if(document.visibilityState==='visible')void model.refresh(false,true);},30000);
     document.addEventListener('visibilitychange',resume);window.addEventListener('online',resume);
     return()=>{model.dispose();clearInterval(poll);document.removeEventListener('visibilitychange',resume);window.removeEventListener('online',resume);};
   },[model]);
-  useEffect(()=>{void model.refresh();},[model,session.authContextVersion]);
+  useEffect(()=>{void model.refresh(false,true);},[model,session.authContextVersion]);
   const expiry=state.profile?.visualExpiresAt;
   useEffect(()=>{if(!expiry)return;const ms=Date.parse(expiry)-Date.now();if(ms<=0)return;const timer=setTimeout(()=>void model.refresh(),Math.min(ms,2147483647));return()=>clearTimeout(timer);},[model,expiry]);
   const visible=model.context===context&&session.phase==='ready';
@@ -38,6 +40,13 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
   const expired=!!expiry&&Date.parse(expiry)<=now;
   const disabled=state.busy||!!state.pending||state.uncertain||state.concealed||expired||!profile;
   const concealed=state.concealed||expired||!visible;
+  const draftProfile=useRef<string | undefined>(undefined);
+  useLayoutEffect(()=>{
+    if (profile && draftProfile.current !== profile.profileId) {
+      draftProfile.current=profile.profileId;
+      setDraft('');
+    }
+  },[profile]);
   dirty.current=!!draft.trim()&&!profile?.myPersonalMessageSubmitted&&!state.terminal&&!expired&&visible;
   const requestLeave=useCallback((proceed:()=>void)=>{
     if(model.getSnapshot().pending)return false;
@@ -48,14 +57,14 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
   const register=navigation?.registerVisualReview;
   useLayoutEffect(()=>register?.(requestLeave),[register,requestLeave]);
   useEffect(()=>{if(profile?.myPersonalMessageSubmitted)setDraft('');},[profile?.myPersonalMessageSubmitted]);
-  useEffect(()=>{if(state.terminal||expired||!visible){setLeaving(false);continueLeave.current=null;}},[state.terminal,expired,visible]);
+  useEffect(()=>{if(state.terminal||expired||!visible){setLeaving(false);setMenu(false);setDialog(false);continueLeave.current=null;}},[state.terminal,expired,visible]);
   useEffect(()=>{if(!leaving)return;const d=leaveDialog.current;d?.showModal();return()=>{d?.close();if(leaveFocus.current?.isConnected)leaveFocus.current.focus({preventScroll:true});};},[leaving]);
   const defer=()=>{if(model.getSnapshot().pending)return;if(navigation)onBack();else if(requestLeave(onBack))onBack();};
   const returnAction=<section className="visual-defer"><p>{profile&&!expired?'Pod\u00e9s retomar este descubrimiento desde Actividad antes de que venza el plazo.':'Pod\u00e9s volver a Actividad para consultar el estado o reintentar.'}</p><button className="login-button login-outlined" disabled={!!state.pending} onClick={defer}>Decidir más tarde</button></section>;
   const photo=(index:number)=>{const p=profile?.photos[index];return p&&<ProfileImage key={JSON.stringify([context,matchId,profile.profileId,photoIdentity(p.id,p.url)])} retryEpoch={state.imageRetry} onRetry={()=>void model.refresh(true)} url={p.url} label={`Foto ${index+1} de ${profile.photos.length} de ${profile.displayName}`} eager={index===0}/>;};
   return <section className="visual-review" aria-busy={state.busy&&!profile}>
     <header className="visual-header"><div className="home-heading visual-toolbar"><h2 ref={heading} tabIndex={-1}>Descubrimiento</h2><div className="chat-overflow" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))setMenu(false);}} onKeyDown={e=>{if(e.key==='Escape'){setMenu(false);menuButton.current?.focus();}}}>
-      <button ref={menuButton} className="login-button login-outlined" aria-label="Más acciones" aria-haspopup="menu" aria-expanded={menu} disabled={disabled} onKeyDown={e=>{if(e.key==='ArrowDown'){e.preventDefault();setMenu(true);}}} onClick={()=>setMenu(v=>!v)}>⋮</button>
+      <button ref={menuButton} className="login-button login-outlined" aria-label="Más acciones" aria-haspopup="menu" aria-expanded={menu} disabled={disabled} onKeyDown={e=>{if(e.key==='ArrowDown'){e.preventDefault();setMenu(true);}}} onClick={()=>setMenu(v=>!v)}><ChatIcon name="more"/></button>
       {menu&&<div className="chat-menu" role="menu"><button ref={menuItem} role="menuitem" onClick={()=>{setMenu(false);setDialog(true);}}>Bloquear a esta persona</button></div>}
     </div></div></header>
     <p>Conocé su perfil antes de decidir si querés continuar.</p>
@@ -66,7 +75,7 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
     {expired?<p role="status">El descubrimiento venció. Actualizando estado...</p>:expiry&&Date.parse(expiry)-now<=600000&&<aside className="home-notice">Descubrimiento por vencer. El descubrimiento vence pronto. Completá tu decisión para no perder esta oportunidad.</aside>}
     {(!profile||concealed)&&returnAction}
     <div className={`visual-content${concealed ? ' visual-concealed' : ''}`} style={{ visibility: concealed ? 'hidden' : 'visible' }} inert={concealed} aria-hidden={concealed}>
-    {profile&&<>
+    {profile&&!concealed&&<>
       <article className="home-card visual-profile">
         <header><h3>{profile.displayName}</h3><p>{profile.age} años</p><PublicProfileLocation city={profile.city} countryCode={profile.countryCode}/></header>
         {!profile.photos.length&&<p role="status">No hay fotos aprobadas disponibles.</p>}
@@ -74,34 +83,20 @@ export function VisualReview({ controller, matchId, onBack, onFinished = onBack,
         {!!profile.affinityIndicators.length&&<section className="visual-insert"><h4>Afinidades compartidas</h4><p>Temas en los que encontraron afinidad.</p><ul className="visual-affinities">{profile.affinityIndicators.map(a=><li key={a.categoryId}>{a.title}</li>)}</ul></section>}
         {photo(2)}{!!profile.profileQuestions.length&&<section className="visual-insert"><h4>Preguntas del perfil</h4>{profile.profileQuestions.map((q,i)=><div key={`${q.questionId}/${i}`}><h5>{q.prompt}</h5><p>{q.answer}</p></div>)}</section>}{profile.photos.slice(3).map((_,i)=>photo(i+3))}
       </article>
-      {profile.partnerPersonalMessageSubmitted&&<section className={`home-card visual-section ${!profile.partnerPersonalMessageRead?'visual-unread':''}`}><h3>Mensaje personal de la otra persona</h3>
+      {profile.partnerPersonalMessageSubmitted&&<section className={`home-card visual-section ${!profile.partnerPersonalMessageRead?'visual-unread':''}`}><h3>Mensaje personal de {profile.displayName || 'la otra persona'}</h3>
         <div className="visual-message-badge">{profile.partnerPersonalMessageSubmitted&&!profile.partnerPersonalMessageRead&&<strong>Mensaje nuevo</strong>}</div>
-        <p className={`visual-message-body${state.messageLoaded ? ' visual-message-loaded' : ''}`} aria-live="polite">{!profile.partnerPersonalMessageSubmitted?'No dejó un mensaje personal.':state.pending==='read'?'Leyendo mensaje...':state.messageError?'No pudimos cargar el mensaje personal. Intentá nuevamente.':state.messageLoaded?state.message||'No dejó un mensaje personal.':'La otra persona dejó un mensaje personal para vos.'}</p>
+        <p className={`visual-message-body${state.messageLoaded ? ' visual-message-loaded' : ''}`} aria-live="polite">{state.pending==='read'?'Leyendo mensaje...':state.messageError?'No pudimos cargar el mensaje personal. Intentá nuevamente.':state.messageLoaded?state.message||'No dejó un mensaje personal.':'Te dejó un mensaje personal.'}</p>
         <div className="visual-message-action">{profile.partnerPersonalMessageSubmitted&&!state.messageLoaded&&<button className="login-button login-outlined" disabled={disabled} onClick={()=>void model.act('read')}>{state.messageError?'Reintentar lectura':'Leer mensaje'}</button>}</div>
       </section>}
       <section className="home-card visual-section"><h3>Mi mensaje personal</h3>
         {profile.myPersonalMessageSubmitted?<p>Ya guardaste tu mensaje personal. No se puede modificar.</p>:<><label>Mensaje personal<textarea value={draft} maxLength={280} rows={3} disabled={disabled} onChange={e=>setDraft(e.target.value.slice(0,280))}/></label><p>{draft.length}/280</p>{draft&&!validMessage(draft)&&<p>El mensaje personal no es válido.</p>}<button className="login-button login-outlined" disabled={disabled||!validMessage(draft)} onClick={()=>void model.act('save',draft)}>{state.pending==='save'?'Guardando...':'Guardar mensaje'}</button></>}
         {state.notice&&<p role="status">{state.notice}</p>}
       </section>
-      <section className="home-card visual-section"><h3>Tu decisión</h3><p>Si aprobás y la otra persona también aprueba, se crea la conexión para la siguiente etapa.</p><div className="visual-decisions"><button className="login-button login-primary" disabled={disabled} onClick={()=>void model.act('APPROVED')}>{state.pending==='APPROVED'?'Aprobando...':'Aprobar'}</button><button className="login-button login-outlined" disabled={disabled} onClick={()=>void model.act('REJECTED')}>{state.pending==='REJECTED'?'Rechazando...':'Rechazar'}</button></div></section>
+      <section className="home-card visual-section"><h3>Tu decisión</h3><p>Si vos y {profile.displayName || 'la otra persona'} aprueban, se crea la conexión para la siguiente etapa.</p><div className="visual-decisions"><button className="login-button login-primary" disabled={disabled} onClick={()=>void model.act('APPROVED')}>{state.pending==='APPROVED'?'Aprobando...':'Aprobar'}</button><button className="login-button login-outlined" disabled={disabled} onClick={()=>void model.act('REJECTED')}>{state.pending==='REJECTED'?'Rechazando...':'Rechazar'}</button></div></section>
     </>}
     </div>
     {profile&&!concealed&&returnAction}
     {leaving&&<dialog ref={leaveDialog} aria-labelledby="visual-leave-title" onCancel={()=>{continueLeave.current=null;setLeaving(false);}}><h3 id="visual-leave-title">Mensaje sin guardar</h3><p>Si salís, se descarta tu borrador de mensaje personal.</p><button className="login-button login-outlined" onClick={()=>{continueLeave.current=null;setLeaving(false);}}>Seguir editando</button><button className="login-button login-primary" disabled={!!state.pending} onClick={()=>{if(model.getSnapshot().pending)return;const proceed=continueLeave.current;continueLeave.current=null;dirty.current=false;setDraft('');setLeaving(false);proceed?.();}}>Salir sin guardar</button></dialog>}
     {dialog&&<dialog ref={dialogRef} aria-labelledby="visual-block-title" onCancel={e=>{if(state.pending)e.preventDefault();else setDialog(false);}}><h3 id="visual-block-title">¿Bloquear a esta persona?</h3><p>Esta acción es definitiva y no se puede deshacer. Se cerrará la interacción actual y no volverán a ser emparejados. Bloquear no envía un reporte.</p>{state.error&&<p role="alert">{state.error}</p>}<button className="login-button login-outlined" disabled={!!state.pending} onClick={()=>setDialog(false)}>Cancelar</button><button className="login-button login-primary" disabled={disabled} onClick={()=>void model.act('block')}>{state.pending==='block'?'Bloqueando...':'Bloquear definitivamente'}</button></dialog>}
   </section>;
-}
-export function ProfileImage({ url, label, eager, retryEpoch, onRetry }: { url: string; label: string; eager: boolean; retryEpoch: number; onRetry: () => void }) {
-  const [image, setImage] = useState<{ epoch: number; url: string; status: 'loading' | 'loaded' | 'failed' }>(() => ({ epoch: retryEpoch, url, status: 'loading' }));
-  // Pin the exact request string while loading/loaded. Only a failed request
-  // adopts a renewed signature automatically; explicit refresh remounts after
-  // the new authoritative response, never with the previous expired URL.
-  if (image.status === 'failed' && (image.url !== url || image.epoch !== retryEpoch)) setImage({ epoch: retryEpoch, url, status: 'loading' });
-  const status = image.status;
-  return <figure className="visual-photo">
-    {status !== 'failed' && <img src={image.url} alt={label} loading={eager ? 'eager' : 'lazy'} referrerPolicy="no-referrer" onLoad={() => setImage(current => ({ ...current, status: 'loaded' }))} onError={() => setImage(current => ({ ...current, status: 'failed' }))} />}
-    {status !== 'loaded' && <span role="status">{status === 'failed' ? 'No se pudo cargar esta foto. Volvé a intentar.' : 'Cargando foto…'}</span>}
-    {status === 'failed' && <button className="login-button login-outlined visual-photo-retry" onClick={onRetry}>Reintentar foto</button>}
-    <figcaption>{label}</figcaption>
-  </figure>;
 }

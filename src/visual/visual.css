@@ -7,7 +7,10 @@
 .visual-insert h5 { font-size: 1rem; }
 .visual-photo { margin: 0; position: relative; aspect-ratio: 4 / 5; background: var(--color-surface-variant); border-radius: 12px; overflow: hidden; }
 .visual-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.visual-photo > span { position: absolute; inset: 35% 16px auto; text-align: center; padding: 12px; background: var(--color-surface); }
+:is(.visual-photo, .visual-thumbnail, .managed-photo)[data-image-state="loading"] img { opacity: 0; }
+.visual-photo > :is(.visual-photo-loading, .visual-photo-error) { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 16px; text-align: center; }
+.visual-photo-loading { color: var(--color-on-surface-variant); }
+.visual-photo-error p { margin: 0; }
 .visual-photo figcaption { position: absolute; bottom: 10px; right: 10px; left: 10px; width: fit-content; max-width: calc(100% - 20px); border-radius: 16px; padding: 6px 12px; background: var(--color-surface); overflow-wrap: anywhere; }
 .visual-affinities { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0; list-style: none; }
 .visual-affinities li { border: 1px solid var(--color-outline); border-radius: 24px; padding: 8px 12px; overflow-wrap: anywhere; }
@@ -23,12 +26,12 @@
 .visual-progress.warning { accent-color: var(--color-secondary); }
 .visual-progress.critical { accent-color: var(--color-error); }
 
-.visual-photo-retry { position: absolute; top: 60%; left: 16px; right: 16px; }
-
-.visual-review { margin-block-start: 24px; overflow-anchor: none; }
+.visual-review { margin-block-start: 24px; }
 .visual-header { display: grid; gap: 24px; }
 .visual-header h2 { margin: 0; }
 .visual-toolbar h2 { min-width:0; overflow-wrap:anywhere; }
+.visual-toolbar .chat-overflow { margin-inline-start: auto; }
+.visual-toolbar .chat-overflow > button { min-height: 44px; }
 .visual-concealed { display:none; visibility:hidden; pointer-events:none; }
 .visual-section > .visual-message-body { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .visual-message-badge:empty, .visual-message-action:empty { display:none; }
@@ -54,3 +57,8 @@
 .partner-profile-actions { display: flex; align-items: center; gap: .5rem; }
 .partner-profile-actions .login-button { margin: 0; }
 .partner-profile-loading { margin-top: 20px; }
+.owner-preview .home-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.owner-preview .home-heading h2 { margin: 0; overflow-wrap: anywhere; }
+.owner-preview .home-heading button { margin: 0; }
+.owner-preview .visual-profile { margin-top: .75rem; }
+.visual-profile .visual-insert h3 { margin: 0; font-size: var(--type-section-title-size); }

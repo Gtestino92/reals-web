@@ -117,7 +117,7 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
   const localNavigation = useHomeNavigation(() => !visualReturnLocked.current && !visualLocked.current && !locked.current && !accountLocked.current && !overviewLocked.current && !chat, !providedNavigation);
   const navigation = providedNavigation ?? localNavigation;
   // Draft setup owns its shared history and renders questions outside this nested Home.
-  const surface = navigation.destination === 'second-chat' || navigation.destination === 'home' || navigation.destination === 'activity' || (delegateProfileQuestions && (isProfileQuestions(navigation.destination) || navigation.destination === 'my-profile-preview')) ? null : navigation.destination;
+  const surface = navigation.destination === 'second-chat' || navigation.destination === 'home' || navigation.destination === 'activity' || (delegateProfileQuestions && (isProfileQuestions(navigation.destination) || ['my-profile-preview', 'setup-details'].includes(navigation.destination))) ? null : navigation.destination;
   const navigationRef=useRef(navigation);navigationRef.current=navigation;
   const finishVisual = async (matchId:string,reason:VisualOutcome) => {
     const epoch=++returnEpoch.current,account=controller.snapshot.account?.id;

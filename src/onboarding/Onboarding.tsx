@@ -74,6 +74,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
   const [error, setError] = useState<{ message: string; activation: boolean } | null>(null);
   const activationErrorId = useId();
   const [savingProfile, setSavingProfile] = useState<'create' | 'details' | 'filters' | null>(null);
+  const [activating, setActivating] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; profileMode: 'create' | 'details' | 'filters' | null }>({ message: '', profileMode: null });
   const { message, profileMode: feedbackProfile } = feedback;
   const setMessage = (message: string) => setFeedback({ message, profileMode: null });
@@ -100,6 +101,19 @@ export function Onboarding({ Home, active = true, controller, management, naviga
   const setupNavigationEnabled = !management && model?.profile?.status !== 'ACTIVE';
   const setupNavigation = useHomeNavigation(() => (!owner.current?.locked || owner.current.background) && !cropOwned.current && !accountLocked.current && !nestedHomeLock.current, setupNavigationEnabled && !providedNavigation);
   const navigation = providedNavigation ?? setupNavigation;
+  const setupEditing = setupNavigationEnabled && !!model?.profile && model.legal.satisfied && navigation.destination === 'setup-details';
+  const setupEditEntry = useRef<HTMLButtonElement>(null), setupEditHeading = useRef<HTMLHeadingElement>(null);
+  const setupEditScroll = useRef(0), wasSetupEditing = useRef(false);
+  useLayoutEffect(() => {
+    if (setupEditing) {
+      window.scrollTo(0, 0);
+      setupEditHeading.current?.focus({ preventScroll: true });
+    } else if (wasSetupEditing.current && navigation.destination === 'home') {
+      setupEditEntry.current?.focus({ preventScroll: true });
+      window.scrollTo(0, setupEditScroll.current);
+    }
+    wasSetupEditing.current = setupEditing;
+  }, [setupEditing, navigation.destination]);
   const previewActive = navigation.destination === 'my-profile-preview';
   const previewEntry = useRef<HTMLButtonElement>(null), previewScroll = useRef(0), wasPreview = useRef(false);
   useLayoutEffect(() => {
@@ -171,7 +185,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     }
     const operation = new AbortController();
     resource.operation = operation; resource.locked = true; resource.background = background;
-    if (!background) { onNavigationBlockedChange?.(true); setBusy(true); setSavingProfile(profileMode ?? null); setError(null); setMessage(''); setPhotoError(''); }
+    if (!background) { onNavigationBlockedChange?.(true); setBusy(true); setSavingProfile(profileMode ?? null); setActivating(activation); setError(null); setMessage(''); setPhotoError(''); }
     const signal = AbortSignal.any([resource.abort.signal, operation.signal]);
     let failure: unknown;
     try { if (task) await task(signal); }
@@ -191,7 +205,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
       if (activation && !activated && uncertain) resource.activationNeedsCheck = true;
       setBlocked(resource.creationNeedsCheck || resource.activationNeedsCheck || (uncertain && profileMode !== 'create' && !activation));
       if (activated && !management) setError(current => current?.activation ? null : current);
-      if (management && task && !failure && !signal.aborted) setFeedback({ message: 'Cambios guardados.', profileMode: profileMode ?? null });
+      if ((management || profileMode && profileMode !== 'create') && task && !failure && !signal.aborted) setFeedback({ message: 'Cambios guardados.', profileMode: profileMode ?? null });
       if (activation && !failure && activated) setSuccess(true);
       if (failure && (profileMode !== 'create' || !result.profile) && (!activation || !activated)) {
         setError({ message: onboardingError(failure, activation), activation });
@@ -204,7 +218,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
         setBlocked(true); setError({ message: onboardingError(failure ?? e, activationFeedback), activation: activationFeedback });
       }
     }
-    finally { if (owner.current === resource && !signal.aborted) { if (resource.operation === operation) { resource.locked = false; resource.background = false; resource.operation = null; setBusy(false); setSavingProfile(null); } } }
+    finally { if (owner.current === resource && !signal.aborted) { if (resource.operation === operation) { resource.locked = false; resource.background = false; resource.operation = null; setBusy(false); setSavingProfile(null); setActivating(false); } } }
     return true;
   };
   const foreground = useRef(active); foreground.current = active;
@@ -303,16 +317,24 @@ export function Onboarding({ Home, active = true, controller, management, naviga
   useLayoutEffect(() => { onAccountAvailableChange?.(accountAvailable); return () => onAccountAvailableChange?.(false); }, [accountAvailable, onAccountAvailableChange]);
   const creating = !!model?.legal.satisfied && !model.profile;
   const initialDeliveryError = !verified ? controller.snapshot.verificationDeliveryError?.message : undefined;
-  const activationInline = !!error?.activation && !management && model?.legal.satisfied && !!model.profile && model.profile.status !== 'ACTIVE';
+  const activationInline = !!error?.activation && !setupEditing && !management && model?.legal.satisfied && !!model.profile && model.profile.status !== 'ACTIVE';
   const errorAlert = error && <p id={activationInline ? activationErrorId : undefined} role="alert">{error.message}</p>;
   const checkStatus = (error || blocked) && !busy && <button type="button" aria-describedby={activationInline ? activationErrorId : undefined} disabled={!!crop || ((creating || activationInline) && accountBusy) || (activationInline && (nestedHomeBlocked || nestedManagement))} onClick={() => void run()}>Consultar estado</button>;
   const questionsSection = management !== 'filters' && ['DRAFT', 'ACTIVE'].includes(model?.profile?.status ?? '') && <section className="home-card profile-question-entry"><h3>Preguntas del perfil</h3><p>Son opcionales y públicas. Podés responder varias y elegir hasta tres para mostrar en tu perfil.</p><button ref={questionsEntry} type="button" className="login-button login-primary" disabled={disabled || !!crop || nestedHomeBlocked || nestedManagement} onClick={openQuestions}>Responder o editar</button></section>;
+  const editForm = (mode: 'details' | 'filters', profile: FullProfile) => (
+    <FormSection key={mode} title={mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'}>
+      <ProfileForm key={profile.id} profile={profile} mode={mode} catalog={catalog} countryError={countryError}
+        retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }}
+        saving={savingProfile === mode} saved={feedbackProfile === mode} onDirtyChange={reportFormDirty[mode]}
+        busy={disabled || !!crop || (!management && !setupEditing)} submit={writeProfile}/>
+    </FormSection>
+  );
   if (!model && busy && !management) return <SessionLoading />;
   return <><div className="onboarding" hidden={questionsActive || previewActive} aria-busy={busy}>
     {management && <header className="home-heading"><h2>{management === 'details' ? 'Tu perfil' : 'Preferencias'}</h2><button type="button" className="login-button login-outlined" disabled={busy || !!crop} onClick={onBack}>Volver a Inicio</button></header>}
     {management && !model && busy && <><p className="home-loading-status" role="status">Cargando {management === 'details' ? 'perfil' : 'preferencias'}…</p><div className="home-placeholder management-placeholder" aria-hidden="true"><div className="home-card">{Array.from({ length: 4 }, (_, i) => <div className="placeholder-field" key={i}><span/><span/></div>)}</div>{management === 'details' && <div className="home-card home-placeholder-search"><span/><span/><span/></div>}</div></> }
     {!creating && !activationInline && errorAlert}{message && !feedbackProfile && <p role="status">{message}</p>}
-    {busy && (!management || !!model) && <p className="home-loading-status" role="status">Actualizando estado…</p>}
+    {busy && !activating && (!management || !!model) && <p className="home-loading-status" role="status">Actualizando estado…</p>}
     {!creating && !activationInline && checkStatus}
     {model && !model.legal.satisfied ? <><h2>Antes de continuar</h2><p>Revisá los documentos vigentes. Algunas acciones de participación requieren que completes la acción indicada.</p>
       {model.legal.documents.map(doc => <article key={doc.type}><h3>{({ TERMS_OF_USE: 'Términos de uso', PRIVACY_NOTICE: 'Aviso de privacidad', COMMUNITY_GUIDELINES: 'Normas de la comunidad' } as Record<string,string>)[doc.type] ?? doc.type}</h3><p>Versión {doc.version} · {doc.requiredAction} · {doc.satisfied ? 'Completado' : 'Pendiente'}</p><a href={doc.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Ver documento</a>{!doc.satisfied && <button disabled={disabled} onClick={() => void run(async signal => { await controller.request('/me/legal-document-actions',signal,'POST',{ documentType: doc.type, documentVersion: doc.version, action: doc.requiredAction }); })}>{doc.requiredAction === 'ACCEPTED' ? 'Aceptar' : 'Confirmar lectura'}</button>}</article>)}
@@ -321,10 +343,25 @@ export function Onboarding({ Home, active = true, controller, management, naviga
       {initialDeliveryError && <p role="alert">{initialDeliveryError} Podés crear tu perfil y pedir otro correo desde la sección de verificación.</p>}
       <ProfileForm onDirtyChange={reportFormDirty.create} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled} saving={savingProfile === 'create'} submit={writeProfile} creationFeedback={<>{errorAlert}{checkStatus}</>} />
     </> : model?.profile ? <>
-      {!management && <><h2>Completá tu perfil</h2><p>{model.profile.status === 'DRAFT' ? 'Tu perfil está en borrador' : 'Tu perfil está inactivo'}</p></>}
+      {!management && <div hidden={!setupEditing} inert={!setupEditing}>
+        <header className="home-heading">
+          <h2 ref={setupEditHeading} tabIndex={-1}>Datos y preferencias</h2>
+          <button className="login-button login-outlined" type="button" disabled={busy || accountBusy} onClick={() => navigation.backTo('home')}>Volver a fotos y activación</button>
+        </header>
+        <p>Podés editar tus datos y preferencias antes de activar el perfil.</p>
+        {editForm('details', model.profile)}
+        {editForm('filters', model.profile)}
+      </div>}
+      <div hidden={setupEditing} inert={setupEditing} className={management ? undefined : 'profile-setup'}>
+      {!management && <>
+        <header className="home-heading"><h2>Completá tu perfil</h2>
+          <button type="button" ref={setupEditEntry} className="login-button login-outlined" disabled={busy || !!crop || accountBusy || nestedHomeBlocked || nestedManagement} onClick={() => { setupEditScroll.current = window.scrollY; navigation.open('setup-details'); }}>Editar datos y preferencias</button>
+        </header>
+        <p>{model.profile.status === 'DRAFT' ? 'Tu perfil está en borrador' : 'Tu perfil está inactivo'}</p>
+      </>}
       {management && model.profile.status !== 'ACTIVE' && <p>Estado: {model.profile.status}</p>}
       {model.interactions === true && <aside><h3>Inicio: interacciones vigentes</h3><p>Tenés interacciones en curso. Podés consultarlas y continuarlas desde Actividad.</p></aside>}
-      {model.interactions === true && <Home delegateProfileQuestions controller={controller} navigation={setupNavigationEnabled ? navigation : undefined} onNavigationBlockedChange={reportNestedHomeLock} onManagementActiveChange={setNestedManagement} />}
+      {model.interactions === true && <Home delegateProfileQuestions active={active && !setupEditing} controller={controller} navigation={setupNavigationEnabled ? navigation : undefined} onNavigationBlockedChange={reportNestedHomeLock} onManagementActiveChange={setNestedManagement} />}
       {model.interactions === null && <aside><h3>Inicio no disponible</h3><p>No pudimos consultar tus interacciones. Su estado es desconocido. Podés seguir completando el perfil o reintentar la consulta de Inicio.</p><button disabled={disabled || !!crop} onClick={() => void run()}>Reintentar Inicio</button></aside>}
       {!verified && <section id="email-verification" aria-label="Verificá tu email" tabIndex={-1}>
         <h3>Verificá tu email</h3>
@@ -333,7 +370,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
         <button type="button" disabled={disabled || checkAt > now} onClick={() => verifyEmail(false)}>Ya verifiqué</button>
         {verificationFeedback ? <p role={verificationFeedback.error ? 'alert' : 'status'}>{verificationFeedback.message}</p> : initialDeliveryError && <p role="alert">{initialDeliveryError}</p>}
       </section>}
-      {(['details','filters'] as const).filter(mode => management === mode).map(mode => <FormSection key={mode} management={!!management} title={mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'}><ProfileForm saving={savingProfile === mode} saved={feedbackProfile === mode} onDirtyChange={reportFormDirty[mode]} key={`${model.profile!.id}-${mode}`} profile={model.profile!} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled || !!crop} mode={mode} submit={writeProfile}/></FormSection>)}
+      {management && editForm(management, model.profile)}
       {management && questionsSection}
       {management !== 'filters' && <PhotoSection>{management && <p>Hasta nueve fotos. Los cambios pueden requerir una nueva revisión del perfil. Revisá los estados de validación y moderación de cada foto.</p>}
         <p id="photo-upload-guidance" role="status">{uploadGuidance}</p>
@@ -344,22 +381,25 @@ export function Onboarding({ Home, active = true, controller, management, naviga
       </PhotoSection>}
 
       {!management && questionsSection}
-      {(['details','filters'] as const).filter(() => !management).map(mode => <FormSection key={mode} management={!!management} title={mode === 'details' ? 'Datos del perfil' : 'Preferencias de búsqueda'}><ProfileForm saving={savingProfile === mode} saved={feedbackProfile === mode} onDirtyChange={reportFormDirty[mode]} key={`${model.profile!.id}-${mode}`} profile={model.profile!} catalog={catalog} countryError={countryError} retryCountries={() => { const r = owner.current; if (r) void loadCountries(r.abort.signal); }} busy={disabled || !!crop} mode={mode} submit={writeProfile}/></FormSection>)}
-      {management !== 'filters' && ['DRAFT', 'ACTIVE'].includes(model.profile.status) && <section className="home-card profile-question-entry"><button ref={previewEntry} type="button" className="login-button login-outlined" disabled={disabled || !!crop || nestedHomeBlocked || nestedManagement} onClick={() => { previewScroll.current = window.scrollY; navigation.open('my-profile-preview'); }}>Vista previa de mi perfil</button><p>{management ? 'Así se ven tus datos públicos confirmados. Los cambios sin guardar no se muestran.' : 'La vista previa es privada. Solo muestra los datos guardados y no activa ni publica tu perfil.'}</p></section>}
-      {!management && <section aria-label="Activación del perfil">
+      {!management && <section className="setup-activation" aria-label="Activación del perfil">
+        <h3>Tu perfil está casi listo</h3>
+        <p>Activar tu perfil es el último paso para empezar a usar Reals.</p>
         {!verified && <p id="activation-email-guidance">Verificá tu email y presioná «Ya verifiqué» antes de activar el perfil.</p>}
         {activationInline && errorAlert}
         {activationInline && checkStatus}
-        <button type="button" className="profile-submit" aria-describedby={[!verified && 'activation-email-guidance', activationInline && activationErrorId].filter(Boolean).join(' ') || undefined} disabled={activationDisabled} onClick={activate}>Activar perfil</button>
+        <button type="button" className="profile-submit" aria-busy={activating} aria-describedby={[!verified && 'activation-email-guidance', activationInline && activationErrorId].filter(Boolean).join(' ') || undefined} disabled={activationDisabled} onClick={activate}>Activar perfil</button>
+        <p className="setup-activation-progress" role="status">{activating ? 'Activando perfil…' : ''}</p>
       </section>}
+      {management !== 'filters' && ['DRAFT', 'ACTIVE'].includes(model.profile.status) && <section className="home-card profile-question-entry"><button ref={previewEntry} type="button" className="login-button login-outlined" disabled={disabled || !!crop || nestedHomeBlocked || nestedManagement} onClick={() => { previewScroll.current = window.scrollY; navigation.open('my-profile-preview'); }}>Vista previa de mi perfil</button><p>{management ? 'Así se ven tus datos públicos confirmados. Los cambios sin guardar no se muestran.' : 'La vista previa es privada. Solo muestra los datos guardados y no activa ni publica tu perfil.'}</p></section>}
+      </div>
     </> : null}
-    {!management && model && model.profile?.status !== 'ACTIVE' && <AccountSection controller={controller} disabled={busy || !!crop} setup onNavigationBlockedChange={value => { accountLocked.current = value; setAccountBusy(value); onNavigationBlockedChange?.(value || (!!owner.current?.locked && !owner.current.background) || cropOwned.current || nestedHomeLock.current); }} />}
+    {!management && model && model.profile?.status !== 'ACTIVE' && <div className={model.profile && model.legal.satisfied ? 'setup-account' : undefined}><AccountSection controller={controller} disabled={busy || !!crop} setup onNavigationBlockedChange={value => { accountLocked.current = value; setAccountBusy(value); onNavigationBlockedChange?.(value || (!!owner.current?.locked && !owner.current.background) || cropOwned.current || nestedHomeLock.current); }} /></div>}
     {crop && <CropDialog file={crop.file} onCancel={closeCrop} onConfirm={async blob => { if (blocked) return; const data = new FormData(); data.append('file',blob,'profile.jpg'); if (!crop.photo) data.append('position',String(crop.position)); const attempted = await run(async signal => { await controller.request(crop.photo ? `/me/profile/photos/${encodeURIComponent(crop.photo.id)}/file` : '/me/profile/photos',signal,crop.photo ? 'PUT' : 'POST',data); }); if (!attempted) throw new Error('Hay una operación en curso. Volvé a intentar.'); if (owner.current && !owner.current.abort.signal.aborted) closeCrop(); }}/ >}
   </div>{previewActive && active && <MyProfilePreview controller={controller} onBack={() => navigation.backTo(management ? 'profile' : 'home')}/>}<ProfileQuestions model={questions} navigation={navigation} onReturn={() => navigation.backTo(management ? 'profile' : 'home')}/></>;
 }
 
-function FormSection({ management, title, children }: { management: boolean; title: string; children: React.ReactNode }) {
-  return management ? <section aria-label={title}><h3>{title}</h3>{children}</section> : <details><summary>{title}</summary>{children}</details>;
+function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return <section aria-label={title}><h3>{title}</h3>{children}</section>;
 }
 
 function PhotoSection({ children }: { children: React.ReactNode }) {

@@ -45,6 +45,31 @@ beforeEach(() => {
   });
 });
 function mount(localVerification = false) { return render(<StrictMode><App firebase={{ service:auth,localVerification }} api={new ApiClient(fetcher)}/></StrictMode>); }
+it('creates once, preserves the setup editor through history, and restores photos and activation after reload', async () => {
+  const original = mount();
+  fireEvent.submit(await createForm());
+  const edit = await screen.findByRole('button',{name:'Editar datos y preferencias'});
+  expect(screen.queryByRole('form',{name:'Crear perfil'})).toBeNull();
+  fireEvent.click(edit);
+  const form = screen.getByRole('form',{name:'Datos del perfil'});
+  const city = within(form).getByLabelText('Ciudad');
+  fireEvent.change(city,{target:{value:'Rosario'}});
+  expect(screen.queryByRole('button',{name:'Activar perfil'})).toBeNull();
+  act(()=>history.back());
+  await waitFor(()=>expect(edit).toHaveFocus());
+  act(()=>history.forward());
+  expect(await screen.findByRole('heading',{name:'Datos y preferencias'})).toHaveFocus();
+  expect(city).toHaveValue('Rosario');
+  fireEvent.submit(form);
+  await screen.findByText('Cambios guardados.');
+  expect(writes('PATCH')).toHaveLength(1);
+  expect(writes('POST')).toHaveLength(1);
+  original.unmount();
+  mount();
+  fireEvent.click(await screen.findByRole('button',{name:'Editar datos y preferencias'}));
+  expect(within(screen.getByRole('form',{name:'Datos del perfil'})).getByLabelText('Ciudad')).toHaveValue('Rosario');
+  expect(writes('POST')).toHaveLength(1);
+});
 it.each(['DRAFT', 'INACTIVE'])('reuses confirmed recoverable deletion in %s setup and excludes duplicate/coupled writes', async status => {
   profile = { ...initialProfile, status };
   let finish!: (value: Response) => void;
@@ -285,12 +310,13 @@ it('keeps setup question navigation available after a quiet profile refresh', as
 it.each(['ACTIVE', 'DRAFT'])('preserves unsaved profile details, bio and filters through nested questions and history for %s', async status => {
   installQuestions();
   if (status === 'ACTIVE') await openManagement('Tu perfil');
-  else { profile = { ...initialProfile }; mount(); await screen.findByRole('heading', { name: 'Completá tu perfil' }); }
-  const form = await screen.findByRole('form', { name: 'Datos del perfil', hidden: status === 'DRAFT' });
+  else { profile = { ...initialProfile }; mount(); fireEvent.click(await screen.findByRole('button', { name:'Editar datos y preferencias' })); }
+  const form = await screen.findByRole('form', { name: 'Datos del perfil' });
   const bio = within(form).getByLabelText('Bio (opcional)'), name = within(form).getByLabelText('Nombre visible');
   fireEvent.change(bio, { target: { value: 'Mi bio sin guardar ñ' } }); fireEvent.change(name, { target: { value: 'Borrador' } });
-  const filters = status === 'DRAFT' ? screen.getByRole('form', { name: 'Preferencias de búsqueda', hidden: true }) : null;
+  const filters = status === 'DRAFT' ? screen.getByRole('form', { name: 'Preferencias de búsqueda' }) : null;
   if (filters) fireEvent.change(within(filters).getByLabelText('Intención'), { target: { value: 'FRIENDSHIP' } });
+  if (status === 'DRAFT') { fireEvent.click(screen.getByRole('button', { name:'Volver a fotos y activación' })); await screen.findByRole('heading', { name:'Completá tu perfil' }); }
   await openProfileQuestions(); expect(screen.queryByRole('form', { name: 'Datos del perfil' })).toBeNull();
   expect(history.state.trail).toEqual(status === 'ACTIVE' ? ['home', 'profile', 'profile-questions'] : ['home', 'profile-questions']);
   expect(fetcher.mock.calls.filter(([path]) => path === '/api/reference/profile-questions')).toHaveLength(1);
@@ -549,8 +575,8 @@ it('records exactly the required legal action and version', async () => { satisf
 it('recovers a stale legal version without silently accepting the new version', async () => { satisfied = false; mount(); await screen.findByRole('heading',{ name:'Antes de continuar' }); version = 'v2'; fireEvent.click(screen.getByRole('button',{ name:'Confirmar lectura' })); await screen.findByText(/Versión v2/); expect(satisfied).toBe(false); expect(screen.getByRole('button',{ name:'Confirmar lectura' })).toBeEnabled(); });
 it('uses a single country dropdown and validates without a mutation', async () => { mount(); const form = await createForm(); expect(within(form).queryByLabelText('Buscar país')).not.toBeInTheDocument(); expect(within(form).getByLabelText('País')).toHaveValue('AR'); expect(within(form).getByRole('option',{ name:'España' })).toBeInTheDocument(); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'x' } }); fireEvent.submit(form); expect(await screen.findByRole('alert')).toHaveTextContent('Nombre visible'); expect(writes('POST')).toHaveLength(0); });
 it('updates details and filters using separate contracts', async () => { profile = { ...initialProfile }; mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
-  fireEvent.click(screen.getByText('Datos del perfil',{ selector:'summary' })); const details = screen.getByRole('form',{ name:'Datos del perfil' }); fireEvent.change(within(details).getByLabelText('Ciudad'),{ target:{ value:'Rosario' } }); fireEvent.submit(details); await waitFor(() => expect(profile?.city).toBe('Rosario')); await waitFor(() => expect(window.document.querySelector('.onboarding')).toHaveAttribute('aria-busy', 'false')); expect(JSON.parse(String(writes('PATCH')[0]?.[1]?.body))).not.toHaveProperty('intention');
-  fireEvent.click(screen.getByText('Preferencias de búsqueda',{ selector:'summary' })); const filters = screen.getByRole('form',{ name:'Preferencias de búsqueda' }); fireEvent.change(within(filters).getByLabelText('Intención'),{ target:{ value:'FRIENDSHIP' } }); fireEvent.submit(filters); await waitFor(() => expect(profile?.intention).toBe('FRIENDSHIP')); expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body))).not.toHaveProperty('city');
+  fireEvent.click(screen.getByRole('button',{ name:'Editar datos y preferencias' })); const details = screen.getByRole('form',{ name:'Datos del perfil' }); fireEvent.change(within(details).getByLabelText('Ciudad'),{ target:{ value:'Rosario' } }); fireEvent.submit(details); await waitFor(() => expect(profile?.city).toBe('Rosario')); await waitFor(() => expect(window.document.querySelector('.onboarding')).toHaveAttribute('aria-busy', 'false')); expect(JSON.parse(String(writes('PATCH')[0]?.[1]?.body))).not.toHaveProperty('intention');
+  const filters = screen.getByRole('form',{ name:'Preferencias de búsqueda' }); fireEvent.change(within(filters).getByLabelText('Intención'),{ target:{ value:'FRIENDSHIP' } }); fireEvent.submit(filters); await waitFor(() => expect(profile?.intention).toBe('FRIENDSHIP')); expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body))).not.toHaveProperty('city');
 });
 it('reorders all placements and deletes by ID with confirmation', async () => { profile = { ...initialProfile }; list = [initialPhoto,{ ...initialPhoto,id:'second',position:2 }]; vi.spyOn(window,'confirm').mockReturnValue(true); mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' }); reorderWithKeyboard(1,2); await waitFor(() => expect(list[0]?.position).toBe(2)); await waitFor(() => expect(window.document.querySelector('.onboarding')).toHaveAttribute('aria-busy', 'false')); expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body)).placements).toEqual([{ photoId:'second',position:1 },{ photoId:'photo',position:2 }]); fireEvent.click(screen.getByRole('button',{ name:'Eliminar foto 2' })); await waitFor(() => expect(list).toHaveLength(1)); expect(writes('DELETE')[0]?.[0]).toBe('/api/me/profile/photos/photo'); });
 it.each([
@@ -1071,11 +1097,13 @@ it.each(['network','server','malformed'])('allows DRAFT completion and updates w
   expect(screen.getByText(/Su estado es desconocido/)).toBeInTheDocument();
   expect(screen.queryByRole('heading',{ name:'Inicio: interacciones vigentes' })).not.toBeInTheDocument();
   expect(screen.getByRole('button',{ name:'Activar perfil' })).toBeEnabled();
-  fireEvent.click(screen.getByText('Datos del perfil',{ selector:'summary' }));
+  fireEvent.click(screen.getByRole('button',{ name:'Editar datos y preferencias' }));
   const form = screen.getByRole('form',{ name:'Datos del perfil' });
   fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Rosario' } });
   fireEvent.submit(form);
   await waitFor(() => expect(profile?.city).toBe('Rosario'));
+  const back = screen.getByRole('button',{ name:'Volver a fotos y activación' });
+  await waitFor(() => expect(back).toBeEnabled()); fireEvent.click(back);
   await waitFor(() => expect(screen.getByRole('button',{ name:'Reintentar Inicio' })).toBeEnabled());
   expect(writes('PATCH')).toHaveLength(1);
   expect(auth.signOut).not.toHaveBeenCalled();
@@ -1400,8 +1428,10 @@ it.each([
   const preview = screen.queryByRole('button', { name: 'Vista previa de mi perfil' });
   const activate = screen.getByRole('button', { name: 'Activar perfil' });
   const account = screen.getByRole('button', { name: 'Cuenta' });
-  const order = [state, email, photos, questions, screen.getByText('Datos del perfil', { selector: 'summary' }),
-    screen.getByText('Preferencias de búsqueda', { selector: 'summary' }), preview, activate, account].filter(node => node !== null);
+  const edit = screen.getByRole('button', { name:'Editar datos y preferencias' });
+  const order = [edit, state, email, photos, questions, activate, preview, account].filter(node => node !== null);
+  expect(screen.queryByRole('form', { name:'Datos del perfil' })).toBeNull();
+  expect(screen.queryByRole('form', { name:'Preferencias de búsqueda' })).toBeNull();
   for (let i = 1; i < order.length; i++) {
     expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   }
@@ -1535,8 +1565,10 @@ it.each(['ACTIVE','DRAFT'] as const)('opens confirmed preview from %s and preser
     const entry = await screen.findByRole('button', { name: 'Tu perfil' }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
   }
   const entry = await screen.findByRole('button', { name: 'Vista previa de mi perfil' }); await waitFor(() => expect(entry).toBeEnabled());
+  if (status === 'DRAFT') fireEvent.click(screen.getByRole('button', { name:'Editar datos y preferencias' }));
   const form = screen.getByRole('form', { name: 'Datos del perfil' });
   fireEvent.change(within(form).getByLabelText('Bio (opcional)'), { target: { value: 'Unsaved local draft' } });
+  if (status === 'DRAFT') { fireEvent.click(screen.getByRole('button', { name:'Volver a fotos y activación' })); await waitFor(() => expect(entry).toBeVisible()); }
   fireEvent.click(entry);
   await screen.findByRole('heading', { name: 'Vista previa de mi perfil' }); await screen.findByText('Respuesta B');
   expect(screen.getByText('Unsaved local draft')).not.toBeVisible();

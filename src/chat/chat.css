@@ -30,8 +30,15 @@
 
 .chat-page { height:100dvh; padding:0; display:flex; }
 .chat-shell { width:100%; min-width:0; }
-.first-chat { position:relative; box-sizing:border-box; height:var(--chat-viewport, 100dvh); max-height:none; max-width:1280px; margin:0 auto; padding:16px 24px; gap:8px; overflow:auto; }
-.first-chat > * { flex-shrink:0; min-width:0; }
+.first-chat { position:relative; box-sizing:border-box; height:var(--chat-viewport, 100dvh); max-height:none; max-width:1280px; margin:0 auto; padding:max(16px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); gap:8px; overflow:auto; }
+.first-chat > *, .chat-chrome > * { flex-shrink:0; min-width:0; }
+.chat-chrome { display: contents; }
+.first-chat[data-visual-viewport] { position:fixed; inset:var(--chat-viewport-top) 0 auto; }
+.first-chat[data-compact-viewport] { padding-block: max(6px, env(safe-area-inset-top)) 6px; }
+.first-chat[data-compact-viewport] .chat-chrome { display:grid; gap:8px; max-height:32%; min-height:0; overflow:auto; align-content:start; }
+.first-chat[data-compact-viewport] .chat-composer { max-height:60%; overflow:auto; }
+.first-chat[data-compact-viewport] .chat-timeline { min-height:0; padding-block:6px; }
+.first-chat[data-compact-viewport] .chat-composer textarea { max-height:clamp(44px, calc(var(--chat-viewport) * .24), 128px); }
 .chat-heading { flex-wrap:nowrap; border-bottom:1px solid var(--color-secondary); padding-bottom:10px; }
 .chat-heading h2 { font-family:var(--font-display); color:var(--color-primary); font-size:2rem; overflow-wrap:anywhere; }
 .chat-phase { font-size:.75rem; letter-spacing:.08em; color:var(--color-secondary); }
@@ -113,10 +120,10 @@
 @keyframes chat-heart-arrive { from { transform:scale(.86); } to { transform:scale(1); } }
 @media (prefers-reduced-motion:reduce) { .reply-swipe { transition:none; } .chat-given-heart, .chat-guidance-next::after, .chat-guidance-complete::after, .chat-spinner { animation:none; } }
 @media (min-width:1024px) {
-  .first-chat { padding:20px 32px; }
+  .first-chat { padding:max(20px, env(safe-area-inset-top)) max(32px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(32px, env(safe-area-inset-left)); }
 }
 @media (max-width:767px) {
-  .first-chat { padding:calc(8px + env(safe-area-inset-top)) 12px 4px; gap:6px; }
+  .first-chat { padding:calc(8px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); gap:6px; }
   .chat-heading h2 { font-size:1.65rem; }
   .chat-timeline { padding:8px; gap:8px; }
   .chat-message { padding:8px; max-width:85%; }

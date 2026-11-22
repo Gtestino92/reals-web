@@ -39,7 +39,7 @@ it('decision-only shows native choices and hides ordinary conversation controls'
 it('safety form requires valid details and sends reason and optional block',async()=>{mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));fireEvent.click(screen.getByRole('menuitem',{name:'Reportar por seguridad'}));expect(screen.getByRole('dialog')).toBeVisible();expect(screen.getByRole('button',{name:'Confirmar'})).toBeDisabled();fireEvent.change(screen.getByRole('textbox',{name:'Detalle'}),{target:{value:'Descripción del incidente'}});fireEvent.change(screen.getByRole('combobox',{name:'Motivo'}),{target:{value:'HARASSMENT'}});fireEvent.click(screen.getByRole('checkbox'));fireEvent.click(screen.getByRole('button',{name:'Confirmar'}));await waitFor(()=>expect(controller.request).toHaveBeenCalledWith('/chats/c/safety-cancellations',expect.any(AbortSignal),'POST',{reason:'HARASSMENT',details:'Descripción del incidente',blockUser:true}));});
 it('warns before leaving with an unsent draft',async()=>{vi.spyOn(window,'confirm').mockReturnValue(false);mount();await ready();fireEvent.change(screen.getByRole('textbox',{name:'Mensaje'}),{target:{value:'Sin enviar'}});fireEvent(window,new PopStateEvent('popstate'));expect(home).not.toHaveBeenCalled();expect(screen.getByRole('textbox',{name:'Mensaje'})).toHaveValue('Sin enviar');});
 it('unmount aborts outstanding requests and removes the poller',async()=>{const view=mount();await ready();const signals=vi.mocked(controller.request).mock.calls.map(c=>c[1]);view.unmount();expect(signals.every(s=>s.aborted)).toBe(true);});
-it('waiting guidance never displays an actionable next control',async()=>{chat.guidance.myNextRequested=true;mount();await ready();expect(screen.getByText('Esperando a la otra persona para continuar.')).toBeVisible();expect(screen.queryByRole('button',{name:'Otra pregunta'})).toBeNull();});
+it('waiting guidance never displays an actionable next control',async()=>{chat.guidance.myNextRequested=true;mount();await ready();expect(screen.getByText('Esperando a María para continuar.')).toBeVisible();expect(screen.queryByRole('button',{name:'Otra pregunta'})).toBeNull();});
 it('guidance completion is rendered from the snapshot',async()=>{chat.guidance.completed=true;mount();await ready();expect(screen.getByText('Etapa guiada completada.')).toBeVisible();});
 it('shows message updates without moving focus out of composer',async()=>{mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});input.focus();messages.push(messageFixture('2'));await act(async()=>fireEvent(window,new Event('online')));expect(input).toHaveFocus();});
 
@@ -109,7 +109,7 @@ it('keeps incoming hearts outside bubbles and own received hearts passive',async
   messages=[{...messageFixture('1'),reactionType:'HEART'}, {...messageFixture('2','me'),reactionType:'HEART'}];
   mount();await ready();
   expect(screen.getByRole('img',{name:'Reaccionaste con corazón'}).closest('.chat-reaction-lane')).not.toBeNull();
-  expect(screen.getByRole('img',{name:'La otra persona reaccionó con corazón'}).closest('.chat-message')).toBeNull();
+  expect(screen.getByRole('img',{name:'María reaccionó con corazón'}).closest('.chat-message')).toBeNull();
   expect(screen.queryByRole('button',{name:/Reaccionar con/})).toBeNull();
   expect(screen.getAllByRole('button',{name:/Responder mensaje/})).toHaveLength(1);
 });

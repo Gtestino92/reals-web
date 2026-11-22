@@ -48,8 +48,8 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame',vi.fn((callback: FrameRequestCallback) => { frames.set(++frameId,callback); return frameId; }));
   vi.stubGlobal('cancelAnimationFrame',vi.fn((id: number) => frames.delete(id)));
   vi.stubGlobal('PointerEvent',class extends MouseEvent {
-    readonly pointerId: number; readonly isPrimary: boolean;
-    constructor(type: string,init: PointerEventInit = {}) { super(type,init); this.pointerId = init.pointerId ?? 1; this.isPrimary = init.isPrimary ?? true; }
+    readonly pointerId: number; readonly isPrimary: boolean; readonly pointerType: string;
+    constructor(type: string,init: PointerEventInit = {}) { super(type,init); this.pointerId = init.pointerId ?? 1; this.isPrimary = init.isPrimary ?? true; this.pointerType = init.pointerType ?? 'mouse'; }
   });
   Object.defineProperty(HTMLDialogElement.prototype,'showModal',{ configurable:true,value:vi.fn(function(this: HTMLDialogElement) { this.setAttribute('open',''); }) });
   Object.defineProperty(HTMLElement.prototype,'setPointerCapture',{ configurable:true,value:vi.fn() });
@@ -140,6 +140,52 @@ it('does not dereference a released drag during batched pointer movement and rel
   expect(Number((screen.getByLabelText('Posición vertical') as HTMLInputElement).value)).toBeLessThan(.5);
   for (const zoom of [1,2,3,4]) { fireEvent.change(screen.getByLabelText('Zoom'),{ target:{ value:String(zoom) } }); flushFrames(); }
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+it('pinches around the centroid, transitions to pan without jumping, and exports the previewed crop', async () => {
+  const confirm=vi.fn();
+  render(<CropDialog file={fileFrom(png(800,1000))} onCancel={vi.fn()} onConfirm={confirm}/>);
+  const viewport=(await prepared()).parentElement!;
+  const zoom=screen.getByRole<HTMLInputElement>('slider',{name:'Zoom'});
+  const touch=(pointerId:number, clientX:number)=>({pointerId,clientX,clientY:175,pointerType:'touch',isPrimary:pointerId===1});
+  fireEvent.pointerDown(viewport,touch(1,70));
+  fireEvent.pointerDown(viewport,touch(2,126));
+  expect(zoom.valueAsNumber).toBe(1);
+  fireEvent.pointerMove(viewport,touch(2,182));
+  expect(zoom.valueAsNumber).toBe(2);
+  flushFrames();
+  const crop=context.drawImage.mock.calls.at(-1)!;
+  expect(Number(crop[1])+(.45*Number(crop[3]))).toBeCloseTo(.35*800);
+  fireEvent.pointerUp(viewport,touch(1,70));
+  fireEvent.pointerMove(viewport,touch(2,182));
+  flushFrames();
+  expect(context.drawImage.mock.calls.at(-1)?.slice(1,5)).toEqual(crop.slice(1,5));
+  fireEvent.pointerMove(viewport,touch(2,170));
+  flushFrames();
+  const panned=context.drawImage.mock.calls.at(-1)!;
+  expect(Number(panned[1])).toBeGreaterThan(Number(crop[1]));
+  fireEvent.click(screen.getByRole('button',{name:'Usar foto'}));
+  await waitFor(()=>expect(confirm).toHaveBeenCalledOnce());
+  expect(context.drawImage.mock.calls.at(-1)?.slice(1,5)).toEqual(panned.slice(1,5));
+});
+
+it('clamps pinch zoom and releases both captures when a gesture is cancelled', async () => {
+  render(<CropDialog file={fileFrom(png())} onCancel={vi.fn()} onConfirm={vi.fn()}/>);
+  const viewport=(await prepared()).parentElement!;
+  const zoom=screen.getByRole<HTMLInputElement>('slider',{name:'Zoom'});
+  const touch=(pointerId:number, clientX:number)=>({pointerId,clientX,clientY:175,pointerType:'touch'});
+  fireEvent.pointerDown(viewport,touch(1,80));
+  fireEvent.pointerDown(viewport,touch(2,100));
+  fireEvent.pointerMove(viewport,touch(2,270));
+  expect(zoom.valueAsNumber).toBe(4);
+  fireEvent.pointerMove(viewport,touch(2,160));
+  expect(zoom.valueAsNumber).toBeLessThan(4);
+  fireEvent.pointerMove(viewport,touch(2,81));
+  expect(zoom.valueAsNumber).toBe(1);
+  fireEvent.pointerCancel(viewport,touch(1,80));
+  expect(viewport.releasePointerCapture).toHaveBeenCalledWith(1);
+  expect(viewport.releasePointerCapture).toHaveBeenCalledWith(2);
+  fireEvent.pointerMove(viewport,touch(2,240));
+  expect(zoom.valueAsNumber).toBe(1);
 });
 it('releases owned bitmap/canvas storage and pending frames after cancellation without creating original-file URLs', async () => {
   const bitmap = makeBitmap(); decode.mockResolvedValueOnce(bitmap); const cancel = vi.fn();

@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { QuestionContext } from '../profile/affinities/presentation';
 import { object } from '../auth/api';
 
-const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'my-profile-preview', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection', 'admin', 'visual-review', 'scheduling', 'partner-profile', 'second-chat'] as const;
+const destinations = ['home', 'activity', 'profile', 'preferences', 'affinities', 'account', 'notifications', 'affinity-categories', 'affinity-review', 'affinity-question', 'my-profile-preview', 'setup-details', 'profile-questions', 'profile-question-list', 'profile-question-editor', 'profile-question-selection', 'admin', 'visual-review', 'scheduling', 'partner-profile', 'second-chat'] as const;
 export type HomeDestination = typeof destinations[number];
 interface Entry { owner: string; trail: HomeDestination[]; question?: QuestionContext; profileQuestionId?: string; matchId?: string; connectionId?: string; partnerName?: string | null }
 function destination(value: unknown): value is HomeDestination {
