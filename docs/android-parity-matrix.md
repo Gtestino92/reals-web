@@ -1839,3 +1839,16 @@ Base `3cf670e`, branch `fix/web-ux-followup`. Read-only references were Android 
 | Authentication and guided replies | Auth operation ownership remains in SessionController. The form is hidden for authentication/bootstrap, with mode/drafts restored on Firebase failure. The guidance gesture observes current eligibility and selects a quote only; sending remains a separate action. |
 
 Focused jsdom tests verify interaction semantics and request ownership. Windows Chromium with synthetic fixtures verifies initial Google action visibility at 360×640 and 390×664 in light and dark, scroll retention after creation errors, leap-day invalidation, native mouse double-click, and carousel pointer and selection feedback. Android parity comparison is based on source and bundled brand assets. Physical Android Chrome and iPhone Safari checks remain open, including the previously deferred chat keyboard check.
+
+
+### Active profile loading and Home re-entry
+
+Base `bfddcaa`. Read-only Android comparison: `ProfileStatusScreen`, `RealsApp` management navigation, `MatchmakingHomeScreen`, and the profile management and photo grid tests. Android exposes a separate photo-loading state, includes it in the editor busy gate, and reloads Home through its close coordinator. For this requested Web difference, the confirmed profile, legal and queue reads release the management shell; the country catalog gates edits and photo metadata gates the photo controls independently. The skeleton and browser history are Web adaptations. Home re-entry was PARTIAL because a blocking refresh disabled the retained card. The Web regression reproduces the disabled card before the fix and verifies one-click re-entry with a delayed read after the fix.
+
+| Path | Invariant and focused coverage |
+| --- | --- |
+| Details and photo reads | Confirmed metadata owns the photo grid. Unavailable metadata shows a section skeleton or retry, and a download failure stays inside its tile. Tests cover slow catalog and metadata, lazy and failed images, and preserving cached image nodes across signed URL renewal. |
+| Departure, mutation, and recovery | Navigation retires both read paths. Writes supersede photo reads and retain authoritative reconciliation and navigation locks until settled. Late metadata cannot overwrite the write result or a new visit. |
+| Home re-entry | Only an eligible retained ACTIVE snapshot revalidates silently. Search, interaction actions, and automatic chat entry still require reconciliation. A repeated exit aborts the obsolete return read. The existing history guard and queue admission check remain in use. |
+
+These paths are COMPLETE in focused simulated tests. Hosted Dev latency and physical browser Back/Forward remain to be checked.

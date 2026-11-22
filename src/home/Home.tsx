@@ -173,8 +173,8 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
 }
 
 function HomeOverview({ onRestoreSecond, homeReconciler, returnScroll, actedVisuals, affinities, notice, retireNotice, controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed, active, activityOpen, onActivity, onReturnHome, onNavigationBlockedChange, onAdmin, adminPending }: { onRestoreSecond: (item: Activity, session: SecondChatSession) => void; homeReconciler: {current:(()=>Promise<HomeData|null>)|null}; actedVisuals: Set<string>; returnScroll: { current: number }; adminPending: boolean; onAdmin?: (() => void) | undefined; onNavigationBlockedChange: (blocked: boolean) => void; affinities: AffinityModel; activityOpen: boolean; onActivity: () => void; onReturnHome: () => void; active: boolean; notice: string; retireNotice: () => void; controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
-  const { model, busy, blocked, error, refresh, reconcileHome, dismissSecondChat, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller, active);
-  const restoration = useSecondChatRestoration(controller,model?.home ?? null,!busy && !blocked,active,onRestoreSecond);
+  const { model, busy, blocked, error, refresh, refreshOnReturn, returning: returnRead, reconcileHome, dismissSecondChat, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller, active);
+  const restoration = useSecondChatRestoration(controller,model?.home ?? null,!busy && !blocked,active && !returnRead,onRestoreSecond);
   useLayoutEffect(() => { onNavigationBlockedChange(active && (!restoration.ready || busy || searchPhase !== 'idle')); return () => onNavigationBlockedChange(false); }, [active, busy, searchPhase, restoration.ready, onNavigationBlockedChange]);
   const reconciledReturn=useRef(false);
   useLayoutEffect(()=>{
@@ -184,14 +184,14 @@ function HomeOverview({ onRestoreSecond, homeReconciler, returnScroll, actedVisu
   const surface = activityOpen ? 'activity' : 'overview';
   const wasActive = useRef(active);
   const returning = active && !wasActive.current;
-  useLayoutEffect(() => { if (active && !wasActive.current) {if(!reconciledReturn.current)refresh();reconciledReturn.current=false;} wasActive.current = active; }, [active, refresh]);
+  useLayoutEffect(() => { if (active && !wasActive.current) {if(!reconciledReturn.current)refreshOnReturn();reconciledReturn.current=false;} wasActive.current = active; }, [active, refreshOnReturn]);
   const root = useRef<HTMLDivElement>(null);
   const home = model ? visualHomeProjection(model.home,actedVisuals,knownClosed) : undefined, m = home?.matchmaking;
   useEffect(() => { if (model && !busy && !blocked) reconcileHiddenFirstChats(model.home, hidden, knownClosed); }, [model, busy, blocked, hidden, knownClosed]);
   useEffect(() => {
     const item = home?.pendingActions.find(i => i.type === 'FIRST_CHAT' && i.chatId && !suppressed.has(i.chatId));
-    if (active && restoration.ready && !returning && item && !busy && !blocked) onOpenChat(item, true);
-  }, [active, restoration.ready, returning, home, busy, blocked, onOpenChat, suppressed]);
+    if (active && restoration.ready && !returning && !returnRead && item && !busy && !blocked) onOpenChat(item, true);
+  }, [active, restoration.ready, returning, returnRead, home, busy, blocked, onOpenChat, suppressed]);
   const waiting = !!m?.inQueue || searchPhase !== 'idle';
   const screen = waiting ? 'search' : surface;
   useEffect(() => { if (screen !== 'overview') retireNotice(); }, [screen, retireNotice]);
@@ -214,12 +214,12 @@ function HomeOverview({ onRestoreSecond, homeReconciler, returnScroll, actedVisu
     <p>Descubrimientos, próximos pasos y conversaciones en un solo lugar.</p>
     {error && <p className="home-error" role="alert">{error}</p>}
     {error && <button className="login-button login-outlined" disabled={busy} onClick={refresh}>Reintentar</button>}
-    {presentation.groups.map(section => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3><div className="home-grid">{section.items.map((item, index) => <ActivityCard key={`${item.matchId}-${item.connectionId}-${item.type}-${index}`} item={item} disabled={busy || blocked} onOpen={onOpenChat} onDismiss={dismissSecondChat}/>)}</div></section>)}
+    {presentation.groups.map(section => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3><div className="home-grid">{section.items.map((item, index) => <ActivityCard key={`${item.matchId}-${item.connectionId}-${item.type}-${index}`} item={item} disabled={busy || returnRead || blocked} onOpen={onOpenChat} onDismiss={dismissSecondChat}/>)}</div></section>)}
     {presentation.groups.length === 0 && <p>{presentation.hasActivity ? 'Hay actividad en curso. Los detalles aparecerán cuando el servidor los informe.' : 'No tenés pendientes por ahora.'}</p>}
     {presentation.notices.map((notice, index) => <aside className="home-notice" key={`${notice}-${index}`}>Hay novedades sobre tus interacciones. Revisá las opciones disponibles en Actividad.</aside>)}
   </div>;
   return <div ref={root} className={`home ${busy && model ? 'home-reconciling' : ''}`} aria-busy={busy}>
-    <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><div className="home-header-actions">{onAdmin && <AdminEntry pending={adminPending} disabled={busy || searchPhase !== 'idle'} onClick={onAdmin} />}</div></header>
+    <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><div className="home-header-actions">{onAdmin && <AdminEntry pending={adminPending} disabled={busy || returnRead || searchPhase !== 'idle'} onClick={onAdmin} />}</div></header>
     {notice && <p className="home-notice home-terminal-notice" role="status"><span>{notice}</span><button type="button" onClick={retireNotice} aria-label={notice === 'Preferencias guardadas' ? 'Ocultar aviso' : 'Ocultar aviso del chat'}><ChatIcon name="close"/></button></p>}
     {busy && !model && <p className="home-loading-status" role="status">Actualizando Inicio…</p>}
     {busy && !model && <div className="home-placeholder" aria-hidden="true"><div className="home-card home-placeholder-search"><span /><span /><span /></div><div className="home-grid">{managementEntries.map(([target]) => <div className="home-card home-placeholder-card" key={target}><span /><span /><span /></div>)}</div></div>}
@@ -227,12 +227,12 @@ function HomeOverview({ onRestoreSecond, homeReconciler, returnScroll, actedVisu
     {!model && !busy && error && <SignOutButton onConfirm={controller.signOut} />}
     {home && <>
       {home.profileStatus !== 'ACTIVE' && <aside className="home-card"><h3>{home.profileStatus === 'DRAFT' ? 'Tu perfil está en borrador' : 'Tu perfil no está activo'}</h3><p>Tus interacciones se conservan. Para buscar nuevas personas, revisá y activá tu perfil.</p>{onCompleteProfile && <button className="login-button login-outlined" onClick={onCompleteProfile} disabled={busy}>Completar perfil</button>}</aside>}
-      {presentation && <HomePriorities items={presentation.priorities} overflow={presentation.priorityOverflow} now={now} disabled={busy || blocked} onOpen={onOpenChat} onActivity={onActivity}/>}
+      {presentation && <HomePriorities items={presentation.priorities} overflow={presentation.priorityOverflow} now={now} disabled={busy || returnRead || blocked} onOpen={onOpenChat} onActivity={onActivity}/>}
       <section className="home-card home-search" aria-labelledby="search-title"><h3 id="search-title">Buscar chat</h3>
         <p>Una conversación es el comienzo de algo real.</p>
           {!m?.canSearch && <p>{blockedLabels[m?.blockedReason?.code ?? ''] ?? 'La búsqueda no está disponible por ahora. Actualizá el estado o revisá tus interacciones.'}</p>}
           <p>Usamos tu ubicación actual para buscar personas cerca. Puede ser aproximada. El navegador te pedirá permiso al iniciar.</p>
-          <button className={`login-button login-primary ${m?.canSearch && home.profileStatus === 'ACTIVE' ? 'home-search-ready' : ''}`} disabled={busy || blocked || !m?.canSearch || home.profileStatus !== 'ACTIVE'} onClick={search}>Buscar chat</button>
+          <button className={`login-button login-primary ${m?.canSearch && home.profileStatus === 'ACTIVE' ? 'home-search-ready' : ''}`} disabled={busy || returnRead || blocked || !m?.canSearch || home.profileStatus !== 'ACTIVE'} onClick={search}>Buscar chat</button>
       </section>
       {presentation?.hasActivity && <button className="home-card home-activity-entry" onClick={onActivity} aria-label="Ver Actividad"><span className="home-entry-title">Actividad</span><span>{presentation.required ? `${presentation.required} requieren tu acción` : 'Tus conversaciones y próximos pasos'}</span><span aria-hidden="true">Ver actividad →</span></button>}
       {home.profileStatus === 'ACTIVE' && <nav aria-label="Administrar tu perfil y cuenta" className="home-grid home-management">

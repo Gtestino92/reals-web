@@ -1631,28 +1631,23 @@ it('allows leaving a cold read, retires its late response and starts fresh on re
   expect(screen.getByLabelText('Ciudad')).toHaveValue('Córdoba');
 });
 
-it('waits only for visible cold photos, then retains the cached image across preferences and renewed signatures', async () => {
+it('reveals details during image downloads and retains the cached image across preferences and renewed signatures', async () => {
   list = [
     { ...initialPhoto, url: 'https://example.test/one?X-Amz-Signature=old' },
     { ...initialPhoto, id: 'failed', position: 2, url: 'https://example.test/two' },
     { ...initialPhoto, id: 'offscreen', position: 3, url: 'https://example.test/three' },
   ];
-  vi.spyOn(HTMLImageElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLImageElement) {
-    return new DOMRect(0, this.alt.includes('Foto 3') ? window.innerHeight + 100 : 30, 100, 100);
-  });
   vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockImplementation(function (this: HTMLImageElement) { return this.alt.includes('Foto 1'); });
   vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(100);
   await openManagement('Tu perfil');
-  const pending = await waitFor(() => {
-    const image = window.document.querySelector<HTMLImageElement>('img[alt="Foto 2 del perfil"]');
-    expect(image).not.toBeNull();
-    return image!;
-  });
-  expect(screen.getByText('Cargando perfil…')).toBeVisible();
-  expect(screen.queryByRole('form', { name: 'Datos del perfil' })).toBeNull();
-  expect(pending.loading).toBe('eager');
-  fireEvent.error(pending);
   const details = await screen.findByRole('form', { name: 'Datos del perfil' });
+  const pending = await screen.findByRole('img', { name: 'Foto 2 del perfil' });
+  expect(screen.queryByText('Cargando perfil…')).toBeNull();
+  expect(within(details).getByLabelText('Bio (opcional)')).toBeEnabled();
+  expect(pending).toHaveAttribute('loading', 'lazy');
+  expect(pending.parentElement).toHaveAttribute('data-image-state', 'loading');
+  fireEvent.error(pending);
+  expect(screen.getByRole('form', { name: 'Datos del perfil' })).toBe(details);
   const image = screen.getByRole('img', { name: 'Foto 1 del perfil' });
   expect(image.parentElement).toHaveAttribute('data-image-state', 'loaded');
   expect(screen.getByRole('img', { name: 'Foto 3 del perfil' })).toHaveAttribute('loading', 'lazy');
@@ -1727,7 +1722,7 @@ it.each(['success', 'rejected', 'uncertain'] as const)('returns Home only after 
   }
 });
 
-it('opens cold preferences independently of photo metadata and keeps the details skeleton while photos are queried', async () => {
+it('opens preferences without photos and enables details while metadata is held', async () => {
   profile = { ...initialProfile, status: 'ACTIVE' }; mount();
   const preferences = await screen.findByRole('button', { name: 'Preferencias' });
   await waitFor(() => expect(preferences).toBeEnabled());
@@ -1742,9 +1737,88 @@ it('opens cold preferences independently of photo metadata and keeps the details
   await waitFor(() => expect(details).toBeEnabled());
   fireEvent.click(details);
   await waitFor(() => expect(photos).toBeDefined());
-  expect(screen.getByText('Cargando perfil…')).toBeVisible();
-  expect(screen.queryByRole('form', { name: 'Datos del perfil' })).toBeNull();
+  expect(screen.getByText('Cargando fotos…')).toBeVisible();
+  expect(screen.queryByText('Cargando perfil…')).toBeNull();
+  const form = screen.getByRole('form', { name: 'Datos del perfil' });
+  fireEvent.change(within(form).getByLabelText('Ciudad'), { target: { value: 'Rosario' } });
+  expect(within(form).getByRole('button', { name: 'Guardar cambios' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Agregar en posición 1' })).toBeNull();
   expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
-  await act(async () => photos(json([])));
-  expect(await screen.findByRole('form', { name: 'Datos del perfil' })).toBeVisible();
+  await act(async () => photos(json([], 503)));
+  expect(screen.queryByText('Cargando fotos…')).toBeNull();
+  expect(screen.getByRole('alert')).toHaveTextContent('No pudimos actualizar tus fotos.');
+  expect(screen.queryByRole('button', { name: 'Agregar en posición 1' })).toBeNull();
+  fetcher.mockImplementation(base);
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar fotos' }));
+  expect(await screen.findByRole('button', { name: 'Agregar en posición 1' })).toBeEnabled();
+  expect(screen.getByRole('form', { name: 'Datos del perfil' })).toBe(form);
+});
+
+it('reopens Tu perfil with one click while the retained Home reconciles on repeated returns', async () => {
+  await openManagement('Tu perfil');
+  const form = await screen.findByRole('form', { name: 'Datos del perfil' });
+  const base = fetcher.getMockImplementation()!;
+  const reads: { signal: AbortSignal; resolve: (value: Response) => void }[] = [];
+  fetcher.mockImplementation((path, options) => path === '/api/me/home/status'
+    ? new Promise(resolve => { reads.push({ signal: options!.signal!, resolve }); })
+    : base(path, options));
+  for (const index of [0, 1]) {
+    fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
+    const entry = await screen.findByRole('button', { name: 'Tu perfil' });
+    await waitFor(() => expect(reads).toHaveLength(index + 1));
+    expect(screen.getByRole('button', { name: 'Buscar chat' })).toBeDisabled();
+    fireEvent.click(entry);
+    expect(screen.getByRole('form', { name: 'Datos del perfil' })).toBe(form);
+    expect(reads[index]!.signal.aborted).toBe(true);
+    await act(async () => reads[index]!.resolve(json({ unexpected: true })));
+    expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
+  }
+});
+
+it('retires photo metadata on departure and when a write needs authoritative reconciliation', async () => {
+  profile = { ...initialProfile, status: 'ACTIVE' }; mount();
+  const entry = await screen.findByRole('button', { name: 'Tu perfil' });
+  await waitFor(() => expect(entry).toBeEnabled());
+  const base = fetcher.getMockImplementation()!;
+  const reads: { signal: AbortSignal; resolve: (value: Response) => void }[] = [];
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile/photos'
+    ? new Promise(resolve => { reads.push({ signal: options!.signal!, resolve }); })
+    : base(path, options));
+  fireEvent.click(entry);
+  await screen.findByText('Cargando fotos…');
+  await waitFor(() => expect(reads).toHaveLength(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
+  const reentry = await screen.findByRole('button', { name: 'Tu perfil' });
+  expect(reads[0]!.signal.aborted).toBe(true);
+  fireEvent.click(reentry);
+  const form = await screen.findByRole('form', { name: 'Datos del perfil' });
+  await waitFor(() => expect(reads).toHaveLength(2));
+  await act(async () => reads[0]!.resolve(json([initialPhoto])));
+  expect(screen.queryByRole('button', { name: 'Eliminar foto 1' })).toBeNull();
+
+  fireEvent.change(within(form).getByLabelText('Ciudad'), { target: { value: 'Rosario' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Guardar cambios' }));
+  await waitFor(() => expect(reads).toHaveLength(3));
+  expect(reads[1]!.signal.aborted).toBe(true);
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeDisabled();
+  await act(async () => reads[2]!.resolve(json([])));
+  expect(await screen.findByRole('button', { name: 'Agregar en posición 1' })).toBeEnabled();
+  await act(async () => reads[1]!.resolve(json([initialPhoto])));
+  expect(screen.queryByRole('button', { name: 'Eliminar foto 1' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
+});
+
+it('enables confirmed photo controls while the details country catalog is pending', async () => {
+  const base = fetcher.getMockImplementation()!;
+  let catalog!: (value: Response) => void;
+  fetcher.mockImplementation((path, options) => path === '/api/reference/countries'
+    ? new Promise(resolve => { catalog = resolve; })
+    : base(path, options));
+  await openManagement('Tu perfil');
+  const city = await screen.findByLabelText('Ciudad');
+  expect(city).toBeDisabled();
+  expect(await screen.findByRole('button', { name: 'Agregar en posición 1' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
+  await act(async () => catalog(json([{ code: 'AR', displayName: 'Argentina' }])));
+  expect(city).toBeEnabled();
 });
