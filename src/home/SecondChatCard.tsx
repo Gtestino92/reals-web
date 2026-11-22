@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Activity } from './contracts';
 import { useHomeTime } from './useHomeTime';
-import { secondHomeCopy, secondHomePresentation } from './secondHomePresentation';
-export function SecondChatCard({ item, disabled, onOpen, onDismiss }: { item: Activity; disabled: boolean; onOpen: (item: Activity) => void; onDismiss: (id: string) => Promise<void> }) {
+import { secondHomeCopy, secondHomePresentation, waitingSecondChatEvent } from './secondHomePresentation';
+import { GoogleCalendarAction } from '../shared/GoogleCalendarAction';
+export function SecondChatCard({ item, accountId, disabled, onOpen, onDismiss }: { item: Activity; accountId: string | null; disabled: boolean; onOpen: (item: Activity) => void; onDismiss: (id: string) => Promise<void> }) {
   const now = useHomeTime();
   const [busy,setBusy] = useState(false), [error,setError] = useState('');
   const lock = useRef(false), lifetime = useRef<AbortController | null>(null);
   useEffect(() => { lifetime.current = new AbortController(); return () => { lifetime.current?.abort(); }; },[]);
   const p = secondHomePresentation(item,now), s = item.secondChat;
   if (!p || !s) return null;
+  const calendarEvent = !disabled && !busy ? waitingSecondChatEvent(item, now) : null;
   const dismiss = async () => {
     const signal = lifetime.current?.signal;
     if (!signal || lock.current || disabled) return;
@@ -22,6 +24,7 @@ export function SecondChatCard({ item, disabled, onOpen, onDismiss }: { item: Ac
     <div className="second-chat-card-actions">
     {p.label && <button className="login-button login-primary" disabled={disabled || busy || !p.canOpen} onClick={() => { if (!disabled && !lock.current && secondHomePresentation(item,Date.now())?.canOpen) onOpen(item); }}>{p.label}</button>}
     {p.canProfile && <button className="login-button login-outlined" disabled={disabled || busy} onClick={() => { if (!disabled && !lock.current && secondHomePresentation(item,Date.now())?.canProfile) onOpen({...item,type:'SCHEDULING_PROFILE'}); }}>Ver perfil</button>}
+    {calendarEvent && accountId && item.connectionId && <GoogleCalendarAction event={calendarEvent} accountId={accountId} connectionId={item.connectionId}/>}
     {p.canDismiss && <button className="login-button login-outlined" disabled={disabled || busy} onClick={() => void dismiss()}>Ocultar</button>}</div>{error && <p role="alert">{error}</p>}
   </article>;
 }

@@ -7,12 +7,16 @@ export const time='2026-11-15T12:00:00Z';
 export const negotiation=(overrides={}): Negotiation=>({id:'n',connectionId:'c',roundNumber:1,status:'PENDING',confirmedDateTime:null,schedulingExpiresAt:'2026-11-16T12:00:00Z',createdAt:time,updatedAt:time,...overrides});
 export const proposal=(overrides={})=>({id:'p1',connectionId:'c',userId:'them',roundNumber:1,preferenceOrder:1,proposedDateTime:'2026-11-15T16:00:00Z',status:'PENDING' as const,createdAt:time,...overrides});
 export const availability=(): Availability=>({conflictWindowMinutes:60,unavailableWindows:[],serverTime:time});
+export const scheduledStep = (availableAt = proposal().proposedDateTime) => ({
+ type:'SECOND_CHAT_SCHEDULED', connectionId:'c', matchId:'m', requiresAction:false, partner:{displayName:'María'},
+ secondChat:{availableAt, entryClosesAt:'2026-11-15T16:12:00Z', expiresAt:'2026-11-15T17:15:00Z', myAttendanceStatus:'PENDING', durationMinutes:75},
+});
 export function setup() {
  const controller=new SessionController({observe:()=>()=>{},signIn:vi.fn(),signUp:vi.fn(),google:vi.fn(),verify:vi.fn(),signOut:vi.fn()},new ApiClient(),false);
  controller.snapshot={...controller.snapshot,phase:'ready',account:{id:'me',status:'ACTIVE'},profile:{id:'profile',userId:'me',status:'ACTIVE'}};
- const state={n:negotiation(),p:[] as ReturnType<typeof proposal>[],a:availability(),c:{id:'c',matchId:'m',userAId:'me',userBId:'them',state:'SCHEDULING_PHASE',schedulingExpiresAt:'2026-11-16T12:00:00Z',createdAt:time,updatedAt:time}};
+ const state={home:emptyHome(),n:negotiation(),p:[] as ReturnType<typeof proposal>[],a:availability(),c:{id:'c',matchId:'m',userAId:'me',userBId:'them',state:'SCHEDULING_PHASE',schedulingExpiresAt:'2026-11-16T12:00:00Z',createdAt:time,updatedAt:time}};
  const request=vi.spyOn(controller,'request').mockImplementation(async path=>{
-  if(path==='/me/home')return emptyHome();
+  if(path==='/me/home')return state.home;
   if(path.endsWith('/negotiation'))return state.n;
   if(path.endsWith('/proposals'))return state.p;
   if(path.endsWith('/scheduling-availability'))return state.a;

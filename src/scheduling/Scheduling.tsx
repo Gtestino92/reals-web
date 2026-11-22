@@ -6,6 +6,8 @@ import { SchedulingSession } from './SchedulingSession';
 import { conflicts, days, localSlot, reviewReason, roundState, validateSlots } from './policy';
 import type { Availability } from './contracts';
 import { PartnerProfile } from './PartnerProfile';
+import { waitingSecondChatEvent } from '../home/secondHomePresentation';
+import { GoogleCalendarAction } from '../shared/GoogleCalendarAction';
 import './scheduling.css';
 
 export const formatSlot=(v: string)=>new Date(v).toLocaleString('es-AR',{dateStyle:'full',timeStyle:'short'});
@@ -23,12 +25,17 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onBack,o
   useEffect(()=>{
     model.start();void model.refresh();
     const resume=()=>{if(document.visibilityState==='visible')void model.poll();else model.pause();};
-    const timer=setInterval(()=>{const state=model.getSnapshot();if(!state.terminal&&(!state.negotiation||state.negotiation.status==='PENDING'))void model.poll();},7000);
+    const timer=setInterval(model.tick,7000);
     document.addEventListener('visibilitychange',resume);window.addEventListener('online',resume);
     return()=>{model.dispose();clearInterval(timer);document.removeEventListener('visibilitychange',resume);window.removeEventListener('online',resume);};
   },[model]);
   useEffect(()=>{void model.poll();},[model,session.authContextVersion]);
-  const partner=partnerName?.trim();
+  const calendarPolling = model.canPollCalendar(now);
+  useEffect(()=>{if(!calendarPolling)model.stopCalendarPoll();},[calendarPolling,model]);
+  const calendarEvent = session.phase === 'ready' && s.verified && !s.uncertain && !s.pending && !s.terminal && s.calendarActivity
+    ? waitingSecondChatEvent(s.calendarActivity, now)
+    : null;
+  const partner=partnerName?.trim() || calendarEvent?.partnerName?.trim();
   const expires=s.negotiation?.schedulingExpiresAt, expired=!!expires&&Date.parse(expires)<=now;
   const expiryRequested=useRef('');
   useEffect(()=>{if(expired&&expiryRequested.current!==expires){expiryRequested.current=expires??'';void model.refresh();}},[expired,expires,model]);
@@ -50,7 +57,10 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onBack,o
       {r.stage==='WaitingForMyProposals'&&<section className="home-card"><h3>Proponé tus horarios</h3><p>Elegí entre 1 y 3 opciones, en orden de preferencia.</p><SlotPicker key={`${connectionId}/${s.negotiation?.roundNumber}`} now={now} availability={s.availability} selected={s.draft} disabled={disabled} onChange={model.setDraft}/>{s.errorContext==='submit'&&error}<button className="login-button login-primary" disabled={disabled||!!validateSlots(s.draft,now,s.availability)} onClick={()=>void model.act('submit')}>Enviar horarios</button></section>}
       {r.stage==='WaitingForPartnerProposals'&&<section className="home-card"><h3>Esperando a {partner || 'la otra persona'}</h3><p>{r.myPending.length?'Tus opciones están pendientes de revisión.':'Tus opciones fueron rechazadas. Ahora esperamos que envíe las suyas.'}</p><OwnProposals values={r.myPending.map(p=>p.proposedDateTime)}/></section>}
       {r.stage==='ReviewPartnerProposals'&&<section className="home-card"><h3>Horarios que recibiste</h3><p>Elegí una opción o rechazá la lista para continuar la coordinación.</p><ol className="scheduling-options">{r.received.map(p=>{const reason=reviewReason(p.proposedDateTime,now,s.availability);return <li key={p.id}><div className="scheduling-option-content"><time dateTime={p.proposedDateTime}>{formatSlot(p.proposedDateTime)}</time>{reason&&<p className="home-error">{reason}</p>}</div><button className="login-button login-primary" disabled={disabled||!!reason} onClick={()=>void model.act('accept',p.id)}>Aceptar opción {p.preferenceOrder}</button></li>;})}</ol>{r.received.every(p=>!!reviewReason(p.proposedDateTime,now,s.availability))&&<p>No hay horarios disponibles para aceptar. Podés rechazar la lista.</p>}<OwnProposals values={r.myPending.map(p=>p.proposedDateTime)}/>{s.errorContext==='review'&&error}<button className="login-button login-outlined" disabled={disabled} onClick={()=>void model.act('reject')}>Rechazar estas opciones</button></section>}
-      {r.stage==='Scheduled'&&<section className="home-card"><h3>Horario confirmado</h3>{s.negotiation?.confirmedDateTime&&<time dateTime={s.negotiation.confirmedDateTime}>{formatSlot(s.negotiation.confirmedDateTime)}</time>}</section>}
+      {r.stage==='Scheduled'&&<section className="home-card scheduling-confirmed"><h3>Horario confirmado</h3>{s.negotiation?.confirmedDateTime&&<time dateTime={s.negotiation.confirmedDateTime}>{formatSlot(s.negotiation.confirmedDateTime)}</time>}
+        {calendarEvent&&session.account&&<GoogleCalendarAction event={{...calendarEvent,partnerName:partner??null}} accountId={session.account.id} connectionId={connectionId} now={model.now}/>}
+        {s.calendarReadFailed&&!s.error&&<><p role="alert" className="home-error">No pudimos verificar los datos de la cita para Google Calendar.</p><button className="login-button login-outlined" disabled={s.busy} onClick={()=>void model.refresh()}>Reintentar</button></>}
+      </section>}
       {r.stage==='Failed'&&<section className="home-card"><p>No hubo acuerdo. La coordinación ya no está disponible.</p></section>}
       </>}
       <button className="login-button login-outlined" disabled={s.busy||s.terminal} onClick={onBrowse}>Ver perfil</button>

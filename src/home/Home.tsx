@@ -43,8 +43,8 @@ const blockedLabels: Record<string, string> = {
   ACTIVE_CONNECTION_LIMIT_REACHED: 'Ya tenés conexiones activas. Terminá una antes de buscar otra.',
   VISUAL_ADVANCEMENT_LIMIT_REACHED: 'Alcanzaste el límite de perfiles por descubrir. Volvé a consultar más adelante.',
 };
-function ActivityCard({ item, onOpen, disabled = false, onDismiss }: { disabled?: boolean; item: Activity; onOpen: (item: Activity) => void; onDismiss: (id: string) => Promise<void> }) {
-  if (item.type.startsWith('SECOND_CHAT_')) return <SecondChatCard item={item} disabled={disabled} onOpen={onOpen} onDismiss={onDismiss}/>;
+function ActivityCard({ item, accountId, onOpen, disabled = false, onDismiss }: { disabled?: boolean; item: Activity; accountId: string | null; onOpen: (item: Activity) => void; onDismiss: (id: string) => Promise<void> }) {
+  if (item.type.startsWith('SECOND_CHAT_')) return <SecondChatCard item={item} accountId={accountId} disabled={disabled} onOpen={onOpen} onDismiss={onDismiss}/>;
   if (item.type === 'VISUAL_REVIEW') return <button className="home-card home-activity-entry visual-activity" disabled={disabled} onClick={() => onOpen(item)}><span className="home-entry-title">{item.partnerName ? `Descubrí el perfil de ${item.partnerName}` : 'Descubrí el perfil'}</span><VisualDeadline start={item.visualStartedAt} end={item.visualExpiresAt}/><span className="visual-chevron" aria-hidden="true">›</span></button>;
   if (item.type === 'SCHEDULING') {
     const label = item.requiresAction ? 'Elegir horarios' : 'Ver coordinaci\u00f3n';
@@ -214,7 +214,7 @@ function HomeOverview({ onRestoreSecond, homeReconciler, returnScroll, actedVisu
     <p>Descubrimientos, próximos pasos y conversaciones en un solo lugar.</p>
     {error && <p className="home-error" role="alert">{error}</p>}
     {error && <button className="login-button login-outlined" disabled={busy} onClick={refresh}>Reintentar</button>}
-    {presentation.groups.map(section => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3><div className="home-grid">{section.items.map((item, index) => <ActivityCard key={`${item.matchId}-${item.connectionId}-${item.type}-${index}`} item={item} disabled={busy || returnRead || blocked} onOpen={onOpenChat} onDismiss={dismissSecondChat}/>)}</div></section>)}
+    {presentation.groups.map(section => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3><div className="home-grid">{section.items.map((item, index) => <ActivityCard key={`${item.matchId}-${item.connectionId}-${item.type}-${index}`} item={item} accountId={controller.getSnapshot().account?.id ?? null} disabled={busy || returnRead || blocked} onOpen={onOpenChat} onDismiss={dismissSecondChat}/>)}</div></section>)}
     {presentation.groups.length === 0 && <p>{presentation.hasActivity ? 'Hay actividad en curso. Los detalles aparecerán cuando el servidor los informe.' : 'No tenés pendientes por ahora.'}</p>}
     {presentation.notices.map((notice, index) => <aside className="home-notice" key={`${notice}-${index}`}>Hay novedades sobre tus interacciones. Revisá las opciones disponibles en Actividad.</aside>)}
   </div>;

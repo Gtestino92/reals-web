@@ -1,0 +1,21 @@
+.google-calendar-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  text-align: center;
+  text-decoration: none;
+}
+.google-calendar-action svg { flex: none; }
+.google-calendar-action:hover { filter: brightness(.94); }
+.google-calendar-status {
+  display: block;
+  color: var(--color-on-surface-variant);
+  font-size: .875rem;
+  text-align: center;
+}
+.google-calendar-reopen {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}

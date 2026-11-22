@@ -1,5 +1,8 @@
 ﻿import type { Activity } from './contracts';
 
+import type { CalendarEvent } from '../shared/googleCalendar';
+import { parseOffsetTimestamp } from '../shared/offsetTimestamp';
+
 export type SecondHomeState = 'Waiting' | 'Open' | 'ReadOnly' | 'ReadOnlyEnded' | 'Expired' | 'Unavailable';
 export interface SecondHomePresentation {
   state: SecondHomeState; canOpen: boolean; canProfile: boolean; canDismiss: boolean;
@@ -30,6 +33,20 @@ export function secondHomePresentation(item: Activity, now = Date.now()): Second
     label: state === 'ReadOnly' ? 'Ver segundo chat' : state === 'Open' ? 'Entrar al segundo chat' : state === 'Waiting' ? `Disponible a las ${backendTime(s.availableAt)}` : null,
   };
 }
+export function waitingSecondChatEvent(item: Activity, now: number): CalendarEvent | null {
+  const chat = item.secondChat;
+  if (item.type !== 'SECOND_CHAT_SCHEDULED' || !item.connectionId?.trim() || !item.matchId.trim() ||
+    !chat || chat.chatStatus !== null || chat.chatId || item.chatId || chat.myAttendanceStatus !== 'PENDING' ||
+    secondHomePresentation(item, now)?.state !== 'Waiting') return null;
+
+  const start = parseOffsetTimestamp(chat.availableAt);
+  const cutoff = parseOffsetTimestamp(chat.entryClosesAt);
+  const expiry = parseOffsetTimestamp(chat.expiresAt);
+  if (start === null || cutoff === null || expiry === null || start >= cutoff || start >= expiry) return null;
+
+  return { startsAt: chat.availableAt, durationMinutes: chat.durationMinutes, partnerName: item.partnerName };
+}
+
 export const backendTime = (time: string) => new Date(time).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
 export function contextualTime(time: string, now: number): string {
   const date = new Date(time), today = new Date(now), tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate()+1);

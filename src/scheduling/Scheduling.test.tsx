@@ -1,11 +1,15 @@
-﻿import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+﻿import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Scheduling } from './Scheduling';
-import { setup, negotiation, proposal, time } from './fixtures';
+import { setup, negotiation, proposal, scheduledStep, time } from './fixtures';
 import { visualProfile } from '../visual/fixtures';
 import { ApiError } from '../auth/api';
+import { SecondChatCard } from '../home/SecondChatCard';
+import { homeSecondFixture } from '../home/secondHome.fixtures';
 function view(f=setup()) {const back=vi.fn(),browse=vi.fn(),blocked=vi.fn();const props={controller:f.controller,connectionId:'c',matchId:'m',partnerName:'María',onBack:back,onFinished:back,onBlocked:blocked,browse:false,onBrowse:browse,onCloseBrowse:back};const v=render(<Scheduling {...props}/>);return {...f,...v,props,back,browse,blocked};}
-afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();});
+afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();localStorage.clear();});
+const calendarLink = () => screen.queryByRole('link', { name: /^(Agregar a Google Calendar|Volver a agregar al calendario)$/ });
+const openedStatus = 'Evento abierto en Google Calendar';
 
 it('replaces proposal feedback with the confirmed time from polling and rejects older pending snapshots', async () => {
   const f=view(), read=f.request.getMockImplementation()!;
@@ -19,16 +23,21 @@ it('replaces proposal feedback with the confirmed time from polling and rejects 
   fireEvent.click(screen.getByRole('button',{name:'Enviar horarios'}));
   await screen.findByText('Enviamos tus horarios.');
   expect(screen.getByRole('heading',{name:'Esperando a María'})).toBeVisible();
+  expect(calendarLink()).toBeNull();
   const confirmed=proposal().proposedDateTime;
   f.state.n=negotiation({status:'CONFIRMED',confirmedDateTime:confirmed});
   f.state.c={...oldConnection,state:'SECOND_CHAT_SCHEDULED'};
+  f.state.home.nextSteps=[scheduledStep('2026-11-15T13:00:00-03:00')];
   await act(async()=>window.dispatchEvent(new Event('online')));
   const heading=screen.getByRole('heading',{name:'Horario confirmado'});
   expect(heading.parentElement?.querySelector('time')).toHaveAttribute('datetime',confirmed);
+  expect(calendarLink()).toHaveAttribute('href', expect.stringContaining('20261115T160000Z%2F20261115T171500Z'));
+  expect(f.back).not.toHaveBeenCalled();
   expect(screen.queryByText('Enviamos tus horarios.')).toBeNull();
   f.state.n=oldNegotiation; f.state.c=oldConnection;
   await act(async()=>window.dispatchEvent(new Event('online')));
   expect(screen.getByRole('heading',{name:'Horario confirmado'})).toBe(heading);
+  expect(calendarLink()).toBeNull();
   expect(screen.queryByText('Enviamos tus horarios.')).toBeNull();
 });
 
@@ -36,24 +45,147 @@ it('keeps a failed acceptance actionable and shows one confirmation after a succ
   const f=setup(), read=f.request.getMockImplementation()!;
   f.state.p=[proposal()];
   let fail=true;
+  let finishHome: (() => void) | undefined;
   f.request.mockImplementation(async(path,signal,method,body)=>{
+    if (path==='/me/home' && !fail) await new Promise<void>(resolve => { finishHome=resolve; });
     if (method==='POST') {
       if (fail) throw new ApiError('backend',409,'SCHEDULING_SLOT_CONFLICT');
       f.state.n=negotiation({status:'CONFIRMED',confirmedDateTime:proposal().proposedDateTime});
       f.state.c={...f.state.c,state:'SECOND_CHAT_SCHEDULED'};
+      f.state.home.nextSteps=[scheduledStep()];
       return f.state.n;
     }
     return read(path,signal,method,body);
   });
-  view(f);
+  const {back}=view(f);
   const accept=await screen.findByRole('button',{name:'Aceptar opción 1'});
   fireEvent.click(accept);
   expect(await screen.findByRole('alert')).toHaveTextContent(/superpone/);
   expect(screen.queryByRole('heading',{name:'Horario confirmado'})).toBeNull();
+  expect(calendarLink()).toBeNull();
   fail=false;
+  f.request.mockClear();
   fireEvent.click(accept);
+  await waitFor(()=>expect(finishHome).toBeDefined());
+  expect(calendarLink()).toBeNull();
+  finishHome?.();
   await screen.findByRole('heading',{name:'Horario confirmado'});
   expect(screen.getAllByText(/Horario confirmado/)).toHaveLength(1);
+  expect(calendarLink()).toBeVisible();
+  expect(back).not.toHaveBeenCalled();
+  expect(f.request.mock.calls.filter(([path])=>path==='/me/home')).toHaveLength(1);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('opens with a verified Calendar action on navigation and removes it when the start is reached', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-15T15:59:52Z'));
+  const f = setup(), stage = scheduledStep();
+  f.state.a.serverTime = new Date().toISOString();
+  f.state.n = negotiation({status:'CONFIRMED',confirmedDateTime:stage.secondChat.availableAt});
+  f.state.c.state = 'SECOND_CHAT_SCHEDULED';
+  f.state.home.nextSteps = [stage];
+  await act(async()=>{view(f);});
+  expect(calendarLink()).toBeVisible();
+  fireEvent.click(calendarLink()!);
+  expect(screen.getByText(openedStatus)).toBeVisible();
+  f.request.mockClear();
+  let resolve: ((value: unknown) => void) | undefined;
+  f.request.mockImplementationOnce(()=>new Promise(accept=>{resolve=accept;}));
+  await act(async()=>{await vi.advanceTimersByTimeAsync(7000);});
+  expect(f.request.mock.calls.map(([path])=>path)).toEqual(['/connections/c']);
+  const signal=f.request.mock.calls[0]?.[1];
+  expect(signal?.aborted).toBe(false);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});
+  expect(calendarLink()).toBeNull();
+  expect(screen.queryByText(openedStatus)).toBeNull();
+  expect(signal?.aborted).toBe(true);
+  await act(async()=>resolve?.({...f.state.c,state:'CLOSED'}));
+  expect(screen.getByRole('heading',{name:'Horario confirmado'})).toBeVisible();
+  await act(async()=>{await vi.advanceTimersByTimeAsync(14_000);});
+  expect(f.request).toHaveBeenCalledTimes(1);
+});
+
+it.each(['CLOSED', 'denied'])('withdraws the Calendar link on remote %s while continuously visible', async outcome => {
+  vi.useFakeTimers();
+  vi.setSystemTime(time);
+  const f=setup(), stage=scheduledStep();
+  f.state.n=negotiation({status:'CONFIRMED',confirmedDateTime:stage.secondChat.availableAt});
+  f.state.c.state='SECOND_CHAT_SCHEDULED';
+  f.state.home.nextSteps=[stage];
+  await act(async()=>{view(f);});
+  const heading=screen.getByRole('heading',{name:'Horario confirmado'});
+  const link=screen.getByRole('link',{name:'Agregar a Google Calendar'});
+  fireEvent.click(link);
+  expect(screen.getByText(openedStatus)).toBeVisible();
+  f.request.mockClear();
+  let resolve: ((value: unknown)=>void) | undefined;
+  f.request.mockImplementationOnce(()=>new Promise(accept=>{resolve=accept;}));
+  link.focus();
+
+  await act(async()=>{await vi.advanceTimersByTimeAsync(14_000);});
+  expect(f.request.mock.calls.map(([path])=>path)).toEqual(['/connections/c']);
+  expect(calendarLink()).toBe(link);
+  expect(link).toHaveFocus();
+  await act(async()=>resolve?.(f.state.c));
+  expect(screen.getByRole('heading',{name:'Horario confirmado'})).toBe(heading);
+  expect(calendarLink()).toBe(link);
+  expect(link).toHaveFocus();
+
+  if (outcome==='CLOSED') f.state.c.state='CLOSED';
+  else f.request.mockRejectedValueOnce(new ApiError('backend',403));
+  await act(async()=>{await vi.advanceTimersByTimeAsync(7_000);});
+  expect(calendarLink()).toBeNull();
+  expect(screen.queryByText(openedStatus)).toBeNull();
+  expect(screen.getByText('La conexión ya no está disponible. Volvé a Actividad.')).toBeVisible();
+  expect(f.request.mock.calls.map(([path])=>path)).toEqual(['/connections/c','/connections/c']);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(14_000);});
+  expect(f.request).toHaveBeenCalledTimes(2);
+});
+
+it.each(['Scheduling','Activity'])('shares an opened Calendar template from %s with both surfaces', async origin => {
+  vi.useFakeTimers();
+  vi.setSystemTime(time);
+  const f=setup(), stage=scheduledStep();
+  f.state.n=negotiation({status:'CONFIRMED',confirmedDateTime:stage.secondChat.availableAt});
+  f.state.c.state='SECOND_CHAT_SCHEDULED';
+  f.state.home.nextSteps=[stage];
+  let scheduling: ReturnType<typeof view> | undefined;
+  await act(async()=>{scheduling=view(f);});
+  const item={...homeSecondFixture(),connectionId:stage.connectionId,
+    partnerName:'María',secondChat:{...homeSecondFixture().secondChat!,...stage.secondChat}};
+  const activity=render(<SecondChatCard item={item} accountId="me" disabled={false} onOpen={vi.fn()} onDismiss={vi.fn(async()=>{})}/>);
+  const schedulingView=within(scheduling!.container), activityView=within(activity.container);
+  const first=origin==='Scheduling'?schedulingView:activityView;
+  fireEvent.click(first.getByRole('link',{name:'Agregar a Google Calendar'}));
+  for(const surface of [schedulingView,activityView]){
+    expect(surface.getByText(openedStatus)).toBeVisible();
+    expect(surface.getByRole('link',{name:'Volver a agregar al calendario'})).toHaveAttribute('href',expect.stringContaining('20261115T160000Z%2F20261115T171500Z'));
+  }
+});
+
+it('keeps the confirmed card and link during delayed resume, then hides the link on failure and restores it on retry', async () => {
+  const f=setup(), stage=scheduledStep(), read=f.request.getMockImplementation()!;
+  f.state.n=negotiation({status:'CONFIRMED',confirmedDateTime:stage.secondChat.availableAt});
+  f.state.c.state='SECOND_CHAT_SCHEDULED';
+  f.state.home.nextSteps=[stage];
+  view(f);
+  const link=await screen.findByRole('link',{name:'Agregar a Google Calendar'});
+  const heading=screen.getByRole('heading',{name:'Horario confirmado'});
+  let rejectHome: ((error: unknown)=>void) | undefined;
+  f.request.mockImplementation((path,...args)=>path==='/me/home' ? new Promise((_, reject)=>{rejectHome=reject;}) : read(path,...args));
+  link.focus();
+  await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
+  expect(rejectHome).toBeDefined();
+  expect(calendarLink()).toBe(link);
+  expect(link).toHaveFocus();
+  await act(async()=>rejectHome?.(new ApiError('network')));
+  expect(screen.getByRole('heading',{name:'Horario confirmado'})).toBe(heading);
+  expect(screen.getByRole('alert')).toHaveTextContent('No pudimos verificar los datos de la cita');
+  expect(calendarLink()).toBeNull();
+  f.request.mockImplementation(read);
+  fireEvent.click(screen.getByRole('button',{name:'Reintentar'}));
+  await screen.findByRole('link',{name:'Agregar a Google Calendar'});
   expect(screen.queryByRole('alert')).toBeNull();
 });
 it('renders selector with seven days, half hours, ordered removals and profile navigation',async()=>{
