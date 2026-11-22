@@ -14,6 +14,7 @@
 .onboarding [role=alert] { color: var(--color-error); }
 .photo-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; align-items: start; }
 .onboarding .photo-slot { min-width: 0; padding: 0; margin: 0; border: 0; border-radius: 0; }
+.photo-metadata-placeholder .placeholder-photo { aspect-ratio: 1; }
 .photo-frame { position: relative; aspect-ratio: 1; border: 1px solid var(--color-outline); border-radius: var(--radius-row); overflow: hidden; background: var(--color-surface); }
 .photo-frame:has(.photo-reorder-handle) { border-radius: var(--radius-row) var(--radius-row) 0 0; }
 .photo-slot[data-drop-active=true] .photo-frame, .photo-slot[data-reorder-target=true] .photo-frame { outline: 3px solid var(--color-secondary); outline-offset: 1px; }
@@ -122,8 +123,6 @@
   .profile-date-selects { grid-template-columns: 1fr; }
 }
 
-.management-body { position: relative; }
-.management-preparing { position: absolute; inset: 0 0 auto; opacity: 0; pointer-events: none; }
 .managed-photo-error {
   position: absolute;
   inset: 0;

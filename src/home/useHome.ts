@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ApiError, object, parseProfile } from '../auth/api';
 import type { SessionController } from '../auth/session';
 import { parseHome, parseQueue, parseStatus } from './contracts';
@@ -8,10 +8,10 @@ import type { LocationFailureKind } from './location';
 
 interface Model { home: HomeData; name: string }
 export type SearchPhase = 'idle' | 'locating' | 'admitting' | 'queued' | 'canceling' | 'reconciling' | 'failed';
-interface State { model: Model | null; busy: boolean; blocked: boolean; error: string; searchPhase: SearchPhase; locationFailure: LocationFailureKind | null }
+interface State { model: Model | null; busy: boolean; blocked: boolean; error: string; returning: boolean; searchPhase: SearchPhase; locationFailure: LocationFailureKind | null }
 interface Owner { lifetime: AbortController; read: AbortController | null; location: AbortController | null; serial: number; mutation: boolean; cancelRequested: boolean; version: number | null; uncertain: boolean; reconcile: boolean }
 export function useHome(controller: SessionController, active = true) {
-  const [state, setState] = useState<State>({ model: null, busy: true, blocked: true, error: '', searchPhase: 'idle', locationFailure: null });
+  const [state, setState] = useState<State>({ model: null, busy: true, blocked: true, returning: false, error: '', searchPhase: 'idle', locationFailure: null });
   const foreground = useRef(active); foreground.current = active;
   const owner = useRef<Owner | null>(null), latest = useRef<Model | null>(null);
   const valid = (r: Owner, serial: number) => owner.current === r && !r.lifetime.signal.aborted && r.serial === serial;
@@ -41,13 +41,14 @@ export function useHome(controller: SessionController, active = true) {
     }
     return null;
   };
-  const refresh = async (poll = false): Promise<HomeData | null> => {
+  const refresh = async (poll = false, returning = false): Promise<HomeData | null> => {
     const r = owner.current;
     if (!r || r.mutation || r.lifetime.signal.aborted) return null;
     if (r.read) return null;
     const read = new AbortController(); r.read = read;
     const signal = AbortSignal.any([read.signal, r.lifetime.signal]), serial = ++r.serial;
-    if (!poll) { r.uncertain = false; r.reconcile = true; setState(s => ({ ...s, busy: true, blocked: true, error: '', locationFailure: null })); }
+    if (returning) setState(s => ({ ...s, returning: true }));
+    else if (!poll) { r.uncertain = false; r.reconcile = true; setState(s => ({ ...s, busy: true, blocked: true, error: '', locationFailure: null })); }
     try {
       if (poll) {
         const status = parseStatus(await controller.request('/me/home/status', signal));
@@ -62,9 +63,15 @@ export function useHome(controller: SessionController, active = true) {
     } finally {
       if (valid(r, serial)) {
         r.read = null;
-        setState(s => ({ ...s, busy: false, searchPhase: s.blocked && s.searchPhase !== 'idle' ? 'failed' : latest.current?.home.matchmaking.inQueue ? 'queued' : s.searchPhase === 'failed' && poll ? 'failed' : 'idle' }));
+        setState(s => ({ ...s, busy: false, returning: false, searchPhase: s.blocked && s.searchPhase !== 'idle' ? 'failed' : latest.current?.home.matchmaking.inQueue ? 'queued' : s.searchPhase === 'failed' && poll ? 'failed' : 'idle' }));
       }
     }
+  };
+  const refreshOnReturn = () => {
+    const retained = latest.current?.home;
+    const safe = retained?.profileStatus === 'ACTIVE' && controller.snapshot.profile?.status === 'ACTIVE' &&
+      !retained.matchmaking.inQueue && !state.busy && !state.blocked && state.searchPhase === 'idle' && !owner.current?.uncertain;
+    void refresh(false, safe);
   };
   const reconcileHome = async () => {
     const r=owner.current;
@@ -74,7 +81,7 @@ export function useHome(controller: SessionController, active = true) {
   };
   const dismissSecondChat = async (connectionId: string) => {
     const r = owner.current;
-    if (!r || r.mutation || state.busy || state.blocked || r.lifetime.signal.aborted) return;
+    if (!r || r.mutation || state.busy || state.returning || state.blocked || r.lifetime.signal.aborted) return;
     r.mutation = true; r.read?.abort(); r.read = null;
     const serial = ++r.serial, signal = r.lifetime.signal;
     setState(s => ({ ...s, busy: true, error: '' }));
@@ -96,7 +103,7 @@ export function useHome(controller: SessionController, active = true) {
       }
       return;
     }
-    if (!r || r.mutation || state.busy || state.blocked || !model) return;
+    if (!r || r.mutation || state.busy || state.returning || state.blocked || !model) return;
     if (cancel ? !model.home.matchmaking.inQueue : model.home.profileStatus !== 'ACTIVE' || !model.home.matchmaking.canSearch || model.home.matchmaking.inQueue) return;
     r.mutation = true; r.cancelRequested = cancel; r.read?.abort(); r.read = null;
     const serial = ++r.serial, signal = r.lifetime.signal;
@@ -165,7 +172,7 @@ export function useHome(controller: SessionController, active = true) {
   useEffect(() => {
     const r: Owner = { lifetime: new AbortController(), read: null, location: null, serial: 0, mutation: false, cancelRequested: false, version: null, uncertain: false, reconcile: true };
     owner.current = r; latest.current = null;
-    setState({ model: null, busy: true, blocked: true, error: '', searchPhase: 'idle', locationFailure: null });
+    setState({ model: null, busy: true, blocked: true, returning: false, error: '', searchPhase: 'idle', locationFailure: null });
     queueMicrotask(() => { if (!r.lifetime.signal.aborted) void refresh(); });
     const resume = () => {
       if (foreground.current && document.visibilityState === 'visible') void refresh(latest.current !== null);
@@ -178,13 +185,14 @@ export function useHome(controller: SessionController, active = true) {
     // The authenticated/profile mount owns all callbacks and resources.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const r = owner.current;
     if (!active && r && !r.mutation) {
       r.read?.abort(); r.read = null; r.serial++; r.reconcile = true;
+      setState(s => s.returning ? { ...s, returning: false } : s);
     }
   }, [active]);
   const canRetryLocation = state.searchPhase === 'failed' && state.locationFailure !== null && !state.busy && !state.blocked &&
     state.model?.home.profileStatus === 'ACTIVE' && state.model.home.matchmaking.canSearch && !state.model.home.matchmaking.inQueue;
-  return { ...state, reconcileHome, dismissSecondChat, canRetryLocation, retryLocation: () => { if (canRetryLocation) void mutate(false); }, refresh: () => void refresh(), search: () => void mutate(false), cancel: () => void mutate(true), backFromSearch: () => { if (!state.busy && !state.blocked && !latest.current?.home.matchmaking.inQueue) setState(s => ({ ...s, searchPhase: 'idle', error: '', locationFailure: null })); } };
+  return { ...state, refreshOnReturn, reconcileHome, dismissSecondChat, canRetryLocation, retryLocation: () => { if (canRetryLocation) void mutate(false); }, refresh: () => void refresh(), search: () => void mutate(false), cancel: () => void mutate(true), backFromSearch: () => { if (!state.busy && !state.blocked && !latest.current?.home.matchmaking.inQueue) setState(s => ({ ...s, searchPhase: 'idle', error: '', locationFailure: null })); } };
 }
