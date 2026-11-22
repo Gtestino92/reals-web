@@ -186,26 +186,54 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     }
   };
   const reconcile = async (signal: AbortSignal, verifyWrite: boolean) => {
-    let profile: FullProfile | null = null;
     const account = controller.snapshot.account;
     if (!account) throw new Error('Sesión no disponible');
-    try { profile = fullProfile(await controller.request('/me/profile',signal),account.id); }
-    catch (e) { if (!(e instanceof ApiError) || e.code !== 'PROFILE_NOT_FOUND' || e.status !== 404) throw e; }
-    signal.throwIfAborted();
-    const queued = !!management && !!parseQueue(await controller.request('/matchmaking/queue', signal), account.id);
-    signal.throwIfAborted();
-    if (queued && !verifyWrite) return null;
-    const readLegal = async () => {
-      if (!management) {
-        const status = await controller.request('/me/legal-status', signal);
-        return [status, await controller.request('/legal/documents/current', signal)] as const;
+    const readProfile = async (readSignal: AbortSignal) => {
+      try { return fullProfile(await controller.request('/me/profile', readSignal), account.id); }
+      catch (error) {
+        if (!(error instanceof ApiError) || error.code !== 'PROFILE_NOT_FOUND' || error.status !== 404) throw error;
+        return null;
       }
-      return Promise.all([controller.request('/me/legal-status', signal), controller.request('/legal/documents/current', signal)]);
     };
-    let pair = await readLegal();
+    const readQueue = async (readSignal: AbortSignal) =>
+      !!parseQueue(await controller.request('/matchmaking/queue', readSignal), account.id);
+    const readLegal = async (readSignal: AbortSignal) => {
+      if (!management) {
+        const status = await controller.request('/me/legal-status', readSignal);
+        return [status, await controller.request('/legal/documents/current', readSignal)] as const;
+      }
+      return Promise.all([controller.request('/me/legal-status', readSignal), controller.request('/legal/documents/current', readSignal)]);
+    };
+    let profile: FullProfile | null;
+    let queued = false;
+    let pair: Awaited<ReturnType<typeof readLegal>>;
+    if (management === 'filters' && !verifyWrite) {
+      const reads = new AbortController();
+      const readSignal = AbortSignal.any([signal, reads.signal]);
+      const activeQueue = Symbol();
+      try {
+        [profile, , pair] = await Promise.all([
+          readProfile(readSignal),
+          readQueue(readSignal).then(inQueue => { if (inQueue) throw activeQueue; }),
+          readLegal(readSignal),
+        ]);
+      } catch (error) {
+        if (error === activeQueue) return null;
+        throw error;
+      } finally {
+        reads.abort();
+      }
+    } else {
+      profile = await readProfile(signal);
+      signal.throwIfAborted();
+      queued = !!management && await readQueue(signal);
+      signal.throwIfAborted();
+      if (queued && !verifyWrite) return null;
+      pair = await readLegal(signal);
+    }
     let requirements;
     try { requirements = legal(...pair); }
-    catch { pair = await readLegal(); requirements = legal(...pair); }
+    catch { pair = await readLegal(signal); requirements = legal(...pair); }
     const progressivePhotos = !verifyWrite && management === 'details' && profile?.status === 'ACTIVE' && requirements.satisfied;
     const retainPhotos = management === 'filters' || progressivePhotos;
     const list = !profile ? [] : retainPhotos ? null : photos(await controller.request('/me/profile/photos', signal));

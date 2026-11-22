@@ -1852,3 +1852,5 @@ Base `bfddcaa`. Read-only Android comparison: `ProfileStatusScreen`, `RealsApp` 
 | Home re-entry | Only an eligible retained ACTIVE snapshot revalidates silently. Search, interaction actions, and automatic chat entry still require reconciliation. A repeated exit aborts the obsolete return read. The existing history guard and queue admission check remain in use. |
 
 These paths are COMPLETE in focused simulated tests. Hosted Dev latency and physical browser Back/Forward remain to be checked.
+
+Web Preferences admission overlaps the profile, queue and legal reads. Controls still require all confirmations. An active queue cancels sibling reads and returns to Home. Focused tests hold all four requests open to verify concurrency and the admission gate.

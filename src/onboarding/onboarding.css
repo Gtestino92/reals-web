@@ -56,6 +56,26 @@
 .profile-fields { display: grid; grid-template-columns: minmax(0,1fr); gap: 16px; }
 .profile-form label { margin: 0; font-size: .9375rem; font-weight: 500; }
 .profile-form :is(input:not([type=checkbox]):not([type=range]), select, textarea) { width: 100%; min-width: 0; min-height: var(--control-min-height); padding: 10px 12px; font-weight: 400; }
+@media (forced-colors: none) {
+  .onboarding .profile-form label > select {
+    appearance: none;
+    grid-area: 2 / 1;
+    padding-inline-end: 2rem;
+  }
+  .profile-form label:has(> select)::after {
+    content: '';
+    grid-area: 2 / 1;
+    justify-self: end;
+    align-self: center;
+    width: .45rem;
+    height: .45rem;
+    margin-inline-end: .85rem;
+    border-right: 2px solid var(--color-on-surface-variant);
+    border-bottom: 2px solid var(--color-on-surface-variant);
+    transform: translateY(-.1rem) rotate(45deg);
+    pointer-events: none;
+  }
+}
 .profile-form textarea { resize: vertical; font-weight: 400; }
 .profile-form .field-wide { grid-column: 1 / -1; }
 .profile-form :is(.gender-preferences, .age-preference) { margin: 16px 0; }
