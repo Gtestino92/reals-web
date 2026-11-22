@@ -4,19 +4,29 @@ import type { Photo } from './contracts';
 import { PhotoLoading, usePhotoRequest } from '../visual/ProfileImage';
 import { photoIdentity } from '../visual/photoIdentity';
 
-function ManagedPhoto({ photo, position }: { photo: Photo; position: number }) {
-  const { status, ...request } = usePhotoRequest(photo.url);
-  return <span className="managed-photo" data-image-state={status}>
-    {status !== 'failed' && <img {...request} alt={`Foto ${position} del perfil`} draggable={false} referrerPolicy="no-referrer"/>}
-    {status === 'loading' && <PhotoLoading/>}
-    {status === 'failed' && <span className="managed-photo-error">No se pudo cargar la foto.</span>}
-  </span>;
+function ManagedPhoto({ photo, position, reorderDisabled, picked, instructions, onRetryPhoto }: {
+  photo: Photo; position: number; reorderDisabled: boolean; picked: boolean; instructions?: string; onRetryPhoto?: (() => void) | undefined;
+}) {
+  const [retryEpoch, setRetryEpoch] = useState(0);
+  const { status, ...request } = usePhotoRequest(photo.url, retryEpoch);
+  return <>
+    <button type="button" className="photo-reorder-handle" data-reorder-photo={photo.id} aria-label={`Reordenar foto ${position}`} aria-describedby={instructions} aria-pressed={picked} disabled={reorderDisabled}>
+      <span className="managed-photo" data-image-state={status}>
+        {status !== 'failed' && <img {...request} alt={`Foto ${position} del perfil`} loading="lazy" draggable={false} referrerPolicy="no-referrer"/>}
+        {status === 'loading' && <PhotoLoading/>}
+      </span>
+    </button>
+    {status === 'failed' && <div className="managed-photo-error">
+      <span>No se pudo cargar la foto.</span>
+      <button type="button" aria-label={`Reintentar foto ${position}`} onClick={() => { setRetryEpoch(value => value + 1); onRetryPhoto?.(); }}>Reintentar</button>
+    </div>}
+  </>;
 }
 
-export function PhotoSlot({ position, photo, disabled, managementDisabled = disabled, reorderDisabled = managementDisabled, picked = false, target = false, instructions, onSelect, onDelete }: {
+export function PhotoSlot({ position, photo, disabled, managementDisabled = disabled, reorderDisabled = managementDisabled, picked = false, target = false, instructions, onSelect, onDelete, onRetryPhoto }: {
   position: number; photo: Photo | undefined; disabled: boolean; managementDisabled?: boolean; reorderDisabled?: boolean;
   picked?: boolean; target?: boolean; instructions?: string;
-  onSelect: (files: File[]) => void; onDelete?: () => void;
+  onSelect: (files: File[]) => void; onDelete?: () => void; onRetryPhoto?: (() => void) | undefined;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -33,9 +43,7 @@ export function PhotoSlot({ position, photo, disabled, managementDisabled = disa
     onDrop={event => { if (!hasFiles(event)) return; event.preventDefault(); setDragging(false); if (!disabled) onSelect(Array.from(event.dataTransfer.files)); }}>
     <div className="photo-frame">
       {photo ? <>
-        <button type="button" className="photo-reorder-handle" data-reorder-photo={photo.id} aria-label={`Reordenar foto ${position}`} aria-describedby={instructions} aria-pressed={picked} disabled={reorderDisabled}>
-          <ManagedPhoto key={photoIdentity(photo.id,photo.url)} photo={photo} position={position}/>
-        </button>
+        <ManagedPhoto key={photoIdentity(photo.id,photo.url)} photo={photo} position={position} picked={picked} reorderDisabled={reorderDisabled} onRetryPhoto={onRetryPhoto} {...(instructions ? { instructions } : {})} />
         {onDelete && <button className="photo-delete" type="button" disabled={managementDisabled} aria-label={`Eliminar foto ${position}`} onClick={onDelete}><span aria-hidden="true">×</span></button>}
         {(rejected || review) && <span className={`photo-moderation ${rejected ? 'photo-rejected' : ''}`} role="note" aria-label={rejected ? `Foto ${position} rechazada. Debe ser reemplazada.` : `Foto ${position} pendiente de revisión`} title={rejected ? 'Reemplazá esta foto.' : 'Esperá la revisión; el estado se consulta al volver a Reals.'}>{rejected ? 'Rechazada' : 'En revisión'}</span>}
       </> : <button className="photo-add" type="button" disabled={disabled} aria-label={`Agregar en posición ${position}`} aria-describedby="photo-upload-guidance" onClick={() => input.current?.click()}>

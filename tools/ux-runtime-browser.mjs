@@ -29,11 +29,16 @@ await withIdentityChrome(async ({ call, evaluate }) => {
     await evaluate("document.querySelector('.profile-submit').focus()");
     await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',windowsVirtualKeyCode:13});
     await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-    if(phase==='after')await wait("document.activeElement?.name==='displayName'&&!!document.querySelector('[role=alert]')");
-    for(const [label,value] of [['Nombre visible','Prueba'],['Fecha de nacimiento','1995-01-01'],['Ciudad','Córdoba']]) {
+    if(phase==='after')await wait("document.activeElement===document.querySelector('.profile-validation[role=alert]')");
+    const textFields = [['Nombre visible','Prueba'],['Ciudad','Córdoba']];
+    if (phase === 'before') textFields.push(['Fecha de nacimiento','1995-01-01']);
+    for(const [label,value] of textFields) {
       await evaluate(`(()=>{const n=[...document.querySelectorAll('.profile-form label')].find(n=>n.firstChild.textContent===${JSON.stringify(label)}).querySelector('input');const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(n,${JSON.stringify(value)});n.dispatchEvent(new Event('input',{bubbles:true}));})()`);
     }
     if(phase==='after') {
+      for (const [name, value] of [['birthYear', '1995'], ['birthMonth', '01'], ['birthDay', '01']]) {
+        await evaluate(`(()=>{const field=document.querySelector('[name="${name}"]');field.value='${value}';field.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+      }
       await evaluate("(()=>{for(const [label,value] of [['Género','OTHER'],['Intención','FRIENDSHIP']]){const n=[...document.querySelectorAll('.profile-form label')].find(n=>n.firstChild.textContent===label).querySelector('select');n.value=value;n.dispatchEvent(new Event('change',{bubbles:true}));}document.querySelector('.gender-preferences input').click();})()");
     }
     await evaluate('auditFixture.hold(true)');await click('Crear perfil');

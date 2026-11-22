@@ -218,3 +218,10 @@ it.each(['missing context','draw failure','context loss'])('reports %s without b
   expect(screen.getByRole('alert')).toHaveTextContent(/vista previa|recorte/); expect(screen.getByRole('heading',{ name:'Recortar foto' })).toBeInTheDocument();
   expect(screen.getByRole('button',{ name:'Usar foto' })).toBeDisabled(); expect(screen.getByRole('button',{ name:'Cancelar' })).toBeEnabled();
 });
+
+it('explains the saved framing immediately before the crop actions', async () => {
+  render(<CropDialog file={fileFrom(png())} onCancel={vi.fn()} onConfirm={vi.fn()} />);
+  await prepared();
+  const note = screen.getByText('La foto se guardará con este encuadre. Si después querés modificarlo, tendrás que volver a subir la imagen.');
+  expect(note.nextElementSibling).toContainElement(screen.getByRole('button', { name: 'Usar foto' }));
+});

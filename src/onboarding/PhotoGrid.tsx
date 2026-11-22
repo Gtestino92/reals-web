@@ -8,10 +8,10 @@ interface Interaction {
   startX: number; startY: number; x: number; y: number; size: number; target: number | null;
   timer: number | null; capture: HTMLDivElement | null;
 }
-export function PhotoGrid({ photos, disabled, uploadsDisabled, onSelect, onDelete, onMove }: {
+export function PhotoGrid({ photos, disabled, uploadsDisabled, onSelect, onDelete, onRetryPhoto, onMove }: {
   photos: Photo[]; disabled: boolean; uploadsDisabled: boolean;
   onSelect: (files: File[], position: number, photo?: Photo) => void;
-  onDelete: (photo: Photo) => void; onMove: (photoId: string, target: number) => void;
+  onDelete: (photo: Photo) => void; onRetryPhoto?: () => void; onMove: (photoId: string, target: number) => void;
 }) {
   const instructions = useId();
   const grid = useRef<HTMLDivElement>(null), owned = useRef<Interaction | null>(null), mounted = useRef(false);
@@ -138,7 +138,7 @@ export function PhotoGrid({ photos, disabled, uploadsDisabled, onSelect, onDelet
       {Array.from({ length:9 },(_,i) => {
         const position = i+1, photo = photos.find(item => item.position === position);
         return <PhotoSlot key={position} position={position} photo={photo} disabled={uploadsDisabled || !!view} managementDisabled={disabled || !!view} reorderDisabled={disabled}
-          picked={view?.photo.id === photo?.id && !!photo} target={view?.target === position} instructions={instructions}
+          picked={view?.photo.id === photo?.id && !!photo} target={view?.target === position} instructions={instructions} onRetryPhoto={onRetryPhoto}
           onSelect={files => { if (!owned.current) onSelect(files,position,photo); }} onDelete={() => { if (photo && !owned.current) onDelete(photo); }}/ >;
       })}
       {view && view.kind !== 'keyboard' && <div className="photo-drag-ghost" aria-hidden="true" style={{ left:view.x-view.size/2,top:view.y-view.size/2,width:view.size,height:view.size }}><img src={view.photo.url} alt="" draggable={false} referrerPolicy="no-referrer"/></div>}

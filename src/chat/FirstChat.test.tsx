@@ -342,3 +342,23 @@ it('never fetches or presents public location in first chat', async () => {
   expect(document.querySelector('.public-profile-location')).toBeNull();
   expect(vi.mocked(controller.request).mock.calls.some(c => c[0].includes('/visual-profile') || c[0].includes('/reference/countries'))).toBe(false);
 });
+
+it('quotes the current guided question on a mouse double-click and sends only on explicit submit', async () => {
+  mount(); await ready();
+  const panel = screen.getByRole('complementary', { name: 'Conversación guiada' });
+  Object.assign(panel.parentElement!, { setPointerCapture: vi.fn(), hasPointerCapture: vi.fn(() => false) });
+  const target = panel.querySelector('.chat-guidance-copy')!;
+  for (const detail of [1, 2]) {
+    for (const type of ['pointerdown', 'pointerup']) {
+      const event = new MouseEvent(type, { bubbles: true, button: 0 });
+      Object.defineProperties(event, { pointerId: { value: 1 }, isPrimary: { value: true }, pointerType: { value: 'mouse' } });
+      fireEvent(target, event);
+    }
+    fireEvent.click(target, { detail });
+  }
+  expect(screen.getByRole('button', { name: 'Quitar respuesta' })).toBeVisible();
+  expect(controller.request).not.toHaveBeenCalledWith('/chats/c/messages', expect.any(AbortSignal), 'POST', expect.anything());
+  fireEvent.change(screen.getByRole('textbox', { name: 'Mensaje' }), { target: { value: 'Mi respuesta' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Enviar mensaje' }));
+  await waitFor(() => expect(controller.request).toHaveBeenCalledWith('/chats/c/messages', expect.any(AbortSignal), 'POST', expect.objectContaining({ replyTo: { type: 'GUIDANCE_QUESTION', targetId: 'question-1' } })));
+});

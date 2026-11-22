@@ -128,3 +128,21 @@
   .chat-timeline { padding:8px; gap:8px; }
   .chat-message { padding:8px; max-width:85%; }
 }
+
+@media (any-hover: hover) and (any-pointer: fine) {
+  .reply-swipe-mouse-quote.reply-swipe-enabled { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+  .first-chat .reply-swipe-mouse-quote .reply-keyboard-action {
+    position: static;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+    clip-path: none;
+    border: 1px solid var(--color-outline);
+    background: var(--color-surface);
+    color: var(--color-primary);
+    font-size: 1.25rem;
+    cursor: pointer;
+  }
+  .first-chat .reply-swipe-mouse-quote .reply-keyboard-action:hover { background: var(--color-secondary-container); }
+}

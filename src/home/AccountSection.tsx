@@ -57,6 +57,23 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
     else if (previousNotifications.current) notificationsButton.current?.focus({ preventScroll: true });
     previousNotifications.current = notificationsOpen;
   }, [notificationsOpen]);
+  const savePreference = (key: keyof Preferences, checked: boolean) => {
+    if (!preferences || uncertain || deleteUncertain) return;
+    const requested = { ...preferences, [key]: checked };
+    void run(async signal => {
+      notificationAction.current = 'write';
+      try {
+        const value = parse(await controller.request('/me/notification-preferences', signal, 'PUT', requested));
+        signal.throwIfAborted();
+        setPreferences(value);
+      } catch (failure) {
+        if (signal.aborted) return;
+        const rejected = failure instanceof ApiError && failure.kind === 'backend' && failure.status >= 400 && failure.status < 500 && failure.status !== 408;
+        setUncertain(!rejected);
+        setError(rejected ? 'No se pudo guardar el cambio. Revisá las preferencias y volvé a intentar.' : 'No pudimos confirmar el cambio. Consultá el estado antes de volver a intentar.');
+      }
+    });
+  };
   const blocked = disabled || busy || deleteUncertain;
   if (notificationsOpen) return <section className="home-account account-notifications" aria-label="Notificaciones" aria-busy={busy} data-saving={busy && notificationAction.current === 'write'}>
     <header className="notification-heading">
@@ -67,13 +84,13 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
     <p className="notification-platform">Estos ajustes se aplican actualmente a las notificaciones push de Android. Las notificaciones del navegador se configurarán por separado cuando estén disponibles.</p>
     <div className="notification-rows">{!preferences && busy && groups.map(([key]) => <div className="notification-row home-placeholder" aria-hidden="true" key={key}><span/><span/></div>)}{preferences && groups.map(([key, label]) => <label className="notification-row" key={key}>
       <span className="notification-copy"><span className="notification-title" id={`${notificationId}-${key}-title`}>{label}</span><span className="notification-description" id={`${notificationId}-${key}-description`}>{descriptions[key]}</span></span>
-      <span className="notification-switch-target"><input type="checkbox" role="switch" className="notification-switch" aria-labelledby={`${notificationId}-${key}-title`} aria-describedby={`${notificationId}-${key}-description`} checked={preferences[key]} disabled={blocked || uncertain} onChange={e => { const requested = { ...preferences, [key]: e.target.checked }; void run(async signal => { notificationAction.current = 'write'; setUncertain(true); const value = parse(await controller.request('/me/notification-preferences', signal, 'PUT', requested)); signal.throwIfAborted(); setPreferences(value); setUncertain(false); }); }}/></span>
+      <span className="notification-switch-target"><input type="checkbox" role="switch" className="notification-switch" aria-labelledby={`${notificationId}-${key}-title`} aria-describedby={`${notificationId}-${key}-description`} checked={preferences[key]} disabled={blocked || uncertain} onChange={e => savePreference(key, e.target.checked)}/></span>
     </label>)}</div>
     <div className="notification-feedback">
       <p role="status">{busy ? notificationAction.current === 'write' ? 'Guardando preferencias…' : preferences ? 'Actualizando preferencias…' : 'Cargando notificaciones…' : ''}</p>
-      {error && <p role="alert" className="notification-error">{notificationAction.current === 'write' ? 'No pudimos confirmar el cambio. Consultá el estado antes de volver a intentar.' : 'No pudimos cargar las preferencias. Revisá tu conexión y usá «Consultar estado».'}</p>}
+      {error && <p role="alert" className="notification-error">{notificationAction.current === 'write' ? error : 'No pudimos cargar las preferencias. Revisá tu conexión y usá «Consultar estado».'}</p>}
     </div>
-    {(error || uncertain) && <button className="login-button login-outlined" disabled={blocked} onClick={read}>Consultar estado</button>}
+    {(uncertain || (error && notificationAction.current === 'read')) && <button className="login-button login-outlined" disabled={blocked} onClick={read}>Consultar estado</button>}
   </section>;
   return <section className={setup ? 'home-card home-account' : 'home-account'} aria-label="Cuenta" aria-busy={busy}>
     {setup ? <header className="home-heading"><h3>Cuenta</h3><button type="button" className="login-button login-outlined" aria-label="Cuenta" aria-expanded={expanded} aria-controls="account-options" disabled={blocked} onClick={() => setExpanded(v => !v)}>{expanded ? 'Ocultar' : 'Abrir'}</button></header> : <header className="home-heading"><h2>Cuenta</h2><button className="login-button login-outlined" disabled={busy || view === 'password'} onClick={onBack}>Volver a Inicio</button></header>}
@@ -81,7 +98,7 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
       {!setup && <button ref={notificationsButton} className="login-button login-outlined" disabled={blocked} onClick={() => { onNotificationsOpen?.(); read(); }}>Notificaciones</button>}
 
       {!setup && controller.hasPasswordProvider === true && <button className="login-button login-outlined" disabled={blocked} onClick={() => { setError(''); setView('password'); }}>Cambiar contraseña de Reals</button>}
-      {!setup && import.meta.env.DEV && <section><h4>Apoyar Reals</h4><p>Si te gusta Reals y querés ayudar a sostener el proyecto, podés hacer un aporte voluntario. No te da beneficios dentro de la app.</p><a className="login-button login-outlined" href="https://cafecito.app/reals-app" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Apoyar en Cafecito</a></section>}
+      {!setup && import.meta.env.DEV && <section className="account-support" aria-labelledby={`${notificationId}-support`}><h3 id={`${notificationId}-support`}>Apoyar Reals</h3><p>Si te gusta Reals y querés ayudar a sostener el proyecto, podés hacer un aporte voluntario. No te da beneficios dentro de la app.</p><a className="login-button login-outlined account-support-link" href="https://cafecito.app/reals-app" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Apoyar en Cafecito</a></section>}
       <SignOutButton disabled={blocked} onOpenChange={setSignOutOpen} onConfirm={controller.signOut} />
       <p>Eliminar la cuenta programa una eliminación recuperable durante 30 días y cierra la sesión.</p>
       <button className="login-button login-outlined" disabled={blocked || uncertain} onClick={() => { if (!owner.current?.locked) setDeleteOpen(true); }}>Eliminar cuenta</button>

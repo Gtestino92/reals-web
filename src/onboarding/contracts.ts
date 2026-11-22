@@ -56,27 +56,33 @@ export function legal(status: unknown, catalog: unknown): { satisfied: boolean; 
   return { satisfied: false, documents };
 }
 export function normalize(fields: Fields): Fields { return { ...fields, displayName: fields.displayName.trim(), city: fields.city.trim(), bio: fields.bio.trim(), countryCode: fields.countryCode.trim().toUpperCase() }; }
-export function validate(f: Fields, catalog: Country[], mode: 'create' | 'details' | 'filters', now = new Date()): string[] {
-  const errors: string[] = [];
+export function profileIssues(f: Fields, catalog: Country[], mode: 'create' | 'details' | 'filters', now = new Date()) {
+  const errors: Partial<Record<keyof Fields, string>> = {};
   if (mode !== 'filters') {
-    if (f.displayName.length < 2 || f.displayName.length > 100 || /[<>\r\n\x00-\x1f\x7f-\x9f]/.test(f.displayName)) errors.push('Nombre visible: usá texto simple de 2 a 100 caracteres.');
-    if (!f.city || f.city.length > 100 || /[<>\r\n\x00-\x1f\x7f-\x9f]/.test(f.city)) errors.push('Ciudad: ingresá hasta 100 caracteres de texto simple.');
-    if (!catalog.some(x => x.code === f.countryCode)) errors.push('Seleccioná un país del catálogo.');
-    if (f.bio.length > 1000 || /[<>\x00-\x09\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test(f.bio)) errors.push('Bio: usá texto simple de hasta 1.000 caracteres.');
+    if (f.displayName.length < 2 || f.displayName.length > 100 || /[<>\r\n\x00-\x1f\x7f-\x9f]/.test(f.displayName)) errors.displayName = 'Nombre visible: usá texto simple de 2 a 100 caracteres.';
+    if (!f.city || f.city.length > 100 || /[<>\r\n\x00-\x1f\x7f-\x9f]/.test(f.city)) errors.city = 'Ciudad: ingresá hasta 100 caracteres de texto simple.';
+    if (!catalog.some(x => x.code === f.countryCode)) errors.countryCode = 'Seleccioná un país del catálogo.';
+    if (f.bio.length > 1000 || /[<>\x00-\x09\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test(f.bio)) errors.bio = 'Bio: usá texto simple de hasta 1.000 caracteres.';
   }
   if (mode === 'create') {
     const date = new Date(`${f.birthDate}T00:00:00Z`);
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(f.birthDate) && Number.isFinite(date.getTime()) && date.toISOString().slice(0,10) === f.birthDate;
     const age = now.getFullYear() - date.getUTCFullYear() - (now.getMonth() < date.getUTCMonth() || (now.getMonth() === date.getUTCMonth() && now.getDate() < date.getUTCDate()) ? 1 : 0);
-    if (!validDate || age < 18 || age > 99) errors.push('Fecha de nacimiento: ingresá una fecha válida; debés tener entre 18 y 99 años.');
-    if (!genders.some(x => x === f.gender)) errors.push('Seleccioná un género válido.');
+    if (!f.birthDate) errors.birthDate = 'Seleccioná tu fecha de nacimiento.';
+    else if (!validDate) errors.birthDate = 'Ingresá una fecha de nacimiento válida.';
+    else if (age < 18 || age > 99) errors.birthDate = 'Debés tener entre 18 y 99 años.';
+    if (!genders.some(x => x === f.gender)) errors.gender = 'Seleccioná un género válido.';
   }
   if (mode !== 'details') {
-    if (!intentions.some(x => x === f.intention)) errors.push('Elegí una intención válida.');
-    if (!f.lookingForGenders.length || !f.lookingForGenders.every(x => genders.some(g => g === x))) errors.push('Elegí al menos un género válido que te interese.');
-    if (![f.preferredMinAge, f.preferredMaxAge, f.maxDistanceKm].every(Number.isInteger) || f.preferredMinAge < 18 || f.preferredMaxAge > 99 || f.preferredMinAge > f.preferredMaxAge || f.maxDistanceKm < 1 || f.maxDistanceKm > 100) errors.push('Elegí edades entre 18 y 99 y una distancia entre 1 y 100 km.');
+    if (!intentions.some(x => x === f.intention)) errors.intention = 'Elegí una intención válida.';
+    if (!f.lookingForGenders.length || !f.lookingForGenders.every(x => genders.some(g => g === x))) errors.lookingForGenders = 'Elegí al menos un género válido que te interese.';
+    if (![f.preferredMinAge, f.preferredMaxAge].every(Number.isInteger) || f.preferredMinAge < 18 || f.preferredMaxAge > 99 || f.preferredMinAge > f.preferredMaxAge) errors.preferredMinAge = 'Elegí un rango de edad entre 18 y 99 años.';
+    if (!Number.isInteger(f.maxDistanceKm) || f.maxDistanceKm < 1 || f.maxDistanceKm > 100) errors.maxDistanceKm = 'Elegí una distancia entre 1 y 100 km.';
   }
   return errors;
+}
+export function validate(f: Fields, catalog: Country[], mode: 'create' | 'details' | 'filters', now = new Date()): string[] {
+  return Object.values(profileIssues(f, catalog, mode, now));
 }
 export function hasInteractions(raw: unknown): boolean {
   if (!object(raw) || !object(raw.activeInteractionsSummary) || !['pendingActions', 'nextSteps', 'passiveNotices'].every(k => Array.isArray(raw[k]))) return invalid();

@@ -52,6 +52,7 @@ it.each([['activityEnabled', 'Actividad'], ['remindersEnabled', 'Recordatorios']
   fireEvent.click(toggle); fireEvent.click(toggle);
   expect(controller.request).toHaveBeenCalledTimes(2); screen.getAllByRole('switch').forEach(input => expect(input).toBeDisabled());
   expect(screen.getByRole('region', { name: 'Notificaciones' })).toHaveAttribute('data-saving', 'true');
+  expect(screen.queryByRole('button', { name: 'Consultar estado' })).toBeNull();
   expect(toggle).toHaveProperty('checked', preferences[key]); expect(screen.getByRole('status')).toHaveTextContent('Guardando preferencias…');
   expect(controller.request).toHaveBeenLastCalledWith('/me/notification-preferences', expect.any(AbortSignal), 'PUT', { ...preferences, [key]: !preferences[key] });
   await act(async () => resolve({ activityEnabled: true, remindersEnabled: true, availabilityEnabled: false }));
@@ -114,4 +115,43 @@ it('rejects late read installation after unmount', async () => {
   const view = mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
   const signal = vi.mocked(controller.request).mock.calls[0]![1]; view.unmount(); expect(signal.aborted).toBe(true);
   await act(async () => resolve(preferences)); expect(screen.queryByRole('switch')).toBeNull();
+});
+
+it('keeps confirmed switches available after an explicit rejection without offering recovery', async () => {
+  mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
+  const toggle = await screen.findByRole('switch', { name: 'Actividad' });
+  vi.mocked(controller.request).mockRejectedValueOnce(new ApiError('backend', 400, 'INVALID_NOTIFICATION_PREFERENCES'));
+  fireEvent.click(toggle);
+  await screen.findByRole('alert');
+  expect(toggle).toBeChecked(); expect(toggle).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Consultar estado' })).toBeNull();
+});
+
+it('aborts a pending PUT when the session surface is replaced and ignores its late result', async () => {
+  const oldController = controller;
+  const old = mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
+  const toggle = await screen.findByRole('switch', { name: 'Actividad' });
+  let resolve!: (value: unknown) => void;
+  vi.mocked(oldController.request).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  fireEvent.click(toggle);
+  const signal = vi.mocked(oldController.request).mock.lastCall![1];
+  old.unmount();
+  expect(signal.aborted).toBe(true);
+  controller = controllerFixture();
+  vi.spyOn(controller, 'request').mockResolvedValue({ ...preferences, remindersEnabled: true });
+  mount(); fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
+  const reminders = await screen.findByRole('switch', { name: 'Recordatorios' });
+  await act(async () => resolve({ ...preferences, activityEnabled: false }));
+  expect(reminders).toBeChecked();
+  expect(screen.getByRole('switch', { name: 'Actividad' })).toBeChecked();
+});
+
+it('shows the development Cafecito link with the voluntary copy and external-link protections', () => {
+  mount();
+  expect(screen.getByRole('region', { name: 'Apoyar Reals' })).toHaveTextContent('aporte voluntario. No te da beneficios dentro de la app.');
+  const link = screen.getByRole('link', { name: 'Apoyar en Cafecito' });
+  expect(link).toHaveAttribute('href', 'https://cafecito.app/reals-app');
+  expect(link).toHaveAttribute('target', '_blank');
+  expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  expect(link).toHaveAttribute('referrerpolicy', 'no-referrer');
 });

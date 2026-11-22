@@ -92,3 +92,37 @@ it('exposes a native keyboard button outside the content, without a permanent vi
   act(()=>button.focus()); expect(button).toHaveFocus(); expect(button).toHaveClass('reply-keyboard-action');
   fireEvent.click(button); expect(reply).toHaveBeenCalledTimes(1); expect(target.querySelector('p')?.contains(button)).toBe(false);
 });
+
+it('quotes only two mouse clicks on eligible guidance, excluding touch, controls, and a completed drag', () => {
+  const reply = vi.fn();
+  render(<ReplySwipe enabled mouseDoubleClick label="Responder pregunta" onReply={reply}>
+    <p>Pregunta de prueba</p><button type="button">Otra pregunta</button>
+  </ReplySwipe>);
+  const question = screen.getByText('Pregunta de prueba');
+  const progression = screen.getByRole('button', { name: 'Otra pregunta' });
+  const click = (target: HTMLElement, count: number, kind = 'mouse', shift = false) => {
+    pointer(target, 'pointerdown', 0, 0, kind, shift);
+    pointer(target, 'pointerup', 0, 0, kind, shift);
+    fireEvent.click(target, { detail: count, shiftKey: shift });
+  };
+  click(question, 1, 'touch'); click(question, 2, 'touch');
+  click(question, 1); click(progression, 2);
+  click(question, 1, 'mouse', true); click(question, 2, 'mouse', true);
+  expect(reply).not.toHaveBeenCalled();
+  click(question, 1);
+  pointer(question, 'pointerdown', 0, 0, 'mouse'); pointer(question, 'pointerup', 60, 0, 'mouse');
+  fireEvent.click(question, { detail: 2 });
+  expect(reply).toHaveBeenCalledTimes(1);
+  click(question, 1); click(question, 2);
+  expect(reply).toHaveBeenCalledTimes(2);
+});
+
+it('leaves a double-click on an ordinary message native', () => {
+  const { target, reply } = setup();
+  for (const detail of [1, 2]) {
+    pointer(target, 'pointerdown', 0, 0, 'mouse'); pointer(target, 'pointerup', 0, 0, 'mouse');
+    fireEvent.click(target, { detail });
+  }
+  fireEvent.doubleClick(target);
+  expect(reply).not.toHaveBeenCalled();
+});

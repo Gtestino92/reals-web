@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from 'react';
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import seal from '../assets/reals-seal.png';
 import googleIcon from '../assets/google-g.png';
 import './login.css';
@@ -71,100 +71,117 @@ export function LoginScreen({
   const [password, setPassword] = useState('');
   const [keepSignedIn, setKeepSignedIn] = useState(false);
   const cooldown = useResetCooldown(passwordResetAvailableAtMillis);
-  const busy = loading || googleLoading || passwordResetLoading || sessionLoading;
+  const authenticating = loading || googleLoading || sessionLoading;
+  const busy = authenticating || passwordResetLoading;
   const signIn = mode === 'signIn';
   const visibleError = error !== null && (
     errorOwner === 'shared' || errorOwner === mode || (errorOwner === null && signIn)
   );
-  const submitLabel = signIn
-    ? (loading ? 'Ingresando...' : 'Ingresar')
-    : (loading ? 'Creando cuenta...' : 'Crear cuenta');
+  const modeOption = useRef<HTMLInputElement>(null);
+  const wasAuthenticating = useRef(false);
+  useLayoutEffect(() => {
+    if (!authenticating && wasAuthenticating.current) modeOption.current?.focus({ preventScroll: true });
+    wasAuthenticating.current = authenticating;
+  }, [authenticating]);
   const resetLabel = passwordResetLoading
     ? 'Enviando...'
     : (cooldown > 0 ? `Reenviar en ${cooldown}s` : 'Olvidé mi contraseña');
 
   return (
     <main className="login-page">
-      <section className="login-panel" aria-labelledby="login-heading">
-        <header className="login-header">
-          <div className="login-brand">
-            <img className="login-seal" src={seal} alt="" width="54" height="54" />
-            <h1>Reals</h1>
-            <div className="brand-divider" aria-hidden="true"><span /></div>
-          </div>
-          <h2 id="login-heading">{signIn ? 'Iniciar sesión' : 'Creá tu cuenta'}</h2>
-          <p id="login-description" className="login-description">{sessionLoading || loading || googleLoading
-            ? <span role="status">Preparando tu sesión de forma segura…</span>
-            : signIn ? 'Ingresá con tu email y contraseña para continuar.' : 'Registrate con tu email y contraseña para empezar.'}</p>
-        </header>
-        <form
-          className="login-form"
-          aria-labelledby="login-heading"
-          aria-describedby="login-description"
-          aria-busy={busy}
-          noValidate
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (busy) return;
-            (signIn ? onSignIn : onSignUp)(email, password, keepSignedIn);
-          }}
-          onKeyDown={(event) => {
-            // Browser Back keeps its normal navigation meaning. Escape offers
-            // the local Android Back equivalent without modifying history.
-            if (event.key === 'Escape' && !signIn && !busy) {
+      <section className="login-panel" aria-label="Reals" onKeyDown={(event) => {
+        // Browser Back keeps its normal navigation meaning. Escape switches
+        // modes without adding or replacing a history entry.
+        if (event.key === 'Escape' && !signIn && !busy) {
+          event.preventDefault();
+          setMode('signIn');
+        }
+      }}>
+        <LoginBrand />
+        {authenticating ? <AuthenticationProgress /> : <>
+          <fieldset className="login-modes" disabled={busy}>
+            <legend className="login-visually-hidden">Acceso a Reals</legend>
+            <label>
+              <input ref={signIn ? modeOption : null} type="radio" name="auth-mode" checked={signIn} onChange={() => setMode('signIn')} />
+              <span id="login-sign-in">Iniciar sesión</span>
+            </label>
+            <label>
+              <input ref={signIn ? null : modeOption} type="radio" name="auth-mode" checked={!signIn} onChange={() => setMode('signUp')} />
+              <span id="login-sign-up">Crear cuenta</span>
+            </label>
+          </fieldset>
+          <form className="login-form" aria-labelledby={signIn ? 'login-sign-in' : 'login-sign-up'} aria-busy={busy} noValidate
+            onSubmit={(event) => {
               event.preventDefault();
-              setMode('signIn');
-            }
-          }}
-        >
-          <div className="login-field">
-            <input id="login-email" name="email" type="email" inputMode="email"
-              autoComplete="username" autoCapitalize="none" spellCheck={false}
-              placeholder=" " value={email} disabled={busy}
-              onChange={(event) => setEmail(event.target.value)} />
-            <label htmlFor="login-email">Email</label>
-          </div>
-          <div className="login-field">
-            <input id="login-password" name="password" type="password"
-              autoComplete={signIn ? 'current-password' : 'new-password'}
-              placeholder=" " value={password} disabled={busy}
-              onChange={(event) => setPassword(event.target.value)} />
-            <label htmlFor="login-password">Password</label>
-          </div>
-          <label className="login-remember">
-            <input type="checkbox" aria-describedby="persistence-description" checked={keepSignedIn} disabled={busy}
-              onChange={(event) => setKeepSignedIn(event.target.checked)} />
-            <span>Mantener sesión iniciada</span>
-          </label>
-          <p id="persistence-description" className="login-feedback">La opción se aplica a email y contraseña. Con Google, la sesión dura sólo en esta pestaña.</p>
-          {visibleError && <p className="login-error" role="alert">{error}</p>}
-          {signIn && passwordResetMessage !== null && (
-            <p className="login-feedback" role="status">{passwordResetMessage}</p>
-          )}
-          <button className="login-button login-primary" type="submit" disabled={busy}>
-            {submitLabel}
-          </button>
-          <button className="login-button login-switch" type="button" disabled={busy}
-            onClick={() => { if (!busy) setMode(signIn ? 'signUp' : 'signIn'); }}>
-            {signIn ? '¿No tenés cuenta? Crear cuenta' : '¿Ya tenés cuenta? Ingresar'}
-          </button>
-          {signIn && (
-            <button className="login-button login-outlined" type="button"
-              disabled={busy || cooldown > 0}
-              onClick={() => {
-                if (!busy && cooldown <= 0) onPasswordReset(email);
-              }}>
-              {resetLabel}
+              if (!busy) (signIn ? onSignIn : onSignUp)(email, password, keepSignedIn);
+            }}>
+            <div className="login-field">
+              <input id="login-email" name="email" type="email" inputMode="email"
+                autoComplete="username" autoCapitalize="none" spellCheck={false}
+                placeholder=" " value={email} disabled={busy}
+                onChange={(event) => setEmail(event.target.value)} />
+              <label htmlFor="login-email">Email</label>
+            </div>
+            <div className="login-field">
+              <input id="login-password" name="password" type="password"
+                autoComplete={signIn ? 'current-password' : 'new-password'}
+                placeholder=" " value={password} disabled={busy}
+                onChange={(event) => setPassword(event.target.value)} />
+              <label htmlFor="login-password">Password</label>
+            </div>
+            <label className="login-remember">
+              <input type="checkbox" aria-describedby="persistence-description" checked={keepSignedIn} disabled={busy}
+                onChange={(event) => setKeepSignedIn(event.target.checked)} />
+              <span>Mantener sesión iniciada</span>
+            </label>
+            <p id="persistence-description" className="login-feedback">La opción se aplica a email y contraseña. Con Google, la sesión dura sólo en esta pestaña.</p>
+            {visibleError && <p className="login-error" role="alert">{error}</p>}
+            {signIn && passwordResetMessage !== null && (
+              <p className="login-feedback" role="status">{passwordResetMessage}</p>
+            )}
+            <button className="login-button login-primary" type="submit" disabled={busy}>
+              {signIn ? 'Ingresar' : 'Crear cuenta'}
             </button>
-          )}
-          <div className="login-or" aria-hidden="true"><span />o<span /></div>
-          <button className="login-button login-outlined login-google" type="button" disabled={busy}
-            onClick={() => { if (!busy) onGoogleSignIn(); }}>
-            <img src={googleIcon} alt="" width="20" height="20" />
-            {googleLoading ? 'Conectando con Google...' : 'Continuar con Google'}
-          </button>
-        </form>
+            {signIn && (
+              <button className="login-button login-outlined" type="button"
+                disabled={busy || cooldown > 0}
+                onClick={() => {
+                  if (!busy && cooldown <= 0) onPasswordReset(email);
+                }}>
+                {resetLabel}
+              </button>
+            )}
+            <div className="login-or" aria-hidden="true"><span />o<span /></div>
+            <button className="login-button login-outlined login-google" type="button" disabled={busy}
+              onClick={() => { if (!busy) onGoogleSignIn(); }}>
+              <img src={googleIcon} alt="" width="20" height="20" />
+              Continuar con Google
+            </button>
+          </form>
+        </>}
       </section>
     </main>
   );
+}
+
+function LoginBrand() {
+  return <header className="login-header"><div className="login-brand">
+    <img className="login-seal" src={seal} alt="" width="54" height="54" />
+    <h1>Reals</h1>
+    <div className="brand-divider" aria-hidden="true"><span /></div>
+  </div></header>;
+}
+
+function AuthenticationProgress() {
+  return <div className="auth-progress" role="status" aria-atomic="true">
+    <span className="auth-spinner" aria-hidden="true" />
+    <p>Preparando tu sesión de forma segura…</p>
+  </div>;
+}
+
+export function AuthenticationLoading() {
+  return <main className="login-page"><section className="login-panel" aria-label="Reals">
+    <LoginBrand />
+    <AuthenticationProgress />
+  </section></main>;
 }

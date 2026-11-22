@@ -25,17 +25,16 @@ function credentials() {
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: ' test@example.com ' } });
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password' } });
 }
-it.each(['password', 'google'])('keeps the login DOM through %s authentication and a slow backend bootstrap', async provider => {
+it.each(['password', 'google'])('keeps branded progress through %s authentication and a slow backend bootstrap', async provider => {
   let finish!: (response: Response) => void;
   fetcher.mockImplementation(path => path === '/api/me' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(json({ code: 'PROFILE_NOT_FOUND' }, 404)));
   mount(true); login(); credentials();
-  const panel = document.querySelector('.login-panel'), email = screen.getByLabelText('Email');
+  const panel = document.querySelector('.login-panel');
   fireEvent.click(screen.getByRole('button', { name: provider === 'google' ? 'Continuar con Google' : 'Ingresar' }));
   await waitFor(() => expect(finish).toBeDefined());
-  expect(document.querySelector('.login-panel')).toBe(panel); expect(screen.getByLabelText('Email')).toBe(email);
-  expect(email).toBeDisabled(); expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  expect(document.querySelector('.login-panel')).toBe(panel); expect(screen.queryByLabelText('Email')).toBeNull();
+  expect(screen.queryByRole('form')).toBeNull(); expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
   expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
-  expect(screen.getByRole('button', { name: provider === 'google' ? 'Conectando con Google...' : 'Ingresando...' })).toBeDisabled();
   expect(screen.queryByText('Preparando Reals…')).toBeNull(); expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
   await act(async () => finish(json({ id: 'u', status: 'ACTIVE' })));
   await screen.findByText('Sin perfil: falta completar el registro.');
@@ -45,7 +44,7 @@ it('restores an existing session without rendering an intermediate login form', 
   let finish!: (response: Response) => void;
   fetcher.mockImplementation(path => path === '/api/me' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(json({ code: 'PROFILE_NOT_FOUND' }, 404)));
   mount(true);
-  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión…');
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
   expect(screen.queryByRole('form')).toBeNull();
   expect(screen.getByRole('heading', { name: 'Reals' })).toBeVisible();
   act(() => observer(user)); await waitFor(() => expect(finish).toBeDefined());
@@ -60,7 +59,7 @@ it('shows interactive login immediately when Firebase confirms no existing sessi
   login();
   expect(screen.getByLabelText('Email')).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Ingresar' })).toBeEnabled();
-  expect(screen.queryByText('Preparando tu sesión…')).toBeNull();
+  expect(screen.queryByText('Preparando tu sesión de forma segura…')).toBeNull();
   expect(fetcher).not.toHaveBeenCalled();
 });
 
@@ -68,11 +67,11 @@ it('keeps the restored-session shell until bootstrap resolves and shows an actio
   let fail!: (reason: Error) => void;
   fetcher.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
   mount(true);
-  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión…');
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
   expect(screen.queryByRole('form')).toBeNull();
   act(() => observer(user)); await waitFor(() => expect(fail).toBeDefined());
   expect(screen.queryByRole('form')).toBeNull();
-  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión…');
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
   expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
   await act(async () => fail(new TypeError('offline')));
   expect(screen.getByRole('alert')).toBeVisible(); expect(screen.getByRole('button', { name: 'Reintentar' })).toBeEnabled();
@@ -102,8 +101,10 @@ it('validates empty credentials without invoking Firebase', () => {
 it('signs in, suppresses duplicate submits and auth-observer bootstrap overlap', async () => {
   ready(); mount(); login(); credentials();
   vi.mocked(auth.signIn).mockImplementation(async () => { observer(user); return user; });
+  const form = screen.getByRole('form');
   fireEvent.click(screen.getByRole('button', { name: 'Ingresar' }));
-  fireEvent.submit(screen.getByRole('form'));
+  fireEvent.submit(form);
+  expect(screen.queryByRole('form')).toBeNull();
   await screen.findByText('Sin perfil: falta completar el registro.');
   expect(auth.signIn).toHaveBeenCalledExactlyOnceWith('test@example.com', 'password', false); expect(fetcher).toHaveBeenCalledTimes(2);
 });
@@ -114,13 +115,13 @@ it('maps sign-in failure with safe Spanish message', async () => {
   expect(screen.getByRole('button', { name: 'Ingresar' })).toBeEnabled();
 });
 it('registration sends verification email when local helper disabled', async () => {
-  ready(); mount(); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  ready(); mount(); login(); credentials(); fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
   await screen.findByText('Te enviamos un email para verificar tu cuenta.'); expect(auth.verify).toHaveBeenCalledWith(user);
 });
 it('retries a failed bootstrap without repeating the initial verification send', async () => {
   vi.mocked(auth.verify).mockRejectedValue({ code: 'auth/network-request-failed' });
   fetcher.mockRejectedValueOnce(new TypeError('backend offline'));
-  ready(); mount(true); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  ready(); mount(true); login(); credentials(); fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
   await screen.findByRole('alert');
   expect(auth.signOut).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); await screen.findByText('Sin perfil: falta completar el registro.');
@@ -133,7 +134,7 @@ it('discards a late signup verification result when the identity changes', async
   let finish!: () => void;
   vi.mocked(auth.verify).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   ready(); mount(true); login(); credentials();
-  fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' }));
   fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
   await waitFor(() => expect(finish).toBeDefined());
   await act(async () => observer({ ...user, uid: 'replacement' }));
@@ -146,7 +147,7 @@ it('discards a late signup verification result when the identity changes', async
 it('local registration skips standard email and completes helper refresh', async () => {
   ready(); fetcher.mockResolvedValueOnce(json(null, 204));
   vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user, 'emailVerified', { value: true, configurable: true }); });
-  mount(false, true); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  mount(false, true); login(); credentials(); fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
   await screen.findByText('Sin perfil: falta completar el registro.'); expect(auth.verify).not.toHaveBeenCalled(); expect(user.getIdToken).toHaveBeenLastCalledWith(true);
 });
 it('opens Google directly on click and completes bootstrap', async () => {
@@ -193,7 +194,7 @@ it.each([null, '120', 'malformed'])('restores Firebase under StrictMode and keep
 });
 it('retains a newly registered Firebase identity when backend provisioning is rate limited', async () => {
   fetcher.mockResolvedValueOnce(json({ code: 'USER_NOT_FOUND' }, 404)).mockResolvedValueOnce(limited('3600'));
-  mount(); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  mount(); login(); credentials(); fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
   const alert = await screen.findByRole('alert'); expect(alert).toHaveTextContent('aproximadamente 1 hora');
   expect(auth.signUp).toHaveBeenCalledOnce(); expect(auth.verify).toHaveBeenCalledWith(user); expect(auth.signOut).not.toHaveBeenCalled();
   expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull(); expect(fetcher).toHaveBeenCalledTimes(2);
@@ -313,7 +314,7 @@ it('external signout during sign-in invalidates late completion', async () => {
 });
 it('registration failure belongs to signup and releases controls', async () => {
   vi.mocked(auth.signUp).mockRejectedValueOnce({ code: 'auth/email-already-in-use' });
-  mount(); login(); credentials(); fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  mount(); login(); credentials(); fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Ya existe una cuenta'); expect(screen.getByRole('button', { name: 'Crear cuenta' })).toBeEnabled();
 });
 it('signout failure removes ready state and allows another signout attempt', async () => {
@@ -329,7 +330,8 @@ it('StrictMode missing-user restoration provisions once even with repeated obser
 });
 it('blocks repeated Google attempts while popup is pending', async () => {
   vi.mocked(auth.google).mockImplementation(() => new Promise(() => {})); mount(); login();
-  fireEvent.click(screen.getByRole('button', { name: 'Continuar con Google' })); fireEvent.click(screen.getByRole('button', { name: 'Conectando con Google...' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Continuar con Google' }));
+  expect(screen.queryByRole('button', { name: 'Continuar con Google' })).toBeNull();
   expect(auth.google).toHaveBeenCalledOnce();
 });
 it('unmount aborts in-flight HTTP and late completion cannot start another request', async () => {
@@ -348,7 +350,7 @@ it.each([false, true])('passes checkbox preference through App/controller to bot
   vi.mocked(auth.signIn).mockRejectedValueOnce({ code: 'auth/invalid-credential' });
   fireEvent.click(screen.getByRole('button', { name: 'Ingresar' })); await screen.findByRole('alert');
   expect(auth.signIn).toHaveBeenCalledExactlyOnceWith('test@example.com', 'password', keepSignedIn);
-  fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' }));
   fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
   await screen.findByText('Sin perfil: falta completar el registro.');
   expect(auth.signUp).toHaveBeenCalledExactlyOnceWith('test@example.com', 'password', keepSignedIn);
@@ -360,4 +362,18 @@ it('persistence failure uses safe authentication error and allows retry without 
   expect(error).toHaveTextContent('No pudimos configurar la duración de la sesión');
   expect(error).not.toHaveTextContent('private diagnostic'); expect(fetcher).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: 'Ingresar' })).toBeEnabled();
+});
+
+it('restores signup mode and drafts when a pending Google popup is cancelled', async () => {
+  let cancel!: (reason: unknown) => void;
+  vi.mocked(auth.google).mockImplementationOnce(() => new Promise((_resolve, reject) => { cancel = reject; }));
+  mount(); login(); credentials();
+  fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Continuar con Google' }));
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  await act(async () => cancel({ code: 'auth/popup-closed-by-user' }));
+  expect(screen.getByRole('radio', { name: 'Crear cuenta' })).toBeChecked();
+  expect(screen.getByLabelText('Password')).toHaveValue('password');
+  expect(screen.getByRole('alert')).toBeVisible();
+  expect(fetcher).not.toHaveBeenCalled();
 });

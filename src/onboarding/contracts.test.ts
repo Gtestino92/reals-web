@@ -44,3 +44,18 @@ describe('crop', () => {
     expect((await exportCrop(bitmap,1,.5,.5)).type).toBe('image/jpeg'); expect(draw).toHaveBeenCalledOnce(); expect(canvas?.width).toBe(0); context.mockRestore(); blob.mockRestore();
   });
 });
+
+it.each([
+  ['', 'Seleccioná tu fecha de nacimiento.'],
+  ['2000-11-31', 'Ingresá una fecha de nacimiento válida.'],
+  ['1900-02-29', 'Ingresá una fecha de nacimiento válida.'],
+  ['2000-02-', 'Ingresá una fecha de nacimiento válida.'],
+  ['2000-02-29', undefined],
+  ['2008-11-22', undefined],
+  ['2008-11-23', 'Debés tener entre 18 y 99 años.'],
+  ['1926-11-23', undefined],
+  ['1926-11-22', 'Debés tener entre 18 y 99 años.'],
+])('validates calendar date and exact age boundaries for %s', (birthDate, expected) => {
+  const errors = validate({ ...profile, birthDate }, countryList, 'create', new Date(2026, 10, 22));
+  expect(errors).toEqual(expected ? [expected] : []);
+});

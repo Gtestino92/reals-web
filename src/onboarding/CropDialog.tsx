@@ -119,6 +119,7 @@ export function CropDialog({ file, onCancel, onConfirm }: { file: File; onCancel
       <label>Posición horizontal<input type="range" min="0" max="1" step=".01" value={x} onChange={event => updateCrop({ ...crop.current,x:Number(event.target.value) })}/></label>
       <label>Posición vertical<input type="range" min="0" max="1" step=".01" value={y} onChange={event => updateCrop({ ...crop.current,y:Number(event.target.value) })}/></label>
     </fieldset>
+    <p>La foto se guardará con este encuadre. Si después querés modificarlo, tendrás que volver a subir la imagen.</p>
     <div className="crop-actions">
       <button type="button" className="login-button login-outlined" disabled={busy} onClick={cancel}>Cancelar</button>
       <button type="button" className="login-button login-outlined" disabled={busy || !ready || !!failed} onClick={() => { releaseGesture(); updateCrop(initialCrop); }}>Restablecer</button>

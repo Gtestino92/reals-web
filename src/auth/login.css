@@ -52,7 +52,7 @@
 .session-loading { margin: 24px 0; text-align: center; color: var(--color-on-surface-variant); }
 .session-actions { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--color-outline-variant); }
 .session-actions .login-button { width: 100%; }
-.login-form { display: flex; flex-direction: column; gap: 14px; }
+.login-form { display: flex; flex-direction: column; gap: 10px; }
 .login-field { position: relative; }
 .login-field input {
   width: 100%;
@@ -144,7 +144,6 @@
 }
 .login-primary { background: var(--color-primary); color: var(--color-on-primary); }
 .login-outlined { background: transparent; color: var(--color-primary); border-color: var(--color-outline); }
-.login-switch { background: transparent; color: var(--color-primary); }
 .login-button:hover:enabled { filter: brightness(0.94); }
 .login-button:focus-visible, .login-remember input:focus-visible {
   outline: 2px solid var(--color-primary);
@@ -164,11 +163,74 @@
 .login-or span { flex: 1; border-top: 1px solid var(--color-outline-variant); }
 .login-google { display: flex; align-items: center; justify-content: center; gap: 10px; }
 .login-google img { flex: none; }
-.login-description { min-height: 3em; }
+.login-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 14px 0;
+  padding: 3px;
+  min-inline-size: 0;
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-button);
+  background: var(--color-surface);
+}
+.login-modes label { position: relative; display: grid; text-align: center; }
+.login-modes span {
+  display: grid;
+  place-items: center;
+  min-height: var(--control-min-height);
+  padding: 4px 8px;
+  border-radius: var(--radius-row);
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+.login-visually-hidden, .login-modes input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.login-modes input:disabled + span { cursor: default; opacity: .68; }
+.login-modes input:checked + span { background: var(--color-secondary-container); color: var(--color-on-secondary-container); font-weight: 600; }
+.login-modes input:focus-visible + span { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.auth-progress {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding-block: 2rem;
+  text-align: center;
+  color: var(--color-on-surface-variant);
+}
+.auth-progress p { margin: 0; }
+.auth-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-outline-variant);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: auth-spin 800ms linear infinite;
+}
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .login-modes span { transition: none; }
+  .auth-spinner { animation: none; }
+}
+.login-panel:has(.login-modes) .login-seal { margin-bottom: 4px; }
+.login-panel:has(.login-modes) .brand-divider { margin-top: 8px; }
+.login-panel .login-remember + #persistence-description { margin-top: -6px; }
+@media (max-width: 600px) {
+  .login-panel .login-form { gap: 8px; }
+  .login-modes { margin-block: 12px; }
+  .login-page:has(.login-modes) { padding-block: calc(12px + env(safe-area-inset-top, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)); }
+}
 
 /* Keep the brand mounted when authentication disables a focused mobile input.
    Natural document scrolling accommodates the virtual keyboard without a
    focus-only layout that snaps back during backend bootstrap. */
 @media (max-height: 600px) {
-  .login-panel { margin-top: 0; }
+  .login-panel:not(:has(.auth-progress)) { margin-top: 0; }
 }

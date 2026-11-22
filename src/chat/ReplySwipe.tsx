@@ -2,15 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent, ReactNode } from 'react';
 
 const threshold = 60;
+const nestedControl = (target: EventTarget) => target instanceof Element &&
+  !!target.closest('button,a,audio,input,textarea,select,label,summary,[contenteditable],[role=button],[role=link]');
 export function resistedReplyOffset(distance: number) {
   const raw = Math.max(0, Math.min(distance, threshold * 2.5));
   return raw <= threshold ? raw : threshold + (raw - threshold) * .2;
 }
 
 // One owner per target: no document listeners, timers or deferred reply callbacks.
-export function ReplySwipe({ enabled, label, onReply, children, className = '' }: {
-  enabled: boolean; label: string; onReply: () => void; children: ReactNode; className?: string;
+export function ReplySwipe({ enabled, label, onReply, children, className = '', mouseDoubleClick = false }: {
+  enabled: boolean; label: string; onReply: () => void; children: ReactNode; className?: string; mouseDoubleClick?: boolean;
 }) {
+  const mouseTap = useRef(false);
+  const firstMouseClick = useRef(false);
   const root = useRef<HTMLDivElement>(null);
   const gesture = useRef<{ id: number; x: number; y: number; raw: number; horizontal: boolean } | null>(null);
   const [offset, setOffset] = useState(0), [dragging, setDragging] = useState(false);
@@ -22,7 +26,7 @@ export function ReplySwipe({ enabled, label, onReply, children, className = '' }
   };
   useEffect(() => {
     const owner = root.current;
-    if (!enabled) reset();
+    if (!enabled) { reset(); mouseTap.current = false; firstMouseClick.current = false; }
     return () => {
       const active = gesture.current;
       gesture.current = null;
@@ -30,11 +34,12 @@ export function ReplySwipe({ enabled, label, onReply, children, className = '' }
     };
   }, [enabled]);
   const down = (event: PointerEvent<HTMLDivElement>) => {
+    mouseTap.current = false;
     if (!enabled || !event.isPrimary || event.button !== 0) return;
     if (gesture.current) { reset(); return; }
-    if (event.target instanceof Element && event.target.closest('button,a,audio,input,textarea,select')) return;
+    if (nestedControl(event.target)) return;
     // Shift-drag keeps native text selection. Ordinary right drags, including
-    // those starting on text, reply; taps/double-clicks and left drags stay native.
+    // those starting on text, reply. Left drags stay native.
     if (event.pointerType === 'mouse' && event.shiftKey) return;
     gesture.current = { id: event.pointerId, x: event.clientX, y: event.clientY, raw: 0, horizontal: false };
     // Capture before the first move: a fast pointer can already be outside a
@@ -57,7 +62,7 @@ export function ReplySwipe({ enabled, label, onReply, children, className = '' }
     event.preventDefault();
     setOffset(resistedReplyOffset(active.raw));
   };
-  return <div ref={root} className={`reply-swipe ${enabled ? 'reply-swipe-enabled' : ''} ${className}`} title={enabled ? 'Deslizá a la derecha para responder. Con mouse, Shift + arrastrar selecciona texto.' : undefined} style={{ transform: `translateX(${offset}px)`, transition: dragging ? 'none' : undefined, userSelect: dragging ? 'none' : undefined }}
+  return <div ref={root} className={`reply-swipe ${enabled ? 'reply-swipe-enabled' : ''} ${mouseDoubleClick ? 'reply-swipe-mouse-quote' : ''} ${className}`} title={enabled ? mouseDoubleClick ? 'Deslizá a la derecha o hacé doble clic para responder. Shift + arrastrar selecciona texto.' : 'Deslizá a la derecha para responder. Con mouse, Shift + arrastrar selecciona texto.' : undefined} style={{ transform: `translateX(${offset}px)`, transition: dragging ? 'none' : undefined, userSelect: dragging ? 'none' : undefined }}
     onPointerDown={down} onPointerMove={move} onPointerUp={event => {
       const active = gesture.current;
       if (!active || active.id !== event.pointerId) return;
@@ -66,14 +71,24 @@ export function ReplySwipe({ enabled, label, onReply, children, className = '' }
       const dx = event.clientX - active.x, dy = event.clientY - active.y;
       const horizontal = active.horizontal || (dx >= 8 && dx > Math.abs(dy) * 1.5);
       const select = enabled && horizontal && dx >= threshold;
+      mouseTap.current = mouseDoubleClick && event.pointerType === 'mouse' && !event.shiftKey && !horizontal && Math.abs(dx) < 8 && Math.abs(dy) < 8;
       reset();
       if (select) onReply();
-    }} onPointerCancel={reset} onLostPointerCapture={event => {
+    }} onClick={mouseDoubleClick ? event => {
+      const eligible = enabled && mouseTap.current && !event.shiftKey && !nestedControl(event.target);
+      mouseTap.current = false;
+      if (event.detail === 1) firstMouseClick.current = eligible;
+      else if (event.detail === 2) {
+        const select = firstMouseClick.current && eligible;
+        firstMouseClick.current = false;
+        if (select) { window.getSelection()?.removeAllRanges(); onReply(); }
+      }
+    } : undefined} onPointerCancel={reset} onLostPointerCapture={event => {
       // Touch starts with implicit capture on the text node. Transferring it to
       // this owner emits a bubbling loss for that child, not a cancelled gesture.
       if (event.target === event.currentTarget && gesture.current?.id === event.pointerId) reset();
     }} onDragStart={event => { if (gesture.current) event.preventDefault(); }} onPointerLeave={() => { if (!gesture.current?.horizontal) reset(); }}>
     {children}
-    {enabled && <button type="button" className="reply-keyboard-action" aria-label={label} onClick={onReply}>Responder</button>}
+    {enabled && <button type="button" className="reply-keyboard-action" aria-label={label} onClick={onReply}>{mouseDoubleClick ? <span aria-hidden="true">↩</span> : 'Responder'}</button>}
   </div>;
 }
