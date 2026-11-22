@@ -356,10 +356,12 @@ it('clears an unfinished code on page exit and checks state again after bfcache 
 });
 
 it('keeps the session-owned entry available during draft setup while protecting unsaved forms', async () => {
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   const h = setup('google.com', false, true);
   const entry = await screen.findByRole('button', { name: 'Admin' });
-  await screen.findByRole('heading', { name: 'Completá tu perfil' });
-  fireEvent.click(screen.getByText('Datos del perfil', { selector: 'summary' }));
+  const edit = await screen.findByRole('button', { name: 'Editar datos y preferencias' });
+  expect(entry).toBeEnabled();
+  fireEvent.click(edit);
   fireEvent.change(screen.getByLabelText('Ciudad'), { target: { value: 'Borrador sin guardar' } });
   fireEvent.click(entry); await act(async () => {});
   expect(screen.queryByRole('dialog')).toBeNull(); expect(location.pathname).toBe('/');
