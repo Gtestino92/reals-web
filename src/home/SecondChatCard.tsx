@@ -3,7 +3,7 @@ import type { Activity } from './contracts';
 import { useHomeTime } from './useHomeTime';
 import { secondHomeCopy, secondHomePresentation, waitingSecondChatEvent } from './secondHomePresentation';
 import { GoogleCalendarAction } from '../shared/GoogleCalendarAction';
-export function SecondChatCard({ item, disabled, onOpen, onDismiss }: { item: Activity; disabled: boolean; onOpen: (item: Activity) => void; onDismiss: (id: string) => Promise<void> }) {
+export function SecondChatCard({ item, accountId, disabled, onOpen, onDismiss }: { item: Activity; accountId: string | null; disabled: boolean; onOpen: (item: Activity) => void; onDismiss: (id: string) => Promise<void> }) {
   const now = useHomeTime();
   const [busy,setBusy] = useState(false), [error,setError] = useState('');
   const lock = useRef(false), lifetime = useRef<AbortController | null>(null);
@@ -24,7 +24,7 @@ export function SecondChatCard({ item, disabled, onOpen, onDismiss }: { item: Ac
     <div className="second-chat-card-actions">
     {p.label && <button className="login-button login-primary" disabled={disabled || busy || !p.canOpen} onClick={() => { if (!disabled && !lock.current && secondHomePresentation(item,Date.now())?.canOpen) onOpen(item); }}>{p.label}</button>}
     {p.canProfile && <button className="login-button login-outlined" disabled={disabled || busy} onClick={() => { if (!disabled && !lock.current && secondHomePresentation(item,Date.now())?.canProfile) onOpen({...item,type:'SCHEDULING_PROFILE'}); }}>Ver perfil</button>}
-    {calendarEvent && <GoogleCalendarAction event={calendarEvent}/>}
+    {calendarEvent && accountId && item.connectionId && <GoogleCalendarAction event={calendarEvent} accountId={accountId} connectionId={item.connectionId}/>}
     {p.canDismiss && <button className="login-button login-outlined" disabled={disabled || busy} onClick={() => void dismiss()}>Ocultar</button>}</div>{error && <p role="alert">{error}</p>}
   </article>;
 }

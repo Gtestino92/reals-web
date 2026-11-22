@@ -193,6 +193,46 @@ it('retains the confirmed schedule when Home omits durationMinutes', async () =>
   });
 });
 
+it('hides Calendar metadata on a failed connection check and restores it from a full reconciliation', async () => {
+  const {model,state,request}=await ready();
+  state.n={...state.n,status:'CONFIRMED',confirmedDateTime:slot};
+  state.c.state='SECOND_CHAT_SCHEDULED';
+  state.home.nextSteps=[scheduledStep()];
+  await model.poll();
+  request.mockClear();
+  request.mockRejectedValueOnce(new ApiError('network'));
+  await model.tick();
+  expect(request.mock.calls.map(([path])=>path)).toEqual(['/connections/c']);
+  expect(model.getSnapshot()).toMatchObject({verified:false,terminal:false,calendarActivity:null,negotiation:{status:'CONFIRMED'}});
+  expect(model.getSnapshot().error).toContain('Revisá tu conexión');
+
+  request.mockClear();
+  await model.tick();
+  expect(request).toHaveBeenCalledWith('/me/home',expect.any(AbortSignal));
+  expect(model.getSnapshot()).toMatchObject({verified:true,error:'',calendarActivity:{connectionId:'c'}});
+});
+
+it('aborts the Calendar connection check on disposal and ignores its result after identity replacement', async () => {
+  const {model,state,request,controller}=await ready();
+  state.n={...state.n,status:'CONFIRMED',confirmedDateTime:slot};
+  state.c.state='SECOND_CHAT_SCHEDULED';
+  state.home.nextSteps=[scheduledStep()];
+  await model.poll();
+  request.mockClear();
+  const late=deferred<unknown>();
+  request.mockReturnValueOnce(late.promise);
+  const poll=model.tick();
+  const signal=request.mock.calls[0]?.[1];
+  controller.snapshot={...controller.snapshot,phase:'login',account:null,profile:null};
+  model.dispose();
+  expect(signal?.aborted).toBe(true);
+  late.resolve({...state.c,state:'CLOSED'});
+  await poll;
+  await model.tick();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(model.getSnapshot().connection?.state).toBe('SECOND_CHAT_SCHEDULED');
+});
+
 it('rejects late Home metadata after a newer foreground read or session replacement', async () => {
   const {model,state,request,controller}=await ready(), read=request.getMockImplementation()!;
   state.n={...state.n,status:'CONFIRMED',confirmedDateTime:slot};

@@ -16,7 +16,7 @@ export class SchedulingSession {
   private listeners = new Set<()=>void>();
   private lifetime = new AbortController();
   private gate = false;
-  private background: AbortController | null = null;
+  private background: { controller: AbortController; calendar: boolean } | null = null;
   private generation = 0;
   readonly context: string;
   constructor(private controller: SessionController, readonly connectionId: string, readonly matchId: string, private finish: ()=>void, private lock: (pending: boolean)=>void = ()=>{}) {this.context=sessionContext(controller);}
@@ -25,7 +25,7 @@ export class SchedulingSession {
   private current=()=>!this.lifetime.signal.aborted && this.controller.getSnapshot().phase==='ready' && sessionContext(this.controller)===this.context;
   private install(patch: Partial<State>) {if(this.current()){this.state={...this.state,...patch};if(patch.pending!==undefined)this.lock(patch.pending);this.listeners.forEach(fn=>fn());}}
   start() {if(this.lifetime.signal.aborted){this.lifetime=new AbortController();this.gate=false;this.generation++;}}
-  dispose() {this.generation++;this.background?.abort();this.background=null;this.lifetime.abort();this.lock(false);}
+  dispose() {this.generation++;this.background?.controller.abort();this.background=null;this.lifetime.abort();this.lock(false);}
   now=()=>Date.now()+this.state.offset;
   setDraft=(draft: string[])=>{if(!this.gate||this.state.activity==='polling')this.install({draft});};
   private request=(suffix: string,method='GET',body?: unknown)=>this.controller.request(`/connections/${encodeURIComponent(this.connectionId)}${suffix}`,this.lifetime.signal,method,body);
@@ -87,33 +87,66 @@ export class SchedulingSession {
     this.install({...next,calendarActivity,calendarReadFailed,verified:true,uncertain:false,...(changed?{draft:[]}:{}),...(next.negotiation?.status==='CONFIRMED'?{message:''}:{}),terminal:next.connection.state==='CLOSED'&&next.negotiation?.status!=='FAILED'});
     return true;
   }
+  canPollCalendar(now = this.now()) {
+    const { connection, negotiation, terminal, uncertain } = this.state;
+    return !terminal && !uncertain && connection?.state === 'SECOND_CHAT_SCHEDULED' &&
+      negotiation?.status === 'CONFIRMED' && !!negotiation.confirmedDateTime && Date.parse(negotiation.confirmedDateTime) > now;
+  }
+  private async reconcileConfirmedConnection(signal: AbortSignal) {
+    const before = this.state.connection;
+    const me = this.controller.getSnapshot().account?.id;
+    if (!before || !me) throw new ApiError('invalid');
+    const ticket = this.generation;
+    const raw = await this.controller.request(`/connections/${encodeURIComponent(this.connectionId)}`, signal);
+    if (signal.aborted || !this.current() || ticket !== this.generation || !this.canPollCalendar()) return false;
+    const connection = parseConnection(raw, this.connectionId, this.matchId, me);
+    if (connection.userAId !== before.userAId || connection.userBId !== before.userBId) throw new ApiError('invalid');
+    if (connection.state === 'CLOSED' || connection.state === 'SECOND_CHAT_AVAILABLE' || connection.state === 'SECOND_CHAT') {
+      this.install({ connection, terminal:connection.state === 'CLOSED', calendarActivity:null, calendarReadFailed:false });
+      return true;
+    }
+    if (connection.state !== 'SECOND_CHAT_SCHEDULED') throw new ApiError('invalid');
+    // A changed scheduled record needs the same cross-checks as the initial confirmation.
+    return connection.updatedAt === before.updatedAt && connection.schedulingExpiresAt === before.schedulingExpiresAt
+      ? true : this.reconcile('upcoming', signal);
+  }
   // Only healthy background reads are preemptible. Recovery of an uncertain
   // write retains the blocking reconciliation gate and cannot be bypassed.
   poll=()=>this.refresh(true);
+  tick=()=>{
+    if (this.state.terminal) return;
+    if (!this.state.negotiation || this.state.negotiation.status === 'PENDING') return this.poll();
+    if (this.canPollCalendar()) return this.read('calendar');
+  };
   pause=()=>{if(this.background){this.cancelBackground();this.install({activity:'idle'});}};
-  refresh=async(background = false)=>{
+  stopCalendarPoll=()=>{if(this.background?.calendar)this.pause();};
+  refresh=(background = false)=>this.read(background?'background':'refresh');
+  private async read(mode: 'refresh' | 'background' | 'calendar') {
     if(this.gate||!this.current()||document.visibilityState==='hidden')return;
-    const silent=background&&this.state.verified&&!this.state.uncertain;
+    const calendarPoll=mode==='calendar';
+    const silent=calendarPoll||(mode==='background'&&this.state.verified&&!this.state.uncertain);
     const owned=silent?new AbortController():null;
-    this.background=owned;
+    this.background=owned?{controller:owned,calendar:calendarPoll}:null;
     const signal=owned?AbortSignal.any([this.lifetime.signal,owned.signal]):this.lifetime.signal;
     const ticket=this.generation;
     const wasVerified=this.state.verified;
     this.gate=true;
     this.install(silent?{activity:'polling'}:{activity:this.state.uncertain?'reconciling':this.state.connection?'refreshing':'loading',busy:true,verified:false});
     try {
-      const installed=await this.reconcile(this.state.uncertain?'required':'upcoming',signal);
-      if(this.current()&&ticket===this.generation&&!silent)this.install(installed?{error:''}:{verified:wasVerified});
+      const installed=await (calendarPoll&&wasVerified
+        ? this.reconcileConfirmedConnection(signal)
+        : this.reconcile(this.state.uncertain?'required':'upcoming',signal));
+      if(this.current()&&ticket===this.generation&&(!silent||!wasVerified))this.install(installed?{error:''}:{verified:wasVerified});
     } catch(error) {
-      if(ticket===this.generation&&!signal.aborted)this.failure(error);
+      if(ticket===this.generation&&!signal.aborted&&(!calendarPoll||this.canPollCalendar()))this.failure(error);
     } finally {
       if(ticket===this.generation){owned?.abort();this.background=null;this.gate=false;this.install({activity:'idle',busy:false});}
     }
-  };
+  }
   private cancelBackground() {
     if(!this.background)return;
     this.generation++;
-    this.background.abort();
+    this.background.controller.abort();
     this.background=null;
     this.gate=false;
   }
