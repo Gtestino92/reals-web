@@ -177,6 +177,7 @@ it('does not interrupt a foreground mutation on repeated visibility events', asy
   fireEvent.submit(screen.getByRole('form', { name: 'Datos del perfil' }));
   expect(fetcher).toHaveBeenCalledTimes(count); expect(signal!.aborted).toBe(false);
   expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeDisabled();
+  profile = { ...profile!, bio: 'Cambio explícito' };
   await act(async () => finish(json(profile)));
   await screen.findByText('Cambios guardados.'); expect(bio).toHaveValue('Cambio explícito');
   expect(writes('PATCH')).toHaveLength(1);
@@ -208,8 +209,8 @@ it.each(['success', 'failure'] as const)('supersedes a pending background read f
   expect(reads[0]!.signal.aborted).toBe(true);
   await waitFor(() => expect(reads).toHaveLength(2));
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.getByText('Actualizando estado…')).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeDisabled();
+  expect(screen.getByText('Cargando perfil…')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
   act(() => window.document.dispatchEvent(new Event('visibilitychange')));
   expect(reads).toHaveLength(2); expect(reads[1]!.signal.aborted).toBe(false);
   await act(async () => reads[1]!.finish(outcome === 'success' ? json(profile) : json({ code: 'TEMPORARILY_UNAVAILABLE' }, 503)));
@@ -458,10 +459,8 @@ it('loads saved preferences and saves only the filter contract, surviving a remo
   expect(within(form).getByLabelText(/Distancia máxima/)).toHaveValue('62');
   expect(screen.queryByLabelText('Agregar foto 1')).toBeNull();
   fireEvent.change(within(form).getByLabelText('Intención'),{ target:{ value:'FRIENDSHIP' } }); fireEvent.submit(form);
-  await screen.findByText('Cambios guardados.');
+  await screen.findByText('Preferencias guardadas');
   expect(JSON.parse(String(writes('PUT')[0]?.[1]?.body))).toEqual({ intention:'FRIENDSHIP', lookingForGenders:profile?.lookingForGenders, preferredMinAge:27, preferredMaxAge:43, maxDistanceKm:62 });
-  const back = screen.getByRole('button',{ name:'Volver a Inicio' });
-  await waitFor(() => expect(back).toBeEnabled()); fireEvent.click(back);
   await screen.findByRole('heading', { name: 'Inicio' });
   const entry = await screen.findByRole('button',{ name:'Preferencias' }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
   await screen.findByRole('form',{ name:'Preferencias de búsqueda' }); expect(screen.getByLabelText('Intención')).toHaveValue('FRIENDSHIP');
@@ -563,7 +562,7 @@ it('rejects pending editor reads after sign-out', async () => {
   act(() => observer(null)); await screen.findByRole('button',{ name:'Ingresar' });
   await act(async () => finish?.(json([]))); expect(screen.queryByRole('form',{ name:'Datos del perfil' })).toBeNull();
 });
-async function createForm() { await screen.findByRole('heading',{ name:'Crear perfil' }); const form = screen.getByRole('form',{ name:'Crear perfil' }); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'Ana' } }); fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } }); fireEvent.change(within(form).getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } }); fireEvent.change(within(form).getByLabelText('Género'),{ target:{ value:'MALE' } }); fireEvent.change(within(form).getByLabelText('Intención'),{ target:{ value:'DATE' } }); fireEvent.click(within(form).getByRole('checkbox',{ name:'Mujeres' })); return form; }
+async function createForm() { await screen.findByRole('heading',{ name:'Crear perfil' }); const form = screen.getByRole('form',{ name:'Crear perfil' }); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'Ana' } }); fireEvent.change(within(form).getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } }); for (const [name, value] of [['Año', '1995'], ['Mes', '01'], ['Día', '01']] as const) fireEvent.change(within(form).getByRole('combobox', { name }), { target: { value } }); fireEvent.change(within(form).getByLabelText('Género'),{ target:{ value:'MALE' } }); fireEvent.change(within(form).getByLabelText('Intención'),{ target:{ value:'DATE' } }); fireEvent.click(within(form).getByRole('checkbox',{ name:'Mujeres' })); return form; }
 it('creates once under StrictMode and duplicate submit, restores DRAFT and activates through backend', async () => {
   mount(); const form = await createForm(); fireEvent.submit(form); fireEvent.submit(form);
   await screen.findByRole('heading',{ name:'Completá tu perfil' }); expect(writes('POST')).toHaveLength(1); expect(profile?.status).toBe('DRAFT');
@@ -725,7 +724,7 @@ it.each(['auth/network-request-failed', 'auth/too-many-requests'])('continues si
   vi.mocked(auth.signUp).mockResolvedValue(user);
   vi.mocked(auth.verify).mockRejectedValueOnce({ code, message: 'private Firebase diagnostic' });
   mount();
-  fireEvent.click(await screen.findByRole('button', { name: '¿No tenés cuenta? Crear cuenta' }));
+  fireEvent.click(await screen.findByRole('radio', { name: 'Crear cuenta' }));
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'test-password' } });
   fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
@@ -1265,7 +1264,7 @@ it.each(['signIn','signUp','google'] as const)('navigates from %s without exposi
   else {
     fireEvent.change(screen.getByLabelText('Email'),{ target:{ value:'disposable@example.com' } });
     fireEvent.change(screen.getByLabelText('Password'),{ target:{ value:'test-password' } });
-    if (operation === 'signUp') fireEvent.click(screen.getByRole('button',{ name:'¿No tenés cuenta? Crear cuenta' }));
+    if (operation === 'signUp') fireEvent.click(screen.getByRole('radio',{ name:'Crear cuenta' }));
     fireEvent.click(screen.getByRole('button',{ name:operation === 'signUp' ? 'Crear cuenta' : 'Ingresar' }));
   }
   await waitFor(() => expect(finish).toBeDefined()); expectPreparing();
@@ -1550,8 +1549,8 @@ it.each(['Tu perfil', 'Preferencias'])('retains the confirmed %s form across del
   fireEvent.click(screen.getByRole('button', { name: destination }));
   await waitFor(() => expect(finish).toBeDefined());
   expect(screen.getByRole('form', { name: title })).toBe(form);
-  expect(form.querySelector('input')).toBeDisabled();
-  expect(window.document.querySelector('.session-loading')).toBeNull();
+  expect(form.querySelector('input')).toBeEnabled();
+  expect(window.document.querySelector('.management-placeholder')).toBeNull();
   await act(async () => finish(json({ code: 'SERVICE_UNAVAILABLE' }, 503)));
   await screen.findByRole('alert');
   expect(form).toBeVisible(); expect(form.querySelector('input')).toBeDisabled();
@@ -1597,4 +1596,155 @@ it('keeps photo deletion feedback independent after a profile save and preserves
   expect(bio).toHaveValue('Unsaved bio'); expect(profile?.bio).toBe('Confirmed bio');
   expect(within(form).getByRole('button', { name:'Guardar cambios' })).toBeEnabled();
   expect(writes('PATCH')).toHaveLength(1); expect(writes('DELETE')).toHaveLength(1);
+});
+
+it('allows leaving a cold read, retires its late response and starts fresh on re-entry', async () => {
+  profile = { ...initialProfile, status: 'ACTIVE' }; mount();
+  const entry = await screen.findByRole('button', { name: 'Tu perfil' });
+  await waitFor(() => expect(entry).toBeEnabled());
+  const base = fetcher.getMockImplementation()!;
+  const reads: { signal: AbortSignal; resolve: (value: Response) => void }[] = [];
+  let holdNext = true;
+  fetcher.mockImplementation((path, options) => {
+    if (holdNext && path === '/api/me/profile') {
+      holdNext = false;
+      return new Promise(resolve => { reads.push({ signal: options!.signal!, resolve }); });
+    }
+    return base(path, options);
+  });
+  fireEvent.click(entry);
+  await screen.findByText('Cargando perfil…');
+  expect(screen.queryByRole('form', { name: 'Datos del perfil' })).toBeNull();
+  await waitFor(() => expect(reads).toHaveLength(1));
+  const back = screen.getByRole('button', { name: 'Volver a Inicio' });
+  expect(back).toBeEnabled();
+  fireEvent.click(back);
+  await screen.findByRole('heading', { name: 'Inicio' });
+  expect(reads[0]!.signal.aborted).toBe(true);
+  await act(async () => reads[0]!.resolve(json({ ...profile, city: 'Obsoleta' })));
+  await waitFor(() => expect(entry).toBeEnabled());
+  holdNext = true;
+  fireEvent.click(entry);
+  await waitFor(() => expect(reads).toHaveLength(2));
+  await act(async () => reads[1]!.resolve(json(profile)));
+  expect(await screen.findByRole('form', { name: 'Datos del perfil' })).toBeVisible();
+  expect(screen.getByLabelText('Ciudad')).toHaveValue('Córdoba');
+});
+
+it('waits only for visible cold photos, then retains the cached image across preferences and renewed signatures', async () => {
+  list = [
+    { ...initialPhoto, url: 'https://example.test/one?X-Amz-Signature=old' },
+    { ...initialPhoto, id: 'failed', position: 2, url: 'https://example.test/two' },
+    { ...initialPhoto, id: 'offscreen', position: 3, url: 'https://example.test/three' },
+  ];
+  vi.spyOn(HTMLImageElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLImageElement) {
+    return new DOMRect(0, this.alt.includes('Foto 3') ? window.innerHeight + 100 : 30, 100, 100);
+  });
+  vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockImplementation(function (this: HTMLImageElement) { return this.alt.includes('Foto 1'); });
+  vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(100);
+  await openManagement('Tu perfil');
+  const pending = await waitFor(() => {
+    const image = window.document.querySelector<HTMLImageElement>('img[alt="Foto 2 del perfil"]');
+    expect(image).not.toBeNull();
+    return image!;
+  });
+  expect(screen.getByText('Cargando perfil…')).toBeVisible();
+  expect(screen.queryByRole('form', { name: 'Datos del perfil' })).toBeNull();
+  expect(pending.loading).toBe('eager');
+  fireEvent.error(pending);
+  const details = await screen.findByRole('form', { name: 'Datos del perfil' });
+  const image = screen.getByRole('img', { name: 'Foto 1 del perfil' });
+  expect(image.parentElement).toHaveAttribute('data-image-state', 'loaded');
+  expect(screen.getByRole('img', { name: 'Foto 3 del perfil' })).toHaveAttribute('loading', 'lazy');
+  expect(screen.getByRole('button', { name: 'Reintentar foto 2' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar foto 2' }));
+  expect(screen.getByRole('img', { name: 'Foto 2 del perfil' })).toBeVisible();
+  fireEvent.change(within(details).getByLabelText('Bio (opcional)'), { target: { value: 'Un borrador' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
+  const preferences = await screen.findByRole('button', { name: 'Preferencias' });
+  await waitFor(() => expect(preferences).toBeEnabled()); fireEvent.click(preferences);
+  await screen.findByRole('form', { name: 'Preferencias de búsqueda' });
+  expect(screen.queryByRole('img', { name: 'Foto 1 del perfil' })).toBeNull();
+  list[0] = { ...list[0]!, url: 'https://example.test/one?X-Amz-Signature=new' };
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
+  const entry = await screen.findByRole('button', { name: 'Tu perfil' });
+  await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  expect(await screen.findByRole('form', { name: 'Datos del perfil' })).toBe(details);
+  expect(screen.getByRole('img', { name: 'Foto 1 del perfil' })).toBe(image);
+  expect(image).toHaveAttribute('src', 'https://example.test/one?X-Amz-Signature=old');
+  expect(within(details).getByLabelText('Bio (opcional)')).toHaveValue('Un borrador');
+});
+
+it.each(['success', 'rejected', 'uncertain'] as const)('returns Home only after an active filter save is confirmed (%s)', async outcome => {
+  await openManagement('Preferencias');
+  const form = await screen.findByRole('form', { name: 'Preferencias de búsqueda' });
+  const base = fetcher.getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  let fail!: (error: Error) => void;
+  let reconcile!: (response: Response) => void;
+  let dispatched = false;
+  fetcher.mockImplementation((path, options) => {
+    if (path === '/api/me/profile/match-filters') {
+      dispatched = true;
+      return new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+    }
+    if (dispatched && path === '/api/me/profile') return new Promise(resolve => { reconcile = resolve; });
+    return base(path, options);
+  });
+  fireEvent.change(within(form).getByLabelText('Intención'), { target: { value: 'FRIENDSHIP' } });
+  fireEvent.submit(form); fireEvent.submit(form);
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(writes('PUT')).toHaveLength(1);
+  if (outcome === 'success') profile = { ...profile!, intention: 'FRIENDSHIP' };
+  await act(async () => {
+    if (outcome === 'uncertain') fail(new TypeError('offline'));
+    else finish(outcome === 'success' ? json(profile) : json({ code: 'INVALID_MATCH_FILTERS' }, 400));
+  });
+  await waitFor(() => expect(reconcile).toBeDefined());
+  expect(screen.getByRole('heading', { name: 'Preferencias' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeDisabled();
+  await act(async () => reconcile(json(profile)));
+  if (outcome === 'success') {
+    await screen.findByRole('heading', { name: 'Inicio' });
+    expect(screen.getByText('Preferencias guardadas')).toBeVisible();
+  } else {
+    expect(await screen.findByRole('alert')).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Preferencias' })).toBeVisible();
+    expect(screen.queryByText('Preferencias guardadas')).toBeNull();
+    const back = screen.getByRole('button', { name: 'Volver a Inicio' });
+    if (outcome === 'uncertain') {
+      expect(back).toBeDisabled();
+      const profileReads = () => fetcher.mock.calls.filter(([path]) => path === '/api/me/profile').length;
+      const reads = profileReads();
+      await act(async () => window.document.dispatchEvent(new Event('visibilitychange')));
+      expect(profileReads()).toBe(reads);
+      expect(back).toBeDisabled();
+      fetcher.mockImplementation(base);
+      fireEvent.click(screen.getByRole('button', { name: 'Consultar estado' }));
+      await waitFor(() => expect(back).toBeEnabled());
+      expect(screen.getByRole('heading', { name: 'Preferencias' })).toBeVisible();
+    } else expect(back).toBeEnabled();
+  }
+});
+
+it('opens cold preferences independently of photo metadata and keeps the details skeleton while photos are queried', async () => {
+  profile = { ...initialProfile, status: 'ACTIVE' }; mount();
+  const preferences = await screen.findByRole('button', { name: 'Preferencias' });
+  await waitFor(() => expect(preferences).toBeEnabled());
+  const base = fetcher.getMockImplementation()!;
+  let photos!: (value: Response) => void;
+  fetcher.mockImplementation((path, options) => path === '/api/me/profile/photos' ? new Promise(resolve => { photos = resolve; }) : base(path, options));
+  fireEvent.click(preferences);
+  expect(await screen.findByRole('form', { name: 'Preferencias de búsqueda' })).toBeVisible();
+  expect(photos).toBeUndefined();
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
+  const details = await screen.findByRole('button', { name: 'Tu perfil' });
+  await waitFor(() => expect(details).toBeEnabled());
+  fireEvent.click(details);
+  await waitFor(() => expect(photos).toBeDefined());
+  expect(screen.getByText('Cargando perfil…')).toBeVisible();
+  expect(screen.queryByRole('form', { name: 'Datos del perfil' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
+  await act(async () => photos(json([])));
+  expect(await screen.findByRole('form', { name: 'Datos del perfil' })).toBeVisible();
 });

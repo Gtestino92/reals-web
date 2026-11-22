@@ -10,6 +10,11 @@ export function usePhotoRequest(url: string, retryEpoch = 0) {
   return {
     status: image.status,
     src: image.url,
+    ref: (element: HTMLImageElement | null) => {
+      if (image.status !== 'loading' || !element?.complete) return;
+      const status = element.naturalWidth > 0 ? 'loaded' : 'failed';
+      setImage(current => current === image ? { ...current, status } : current);
+    },
     onLoad: () => setImage(current => current === image ? { ...current, status: 'loaded' } : current),
     onError: () => setImage(current => current === image ? { ...current, status: 'failed' } : current),
   };

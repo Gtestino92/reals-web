@@ -11,8 +11,8 @@ function Bracket() {
   </svg>;
 }
 
-export function AgeRangeSlider({ minAge, maxAge, disabled = false, onChange }: {
-  minAge: number; maxAge: number; disabled?: boolean; onChange: (min: number, max: number) => void;
+export function AgeRangeSlider({ minAge, maxAge, disabled = false, errorId, onChange }: {
+  minAge: number; maxAge: number; disabled?: boolean; errorId?: string | undefined; onChange: (min: number, max: number) => void;
 }) {
   const hint = useId();
   const minThumb = useRef<HTMLButtonElement>(null), maxThumb = useRef<HTMLButtonElement>(null);
@@ -63,8 +63,8 @@ export function AgeRangeSlider({ minAge, maxAge, disabled = false, onChange }: {
   };
   const numeric = (thumb: Thumb, label: string) => <label>{label}<input type="number" inputMode="numeric" step="1"
     min={thumb === 'min' ? lowest : minAge} max={thumb === 'max' ? highest : maxAge} disabled={disabled}
-    value={numericDrafts[thumb] ?? (thumb === 'min' ? minAge : maxAge)} aria-describedby={hint}
-    aria-invalid={numericDrafts[thumb] !== null && !validNumber(thumb,numericDrafts[thumb] ?? '')}
+    value={numericDrafts[thumb] ?? (thumb === 'min' ? minAge : maxAge)} aria-describedby={errorId ? `${hint} ${errorId}` : hint}
+    aria-invalid={!!errorId || numericDrafts[thumb] !== null && !validNumber(thumb,numericDrafts[thumb] ?? '')}
     onChange={event => {
       if (disabled) return;
       const text = event.target.value; draft(thumb,text);
@@ -120,8 +120,8 @@ export function AgeRangeSlider({ minAge, maxAge, disabled = false, onChange }: {
     <div className="age-slider-rail" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}>
       <div className="age-slider-track" aria-hidden="true" />
       <div className="age-slider-selection" aria-hidden="true" style={{ left:`${percent(minAge)}%`,width:`${percent(maxAge)-percent(minAge)}%` }}/>
-      <button ref={minThumb} className="age-thumb age-thumb-min" data-age-thumb="min" type="button" role="slider" aria-orientation="horizontal" aria-label="Edad mínima" aria-describedby={hint} aria-valuemin={lowest} aria-valuemax={maxAge} aria-valuenow={minAge} aria-valuetext={`${minAge} años`} disabled={disabled} style={{ left:`${percent(minAge)}%` }} onKeyDown={event => keyboard(event,'min')}><Bracket/></button>
-      <button ref={maxThumb} className="age-thumb age-thumb-max" data-age-thumb="max" type="button" role="slider" aria-orientation="horizontal" aria-label="Edad máxima" aria-describedby={hint} aria-valuemin={minAge} aria-valuemax={highest} aria-valuenow={maxAge} aria-valuetext={`${maxAge} años`} disabled={disabled} style={{ left:`${percent(maxAge)}%` }} onKeyDown={event => keyboard(event,'max')}><Bracket/></button>
+      <button ref={minThumb} className="age-thumb age-thumb-min" data-age-thumb="min" type="button" role="slider" aria-invalid={!!errorId || undefined} aria-orientation="horizontal" aria-label="Edad mínima" aria-describedby={errorId ? `${hint} ${errorId}` : hint} aria-valuemin={lowest} aria-valuemax={maxAge} aria-valuenow={minAge} aria-valuetext={`${minAge} años`} disabled={disabled} style={{ left:`${percent(minAge)}%` }} onKeyDown={event => keyboard(event,'min')}><Bracket/></button>
+      <button ref={maxThumb} className="age-thumb age-thumb-max" data-age-thumb="max" type="button" role="slider" aria-invalid={!!errorId || undefined} aria-orientation="horizontal" aria-label="Edad máxima" aria-describedby={errorId ? `${hint} ${errorId}` : hint} aria-valuemin={minAge} aria-valuemax={highest} aria-valuenow={maxAge} aria-valuetext={`${maxAge} años`} disabled={disabled} style={{ left:`${percent(maxAge)}%` }} onKeyDown={event => keyboard(event,'max')}><Bracket/></button>
     </div>
     <div className="age-numbers">{numeric('min','Desde:')}{numeric('max','Hasta:')}</div>
     <p id={hint} className="age-slider-hint">Arrastrá [ para la mínima y ] para la máxima, o usá las flechas. Desde y Hasta permiten escribir edades de 18 a 99; se ajustan al confirmar.</p>

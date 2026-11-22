@@ -149,6 +149,7 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
   const homePosition = useRef(0);
   const open = (next: ManagementSurface) => { homePosition.current = window.scrollY; retireNotice(); navigation.open(next); if (next === 'affinities') void affinities.refresh(true); };
   const returnHome = () => navigation.backTo('home');
+  const preferencesSaved = () => { setNotice('Preferencias guardadas'); returnHome(); };
   const focusSurface = profileActive ? 'profile' : surface;
   const previousFocusSurface = useRef(focusSurface);
   useLayoutEffect(() => {
@@ -165,7 +166,7 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
     {surface === 'visual-review' && !visualReturn && navigation.matchId && !actedVisuals.current.has(navigation.matchId) && active && <VisualReview key={navigation.matchId} controller={controller} matchId={navigation.matchId} navigation={navigation} onBlocked={reportVisualLock} onFinished={reason=>void finishVisual(navigation.matchId!,reason)} onBack={() => navigation.backTo(navigation.trailIncludesActivity ? 'activity' : 'home')} />}
 
     <div hidden={surface !== 'account' && surface !== 'notifications'}><AccountSection controller={controller} disabled={false} onBack={() => navigation.backTo(surface === 'notifications' ? 'account' : 'home')} notificationsOpen={surface === 'notifications'} onNotificationsOpen={() => navigation.open('notifications')} onNavigationBlockedChange={value => { accountLocked.current = value; reportNavigationLock(); }} /></div>
-    {retainedManagement.current && <div hidden={!managementActive}><Onboarding Home={Home} active={active && managementActive} onAdminNavigationBlockedChange={onAdminNavigationBlockedChange} controller={controller} management={retainedManagement.current} navigation={navigation} onBack={returnHome} onNavigationBlockedChange={value => { locked.current = value; reportNavigationLock(); }} /></div>}
+    {retainedManagement.current && <div hidden={!managementActive}><Onboarding Home={Home} active={active && managementActive} onAdminNavigationBlockedChange={onAdminNavigationBlockedChange} controller={controller} management={retainedManagement.current} navigation={navigation} onBack={returnHome} onPreferencesSaved={preferencesSaved} onNavigationBlockedChange={value => { locked.current = value; reportNavigationLock(); }} /></div>}
 
     <AffinityQuestionnaire model={affinities} navigation={navigation}/>
   </div></>;
@@ -219,7 +220,7 @@ function HomeOverview({ onRestoreSecond, homeReconciler, returnScroll, actedVisu
   </div>;
   return <div ref={root} className={`home ${busy && model ? 'home-reconciling' : ''}`} aria-busy={busy}>
     <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><div className="home-header-actions">{onAdmin && <AdminEntry pending={adminPending} disabled={busy || searchPhase !== 'idle'} onClick={onAdmin} />}</div></header>
-    {notice && <p className="home-notice home-terminal-notice" role="status"><span>{notice}</span><button type="button" onClick={retireNotice} aria-label="Ocultar aviso del chat"><ChatIcon name="close"/></button></p>}
+    {notice && <p className="home-notice home-terminal-notice" role="status"><span>{notice}</span><button type="button" onClick={retireNotice} aria-label={notice === 'Preferencias guardadas' ? 'Ocultar aviso' : 'Ocultar aviso del chat'}><ChatIcon name="close"/></button></p>}
     {busy && !model && <p className="home-loading-status" role="status">Actualizando Inicio…</p>}
     {busy && !model && <div className="home-placeholder" aria-hidden="true"><div className="home-card home-placeholder-search"><span /><span /><span /></div><div className="home-grid">{managementEntries.map(([target]) => <div className="home-card home-placeholder-card" key={target}><span /><span /><span /></div>)}</div></div>}
     {error && <p className="home-error" role="alert">{error}</p>}{error && <button className="login-button login-outlined" disabled={busy} onClick={refresh}>Reintentar</button>}

@@ -16,13 +16,17 @@ function mount(patch: Partial<Props> = {}) {
   const view = render(tree());
   return { submit,retryCountries,update: (next: Partial<Props>) => { props = { ...props,...next }; view.rerender(tree()); } };
 }
+function selectBirthDate(year: string, month: string, day: string) {
+  for (const [name, value] of [['Año', year], ['Mes', month], ['Día', day]] as const)
+    fireEvent.change(screen.getByRole('combobox', { name }), { target: { value } });
+}
 function fillRequired() {
   fireEvent.change(screen.getByLabelText('Género'),{ target:{ value:'MALE' } });
   fireEvent.change(screen.getByLabelText('Intención'),{ target:{ value:'DATE' } });
   fireEvent.click(screen.getByRole('checkbox',{ name:'Mujeres' }));
   fireEvent.change(screen.getByLabelText('Nombre visible'),{ target:{ value:'Ana' } });
   fireEvent.change(screen.getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } });
-  fireEvent.change(screen.getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } });
+  selectBirthDate('1995', '01', '01');
 }
 const submitForm = () => fireEvent.submit(screen.getByRole('form'));
 
@@ -39,9 +43,9 @@ it('puts creation validation and submit after the distance preference', () => {
   expect(summary.nextElementSibling).toBe(create);
   expect(distance.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const name = within(form).getByLabelText('Nombre visible');
-  expect(name).toHaveFocus();
+  expect(summary).toHaveFocus();
   expect(name).toHaveAttribute('aria-invalid', 'true');
-  expect(name).toHaveAttribute('aria-describedby', summary.id);
+  expect(summary.querySelector('#' + CSS.escape(name.getAttribute('aria-describedby')!))).not.toBeNull();
   expect(name).toHaveAccessibleDescription(/Nombre visible/);
   expect(submit).not.toHaveBeenCalled();
 });
@@ -54,7 +58,7 @@ it.each(['create','filters'] as const)('focuses only missing intention in %s whi
   fireEvent.change(intention,{ target:{ value:'' } });
   submitForm();
   expect(submit).not.toHaveBeenCalled();
-  expect(intention).toHaveFocus();
+  expect(mode === 'create' ? screen.getByRole('alert') : intention).toHaveFocus();
   expect(intention).toHaveAttribute('aria-invalid','true');
   expect(intention).toHaveAccessibleDescription('Elegí una intención válida.');
   for (const checkbox of checkboxes) {
@@ -74,7 +78,7 @@ it.each(['create','filters'] as const)('focuses only missing interested genders 
   fireEvent.click(screen.getByRole('checkbox',{ name:'Mujeres' }));
   submitForm();
   expect(submit).not.toHaveBeenCalled();
-  expect(screen.getByRole('checkbox',{ name:'Hombres' })).toHaveFocus();
+  expect(mode === 'create' ? screen.getByRole('alert') : screen.getByRole('checkbox',{ name:'Hombres' })).toHaveFocus();
   for (const checkbox of screen.getAllByRole('checkbox')) {
     expect(checkbox).toHaveAttribute('aria-invalid','true');
     expect(checkbox).toHaveAccessibleDescription('Elegí al menos un género válido que te interese.');
@@ -90,7 +94,7 @@ it.each(['create','filters'] as const)('focuses only missing interested genders 
 it('defaults new profiles to catalog-provided Argentina, leaves birth date empty and sorts localized country names', () => {
   const { submit } = mount();
   expect(screen.getByLabelText('País')).toHaveValue('AR');
-  expect(screen.getByLabelText('Fecha de nacimiento')).toHaveValue('');
+  for (const name of ['Día', 'Mes', 'Año']) expect(screen.getByRole('combobox', { name })).toHaveValue('');
   expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
   expect(within(screen.getByLabelText('País')).getAllByRole('option').map(o => o.textContent)).toEqual(['Seleccioná un país','Alemania','Argentina','España']);
   expect(screen.getByRole('group',{ name:'Sobre vos' })).toBeInTheDocument();
@@ -159,9 +163,9 @@ it('preserves country error, empty catalog and retry states', () => {
 });
 it('rejects an empty birth date without inventing a default', () => {
   const { submit } = mount(); fillRequired();
-  fireEvent.change(screen.getByLabelText('Fecha de nacimiento'),{ target:{ value:'' } });
-  submitForm(); expect(screen.getByRole('alert')).toHaveTextContent('Fecha de nacimiento');
-  expect(submit).not.toHaveBeenCalled(); expect(screen.getByLabelText('Fecha de nacimiento')).toBeRequired();
+  selectBirthDate('', '', '');
+  submitForm(); expect(screen.getByRole('alert')).toHaveTextContent('Seleccioná tu fecha de nacimiento.');
+  expect(submit).not.toHaveBeenCalled(); expect(screen.getByRole('group', { name: 'Fecha de nacimiento' })).toHaveAttribute('aria-invalid', 'true');
 });
 it('keeps grouped gender and age controls accessible and retains slider validation limits', () => {
   const { submit } = mount(); fillRequired();
@@ -195,13 +199,13 @@ it.each(['create','filters'] as const)('submits synchronized numeric ages throug
   expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ preferredMinAge:33,preferredMaxAge:34 }),mode);
 });
 
-it('requires explicit sensitive choices and focuses the first invalid field without writing', () => {
+it('requires explicit sensitive choices and focuses the creation summary without writing', () => {
   const { submit, update } = mount();
   expect(screen.getByLabelText('Género')).toHaveValue('');
   expect(screen.getByLabelText('Intención')).toHaveValue('');
   for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).not.toBeChecked();
   submitForm();
-  expect(screen.getByLabelText('Nombre visible')).toHaveFocus();
+  expect(screen.getByRole('alert')).toHaveFocus();
   expect(screen.getByLabelText('Nombre visible')).toHaveAttribute('aria-invalid','true');
   expect(submit).not.toHaveBeenCalled();
   fillRequired(); update({ busy:true }); submitForm(); expect(submit).not.toHaveBeenCalled();
@@ -220,9 +224,9 @@ it('keeps sensitive choices empty after filling other fields and links the first
   const { submit } = mount();
   fireEvent.change(screen.getByLabelText('Nombre visible'),{ target:{ value:'Ana' } });
   fireEvent.change(screen.getByLabelText('Ciudad'),{ target:{ value:'Córdoba' } });
-  fireEvent.change(screen.getByLabelText('Fecha de nacimiento'),{ target:{ value:'1995-01-01' } });
+  selectBirthDate('1995', '01', '01');
   submitForm();
-  expect(submit).not.toHaveBeenCalled(); expect(screen.getByLabelText('Género')).toHaveFocus();
+  expect(submit).not.toHaveBeenCalled(); expect(screen.getByRole('alert')).toHaveFocus();
   expect(screen.getByLabelText('Género')).toHaveAccessibleDescription(/Seleccioná un género/);
 });
 
@@ -240,6 +244,7 @@ it('blocks normalized unchanged edits and disables again on confirmation without
   fireEvent.change(screen.getByLabelText('Ciudad'), { target:{ value:'Otro borrador' } });
   update({ profile:{ ...existing,city:'Sevilla',bio:'Servidor' } });
   expect(screen.getByLabelText('Ciudad')).toHaveValue('Otro borrador'); expect(save).toBeEnabled();
+  expect(screen.getByLabelText('Bio (opcional)')).toHaveValue('Servidor');
 });
 it('ignores preference ordering and enables only actual filter changes', () => {
   mount({ profile:{ ...existing,lookingForGenders:['FEMALE','MALE'] },mode:'filters' });
@@ -264,4 +269,30 @@ it('shows saving only for a profile write, not loading or other busy operations'
   expect(screen.queryByText('Guardando\u2026')).toBeNull();
   update({ saving:true }); expect(screen.getByRole('button', { name:'Guardando\u2026' })).toBeDisabled();
   update({ saving:false,busy:false }); expect(screen.getByRole('button', { name:'Guardar cambios' })).toBeDisabled();
+});
+
+it('offers only calendar days and clears a day invalidated by month or year', () => {
+  const { submit } = mount();
+  fillRequired();
+  const day = screen.getByRole('combobox', { name: 'Día' });
+  const month = screen.getByRole('combobox', { name: 'Mes' });
+  const year = screen.getByRole('combobox', { name: 'Año' });
+  selectBirthDate('2000', '10', '31');
+  fireEvent.change(month, { target: { value: '11' } });
+  expect(within(day).queryByRole('option', { name: '31' })).toBeNull();
+  expect(day).toHaveValue('');
+  submitForm();
+  expect(screen.getByRole('alert')).toHaveTextContent('Ingresá una fecha de nacimiento válida.');
+  expect(submit).not.toHaveBeenCalled();
+  selectBirthDate('2000', '02', '29');
+  expect(day).toHaveValue('29');
+  fireEvent.change(year, { target: { value: '2001' } });
+  expect(within(day).queryByRole('option', { name: '29' })).toBeNull();
+  expect(day).toHaveValue('');
+  fireEvent.change(day, { target: { value: '28' } });
+  fireEvent.change(screen.getByLabelText('Ciudad'), { target: { value: 'Rosario' } });
+  expect(day).toHaveValue('28');
+  expect(day).not.toHaveAttribute('aria-invalid');
+  submitForm();
+  expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ birthDate: '2001-02-28', city: 'Rosario' }), 'create');
 });

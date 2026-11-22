@@ -11,6 +11,15 @@
 .visual-photo > :is(.visual-photo-loading, .visual-photo-error) { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 16px; text-align: center; }
 .visual-photo-loading { color: var(--color-on-surface-variant); }
 .visual-photo-error p { margin: 0; }
+.scheduling-thumbnails { display: flex; min-width:0; max-width:100%; gap: .625rem; overflow-x: auto; padding: .25rem; }
+.scheduling-thumbnails button { flex: 0 0 6rem; cursor: pointer; padding: .25rem; border: 1px solid var(--color-outline); border-radius: var(--radius-row); background: var(--color-surface); color: var(--color-on-surface); }
+@media (hover: hover) {
+  .scheduling-thumbnails button:hover { background: var(--color-secondary-container); }
+}
+.scheduling-thumbnails button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.scheduling-thumbnails button[aria-pressed=true] { border: 2px solid var(--color-primary); }
+.scheduling-thumbnails .visual-thumbnail { display: block; height: 7rem; background: var(--color-surface-variant); border-radius: var(--radius-extra-small); overflow: hidden; }
+.scheduling-thumbnails img { width: 100%; height: 100%; object-fit: cover; }
 .visual-photo figcaption { position: absolute; bottom: 10px; right: 10px; left: 10px; width: fit-content; max-width: calc(100% - 20px); border-radius: 16px; padding: 6px 12px; background: var(--color-surface); overflow-wrap: anywhere; }
 .visual-affinities { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0; list-style: none; }
 .visual-affinities li { border: 1px solid var(--color-outline); border-radius: 24px; padding: 8px 12px; overflow-wrap: anywhere; }

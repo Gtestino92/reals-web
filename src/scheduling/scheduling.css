@@ -13,11 +13,6 @@
 .scheduling li button { margin-block: .5rem; }
 .scheduling button { min-height: 48px; white-space: normal; }
 .scheduling dialog { max-width: min(32rem,90vw); }
-.scheduling-thumbnails { display: flex; min-width:0; max-width:100%; gap: .625rem; overflow-x: auto; padding: .25rem; }
-.scheduling-thumbnails button { flex: 0 0 6rem; padding: .25rem; border: 1px solid var(--color-outline); border-radius: var(--radius-row); background: var(--color-surface); color: var(--color-on-surface); }
-.scheduling-thumbnails button[aria-pressed=true] { border: 2px solid var(--color-primary); }
-.scheduling-thumbnails .visual-thumbnail { display: block; height: 7rem; background: var(--color-surface-variant); border-radius: var(--radius-extra-small); overflow: hidden; }
-.scheduling-thumbnails img { width: 100%; height: 100%; object-fit: cover; }
 .scheduling-activity { display: grid; gap: .5rem; }
 
 .scheduling option.scheduling-conflict { color: var(--color-error); }

@@ -38,7 +38,7 @@
 .managed-photo { position: relative; display: grid; width: 100%; height: 100%; place-items: center; background: var(--color-surface-variant); }
 .managed-photo .visual-photo-loading { position: absolute; inset: 0; display: grid; place-items: center; }
 .managed-photo .visual-photo-loading svg { max-width: 50%; }
-.managed-photo-error { padding: 4px; font-size: .75rem; }
+.managed-photo-error { font-size: .75rem; }
 .photo-grid p { font-size: .875rem; }
 .crop-dialog { max-width: min(480px,94vw); max-height: 92dvh; overflow: auto; background: var(--color-surface); color: var(--color-on-surface); border: 1px solid var(--color-outline); border-radius: var(--radius-card); }
 .crop-dialog::backdrop { background: #000b; }
@@ -108,3 +108,35 @@
 }
 
 .profile-form .profile-save-feedback { min-height: 1.5em; margin: 8px 0 0; line-height: 1.5; color: var(--color-primary); font-weight: 600; }
+
+.profile-form .profile-validation { color: var(--color-error); }
+.profile-validation p { margin: .25rem 0; }
+.onboarding .profile-form :is(input, select, textarea, .check, .age-preference, .profile-birth-date):is([aria-invalid=true], :has(> input[aria-invalid=true])) {
+  border-color: var(--color-error);
+}
+.profile-form :is(input[type=checkbox], input[type=range])[aria-invalid=true] { accent-color: var(--color-error); }
+.profile-form :is(.age-preference, .profile-birth-date)[aria-invalid=true] > legend { color: var(--color-error); }
+.profile-form .age-preference[aria-invalid=true] .age-slider-selection { background: var(--color-error); }
+.profile-date-selects { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.2fr) minmax(0, 1fr); gap: .5rem; }
+@media (max-width: 340px) {
+  .profile-date-selects { grid-template-columns: 1fr; }
+}
+
+.management-body { position: relative; }
+.management-preparing { position: absolute; inset: 0 0 auto; opacity: 0; pointer-events: none; }
+.managed-photo-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  padding: 4px;
+  text-align: center;
+  pointer-events: none;
+}
+.onboarding .managed-photo-error button {
+  min-height: 44px;
+  margin: 0;
+  padding: 4px;
+  pointer-events: auto;
+}

@@ -54,7 +54,7 @@ it.each(['google', 'signIn', 'signUp'] as const)('remount binds %s to the new ma
   } else {
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'fixture@example.test' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'synthetic' } });
-    if (operation === 'signUp') fireEvent.click(screen.getByRole('button', { name: /Crear cuenta/ }));
+    if (operation === 'signUp') fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' }));
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: operation === 'signUp' ? 'Crear cuenta' : 'Ingresar' }));
     await waitFor(() => expect(operation === 'signIn' ? sdk.signInWithEmailAndPassword : sdk.createUserWithEmailAndPassword).toHaveBeenCalledOnce());

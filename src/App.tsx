@@ -6,7 +6,7 @@ import { tabOwnershipEnabled } from './tabs/policy';
 import { TabGate } from './tabs/TabGate';
 import type { TabOwnershipManager } from './tabs/TabOwnershipManager';
 import { lazy, Suspense, useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { LoginScreen } from './auth/LoginScreen';
+import { AuthenticationLoading, LoginScreen } from './auth/LoginScreen';
 import { configureFirebase } from './auth/firebase';
 import type { FirebaseSetup } from './auth/firebase';
 import { ApiClient } from './auth/api';
@@ -42,14 +42,7 @@ function SessionApp({ controller }: { controller: SessionController }) {
   if (state.phase === 'ready') return <ReadySession key={`${state.account?.id}/${state.profile?.id}`} controller={controller} />;
   // Manual authentication keeps its operation through backend bootstrap.
   // Restoration has no operation and must not expose an intermediate login form.
-  if (state.phase === 'checking' || (state.phase === 'loading' && state.operation === null)) return <main className="login-page"><section className="login-panel" aria-labelledby="restoring-heading">
-    <header className="login-header"><div className="login-brand">
-      <img className="login-seal" src={seal} alt="" width="54" height="54" />
-      <h1 id="restoring-heading">Reals</h1>
-      <div className="brand-divider" aria-hidden="true"><span /></div>
-    </div></header>
-    <p className="session-loading" role="status" aria-atomic="true">Preparando tu sesión…</p>
-  </section></main>;
+  if (state.phase === 'checking' || (state.phase === 'loading' && state.operation === null)) return <AuthenticationLoading />;
   if (['loading', 'login', 'authenticating'].includes(state.phase)) return <LoginScreen
     sessionLoading={state.phase === 'loading'}
     loading={state.operation === 'signIn' || state.operation === 'signUp'}

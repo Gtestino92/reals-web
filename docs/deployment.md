@@ -18,7 +18,7 @@ When automatic deployments are enabled, Cloudflare Pages builds as its configure
 
 ## Cloudflare Pages settings
 
-The existing project's **production branch** is already set to `development`. Its **Production** configuration scope is for **Reals `dev`** at the same Pages URL, using the existing development Firebase Web app and registration. Automatic deployments are paused while the Railway integration is finalized. Ensure automatic Preview branch deployments are set to **None** before resuming. Keep repository `Gtestino92/reals-web`, Node.js 24, build command `npm ci && npm run build` and output directory `dist`. When production is ready, configure a separate Pages project with `main` as its production branch, its own backend origin and its production Firebase configuration. [Pages branch deployment controls](https://developers.cloudflare.com/pages/configuration/branch-build-controls/) · [Pages build configuration](https://developers.cloudflare.com/pages/configuration/build-configuration/)
+The existing project's **production branch** is already set to `development`. Its **Production** configuration scope is for **Reals `dev`** at the same Pages URL, using the existing development Firebase Web app and registration. Automatic deployments from `development` have been re-enabled for this Dev Pages project. Keep automatic Preview branch deployments set to **None**. Keep repository `Gtestino92/reals-web`, Node.js 24, build command `npm ci && npm run build` and output directory `dist`. When production is ready, configure a separate Pages project with `main` as its production branch, its own backend origin and its production Firebase configuration. [Pages branch deployment controls](https://developers.cloudflare.com/pages/configuration/branch-build-controls/) · [Pages build configuration](https://developers.cloudflare.com/pages/configuration/build-configuration/)
 
 | Pages Production scope variable | Existing development project | Future production project |
 | --- | --- | --- |
@@ -39,7 +39,7 @@ All `VITE_*` values are public browser data. Keep service accounts, passwords, p
 ## Remaining rollout steps
 
 1. Use the existing `development` branch for the workflow PR, wait for **Web validation** to pass on GitHub, and enforce required PR checks on both branches where supported before merging.
-2. Once the Railway development backend, CORS and dependencies are ready, verify the development variables above and resume automatic deployments from `development`. Keep the existing development URL and Firebase settings.
+2. Verify the development variables above and the automatic build from `development`. Keep the existing development URL and Firebase settings.
 3. Verify the Pages build and deployed browser against the development backend. Set up the independent production project when its backend and Firebase configuration are ready, then promote a verified release via a `development` → `main` PR.
 
 ## Remaining integration

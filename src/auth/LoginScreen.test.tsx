@@ -4,8 +4,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { LoginScreen } from './LoginScreen';
 import type { LoginScreenProps } from './LoginScreen';
 
-const switchToSignUp = () => fireEvent.click(screen.getByRole('button', { name: '¿No tenés cuenta? Crear cuenta' }));
-const switchToSignIn = () => fireEvent.click(screen.getByRole('button', { name: '¿Ya tenés cuenta? Ingresar' }));
+const switchToSignUp = () => fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' }));
+const switchToSignIn = () => fireEvent.click(screen.getByRole('radio', { name: 'Iniciar sesión' }));
 function callbacks() {
   return { onSignIn: vi.fn(), onSignUp: vi.fn(), onPasswordReset: vi.fn(), onGoogleSignIn: vi.fn() };
 }
@@ -13,8 +13,8 @@ afterEach(() => { vi.useRealTimers(); });
 
 it('starts in sign-in with Android copy, masking, autofill hints and unchecked remember', () => {
   render(<LoginScreen {...callbacks()} />);
-  expect(screen.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
-  expect(screen.getByText('Ingresá con tu email y contraseña para continuar.')).toBeVisible();
+  expect(screen.getByRole('radio', { name: 'Iniciar sesión' })).toBeChecked();
+  expect(screen.queryByText('Ingresá con tu email y contraseña para continuar.')).toBeNull();
   expect(screen.getByLabelText('Email')).toHaveAttribute('autocomplete', 'username');
   expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password');
   expect(screen.getByLabelText('Password')).toHaveAttribute('autocomplete', 'current-password');
@@ -31,8 +31,7 @@ it('switches both ways without submitting and retains fields and remember prefer
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret' } });
   fireEvent.click(screen.getByRole('checkbox'));
   switchToSignUp();
-  expect(screen.getByRole('heading', { name: 'Creá tu cuenta' })).toBeVisible();
-  expect(screen.getByText('Registrate con tu email y contraseña para empezar.')).toBeVisible();
+  expect(screen.getByRole('radio', { name: 'Crear cuenta' })).toBeChecked();
   expect(screen.getByLabelText('Password')).toHaveAttribute('autocomplete', 'new-password');
   expect(screen.queryByRole('button', { name: 'Olvidé mi contraseña' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Continuar con Google' })).toBeVisible();
@@ -73,42 +72,35 @@ it('calls reset with email only and Google in either mode without submitting', (
   expect(actions.onSignUp).not.toHaveBeenCalled();
 });
 
-it.each(['loading', 'googleLoading', 'passwordResetLoading'] as const)(
-  'locks all controls while %s, including submit and Escape', (pending) => {
-    const actions = callbacks();
-    const { rerender } = render(<LoginScreen {...actions} />);
-    switchToSignUp();
-    rerender(<LoginScreen {...actions} {...{ [pending]: true }} />);
-    expect(screen.getByRole('form')).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByLabelText('Email')).toBeDisabled();
-    expect(screen.getByLabelText('Password')).toBeDisabled();
-    expect(screen.getByRole('checkbox')).toBeDisabled();
-    for (const button of screen.getAllByRole('button')) {
-      expect(button).toBeDisabled();
-      fireEvent.click(button);
-    }
-    fireEvent.submit(screen.getByRole('form'));
-    fireEvent.keyDown(screen.getByLabelText('Email'), { key: 'Escape' });
-    expect(screen.getByRole('heading', { name: 'Creá tu cuenta' })).toBeVisible();
-    if (pending === 'loading') expect(screen.getByRole('button', { name: 'Creando cuenta...' })).toBeVisible();
-    rerender(<LoginScreen {...actions} />);
-    switchToSignIn();
-    rerender(<LoginScreen {...actions} {...{ [pending]: true }} />);
-    expect(screen.getByLabelText('Email')).toBeDisabled();
-    for (const button of screen.getAllByRole('button')) {
-      expect(button).toBeDisabled();
-      fireEvent.click(button);
-    }
-    fireEvent.submit(screen.getByRole('form'));
-    if (pending === 'loading') expect(screen.getByRole('button', { name: 'Ingresando...' })).toBeVisible();
-    if (pending === 'googleLoading') expect(screen.getByRole('button', { name: 'Conectando con Google...' })).toBeVisible();
-    if (pending === 'passwordResetLoading') expect(screen.getByRole('button', { name: 'Enviando...' })).toBeVisible();
-    for (const callback of Object.values(actions)) expect(callback).not.toHaveBeenCalled();
-    rerender(<LoginScreen {...actions} />);
-    expect(screen.getByRole('button', { name: 'Ingresar' })).toBeEnabled();
-  },
-);
+it.each(['loading', 'googleLoading', 'sessionLoading'] as const)('keeps the brand and restores the signup draft after %s', pending => {
+  const actions = callbacks();
+  const { rerender } = render(<LoginScreen {...actions} />);
+  switchToSignUp();
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'persona@example.com' } });
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password' } });
+  const brand = screen.getByRole('heading', { name: 'Reals' });
+  rerender(<LoginScreen {...actions} {...{ [pending]: true }} />);
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  expect(screen.queryByRole('form')).toBeNull();
+  expect(screen.queryByRole('button')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Reals' })).toBe(brand);
+  rerender(<LoginScreen {...actions} error="No se pudo crear la cuenta." errorOwner="signUp" />);
+  expect(screen.getByRole('radio', { name: 'Crear cuenta' })).toBeChecked();
+  expect(screen.getByLabelText('Email')).toHaveValue('persona@example.com');
+  expect(screen.getByLabelText('Password')).toHaveValue('password');
+  expect(screen.getByRole('alert')).toHaveTextContent('No se pudo crear la cuenta.');
+});
 
+it('keeps password reset pending inline and excludes other form interactions', () => {
+  const actions = callbacks();
+  render(<LoginScreen {...actions} passwordResetLoading />);
+  expect(screen.getByRole('form')).toHaveAttribute('aria-busy', 'true');
+  expect(screen.getByRole('button', { name: 'Enviando...' })).toBeDisabled();
+  expect(screen.getByRole('radio', { name: 'Crear cuenta' })).toBeDisabled();
+  expect(screen.getByLabelText('Email')).toBeDisabled();
+  fireEvent.submit(screen.getByRole('form'));
+  expect(actions.onSignIn).not.toHaveBeenCalled();
+});
 it.each([
   ['signIn', true, false], ['signUp', false, true], ['shared', true, true], [null, true, false],
 ] as const)('scopes error owner %s to its permitted modes', (owner, inSignIn, inSignUp) => {
@@ -187,20 +179,7 @@ it('returns from sign-up with Escape without submitting or losing email', () => 
   switchToSignUp();
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'persona@example.com' } });
   fireEvent.keyDown(screen.getByLabelText('Email'), { key: 'Escape' });
-  expect(screen.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
+  expect(screen.getByRole('radio', { name: 'Iniciar sesión' })).toBeChecked();
   expect(screen.getByLabelText('Email')).toHaveValue('persona@example.com');
   expect(actions.onSignIn).not.toHaveBeenCalled();
-});
-
-it('keeps the inputs and loading feedback without offering logout during bootstrap', () => {
-  const props = callbacks();
-  const view = render(<LoginScreen {...props} sessionLoading />);
-  const input = screen.getByLabelText('Email');
-  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull(); expect(input).toBeDisabled();
-  view.rerender(<LoginScreen {...props} />); expect(input).toBeEnabled();
-  view.rerender(<LoginScreen {...props} googleLoading />); expect(input).toBeDisabled();
-  view.rerender(<LoginScreen {...props} sessionLoading />);
-  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión');
-  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
-  expect(screen.getByLabelText('Email')).toBe(input); expect(input).toBeDisabled();
 });
