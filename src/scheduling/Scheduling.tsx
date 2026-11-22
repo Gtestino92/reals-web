@@ -1,20 +1,29 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { SessionController } from '../auth/session';
 import { sessionContext } from '../visual/VisualSession';
 import { VisualDeadline, useVisualNow } from '../visual/deadline';
-import { SchedulingSession } from './SchedulingSession';
+import { SchedulingSession, type SchedulingHomeRead } from './SchedulingSession';
 import { conflicts, days, localSlot, reviewReason, roundState, validateSlots } from './policy';
 import type { Availability } from './contracts';
 import { PartnerProfile } from './PartnerProfile';
 import { waitingSecondChatEvent } from '../home/secondHomePresentation';
 import { GoogleCalendarAction } from '../shared/GoogleCalendarAction';
+import { activityId } from '../notifications/activityPolicy';
+import { usePresentedActivity } from '../notifications/usePresentedActivity';
+import { useActivityNotificationContext } from '../notifications/useActivityNotifications';
 import './scheduling.css';
 
 export const formatSlot=(v: string)=>new Date(v).toLocaleString('es-AR',{dateStyle:'full',timeStyle:'short'});
 export function Scheduling({controller,connectionId,matchId,partnerName,onBack,onFinished,onBlocked,browse,onBrowse,onCloseBrowse}: {controller: SessionController;connectionId: string;matchId: string;partnerName: string|null;onBack:()=>void;onFinished:()=>void;onBlocked:(value:boolean)=>void;browse:boolean;onBrowse:()=>void;onCloseBrowse:()=>void}) {
   const session=useSyncExternalStore(controller.subscribe,controller.getSnapshot);
   const context=sessionContext(controller), finish=useRef(onFinished), lock=useRef(onBlocked);finish.current=onFinished;lock.current=onBlocked;
-  const model=useMemo(()=>new SchedulingSession(controller,connectionId,matchId,()=>finish.current(),value=>lock.current(value)),[controller,context,connectionId,matchId]);
+  const notifications = useActivityNotificationContext();
+  const observeHome = notifications?.enabled ? notifications.observeSchedulingHome : undefined;
+  const latestHome = useRef<{ context: string; read: SchedulingHomeRead } | null>(null);
+  const observing = useRef(observeHome); observing.current = observeHome;
+  const model=useMemo(()=>new SchedulingSession(controller,connectionId,matchId,()=>finish.current(),value=>lock.current(value),read=>{
+    if (observing.current) latestHome.current = { context, read };
+  }),[controller,context,connectionId,matchId]);
   const s=useSyncExternalStore(model.subscribe,model.getSnapshot), clock=useVisualNow(), now=clock+s.offset;
   const r=roundState(s.busy&&!s.negotiation,s.negotiation,s.proposals,controller.getSnapshot().account?.id??'');
   const [menu,setMenu]=useState(false),[dialog,setDialog]=useState(false);
@@ -37,6 +46,24 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onBack,o
     : null;
   const partner=partnerName?.trim() || calendarEvent?.partnerName?.trim();
   const expires=s.negotiation?.schedulingExpiresAt, expired=!!expires&&Date.parse(expires)<=now;
+  const negotiationHeading = useRef<HTMLHeadingElement>(null), appointment = useRef<HTMLTimeElement>(null);
+  const presented = !browse && session.phase === 'ready' && s.verified && !s.uncertain && !s.terminal;
+  const beginHomeRead = notifications?.enabled ? notifications.beginHomeRead : undefined;
+  usePresentedActivity(negotiationHeading, presented && !expired && s.negotiation?.status === 'PENDING' ? activityId('SCHEDULING', connectionId) : null);
+  usePresentedActivity(appointment, presented && r.stage === 'Scheduled' ? activityId('SECOND_CHAT_SCHEDULED', connectionId, s.negotiation?.confirmedDateTime) : null);
+  useLayoutEffect(() => {
+    // The visible appointment acknowledges first, including a local confirmation.
+    const validated = latestHome.current;
+    latestHome.current = null;
+    if (validated?.context === context) observeHome?.(validated.read.home, validated.read.startedAt, validated.read.serverTime);
+  }, [context, observeHome, s]);
+  useLayoutEffect(() => {
+    if (!s.pending || !beginHomeRead) return;
+    // A scheduling write owns its authoritative reconciliation and presentation.
+    const pending = new AbortController();
+    const finish = beginHomeRead(pending.signal);
+    return () => { finish?.(); pending.abort(); };
+  }, [s.pending, beginHomeRead]);
   const expiryRequested=useRef('');
   useEffect(()=>{if(expired&&expiryRequested.current!==expires){expiryRequested.current=expires??'';void model.refresh();}},[expired,expires,model]);
   const disabled=s.busy||!s.verified||s.uncertain||s.terminal||expired||s.negotiation?.status!=='PENDING';
@@ -44,7 +71,7 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onBack,o
   const blockMenu=<div className="chat-overflow" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))setMenu(false);}} onKeyDown={e=>{if(e.key==='Escape'){setMenu(false);menuButton.current?.focus();}}}><button ref={menuButton} className="login-button login-outlined" aria-label="Más acciones" aria-haspopup="menu" aria-expanded={menu} disabled={s.busy||s.terminal} onClick={()=>setMenu(v=>!v)} onKeyDown={e=>{if(e.key==='ArrowDown'){e.preventDefault();setMenu(true);}}}>⋮</button>{menu&&<div className="chat-menu" role="menu"><button ref={menuItem} role="menuitem" onClick={()=>{setMenu(false);setDialog(true);}}>Bloquear a esta persona</button></div>}</div>;
   return <section className="scheduling" aria-busy={s.busy&&!s.connection}>
     {browse&&(s.terminal||s.connection?.state==='CLOSED'||session.phase!=='ready')?<><p>La conexión ya no está disponible.</p><button className="login-button login-outlined" onClick={onBack}>Volver a Actividad</button></>:browse?<PartnerProfile key={JSON.stringify([context,matchId,connectionId])} partnerName={partnerName} controller={controller} matchId={matchId} onBack={onCloseBrowse} disabled={s.pending} menu={blockMenu}/>:<>
-      <header className="home-heading"><h2>Coordinar horarios</h2><button className="login-button login-outlined" disabled={s.pending} onClick={onBack}>Volver a Actividad</button>{blockMenu}</header>
+      <header className="home-heading"><h2 ref={negotiationHeading}>Coordinar horarios</h2><button className="login-button login-outlined" disabled={s.pending} onClick={onBack}>Volver a Actividad</button>{blockMenu}</header>
       <div className="scheduling-meta"><p>{partner?`Con ${partner}`:'Con la otra persona'}</p>
       {s.negotiation&&<p>Ronda {s.negotiation.roundNumber}{s.busy?' · Actualizando…':''}</p>}
       {s.negotiation?.status==='PENDING'&&<VisualDeadline start={s.negotiation.createdAt} end={expires??null} now={now}/>}</div>
@@ -57,7 +84,7 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onBack,o
       {r.stage==='WaitingForMyProposals'&&<section className="home-card"><h3>Proponé tus horarios</h3><p>Elegí entre 1 y 3 opciones, en orden de preferencia.</p><SlotPicker key={`${connectionId}/${s.negotiation?.roundNumber}`} now={now} availability={s.availability} selected={s.draft} disabled={disabled} onChange={model.setDraft}/>{s.errorContext==='submit'&&error}<button className="login-button login-primary" disabled={disabled||!!validateSlots(s.draft,now,s.availability)} onClick={()=>void model.act('submit')}>Enviar horarios</button></section>}
       {r.stage==='WaitingForPartnerProposals'&&<section className="home-card"><h3>Esperando a {partner || 'la otra persona'}</h3><p>{r.myPending.length?'Tus opciones están pendientes de revisión.':'Tus opciones fueron rechazadas. Ahora esperamos que envíe las suyas.'}</p><OwnProposals values={r.myPending.map(p=>p.proposedDateTime)}/></section>}
       {r.stage==='ReviewPartnerProposals'&&<section className="home-card"><h3>Horarios que recibiste</h3><p>Elegí una opción o rechazá la lista para continuar la coordinación.</p><ol className="scheduling-options">{r.received.map(p=>{const reason=reviewReason(p.proposedDateTime,now,s.availability);return <li key={p.id}><div className="scheduling-option-content"><time dateTime={p.proposedDateTime}>{formatSlot(p.proposedDateTime)}</time>{reason&&<p className="home-error">{reason}</p>}</div><button className="login-button login-primary" disabled={disabled||!!reason} onClick={()=>void model.act('accept',p.id)}>Aceptar opción {p.preferenceOrder}</button></li>;})}</ol>{r.received.every(p=>!!reviewReason(p.proposedDateTime,now,s.availability))&&<p>No hay horarios disponibles para aceptar. Podés rechazar la lista.</p>}<OwnProposals values={r.myPending.map(p=>p.proposedDateTime)}/>{s.errorContext==='review'&&error}<button className="login-button login-outlined" disabled={disabled} onClick={()=>void model.act('reject')}>Rechazar estas opciones</button></section>}
-      {r.stage==='Scheduled'&&<section className="home-card scheduling-confirmed"><h3>Horario confirmado</h3>{s.negotiation?.confirmedDateTime&&<time dateTime={s.negotiation.confirmedDateTime}>{formatSlot(s.negotiation.confirmedDateTime)}</time>}
+      {r.stage==='Scheduled'&&<section className="home-card scheduling-confirmed"><h3>Horario confirmado</h3>{s.negotiation?.confirmedDateTime&&<time ref={appointment} dateTime={s.negotiation.confirmedDateTime}>{formatSlot(s.negotiation.confirmedDateTime)}</time>}
         {calendarEvent&&session.account&&<GoogleCalendarAction event={{...calendarEvent,partnerName:partner??null}} accountId={session.account.id} connectionId={connectionId} now={model.now}/>}
         {s.calendarReadFailed&&!s.error&&<><p role="alert" className="home-error">No pudimos verificar los datos de la cita para Google Calendar.</p><button className="login-button login-outlined" disabled={s.busy} onClick={()=>void model.refresh()}>Reintentar</button></>}
       </section>}

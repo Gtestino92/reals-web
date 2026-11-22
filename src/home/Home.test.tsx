@@ -8,6 +8,7 @@ import { OperationalApp as App } from '../App';
 import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
 import { emptyHome, homeStatus } from './fixtures';
+import { storageKey } from '../notifications/activityStorage';
 
 let home: ReturnType<typeof emptyHome>, status: ReturnType<typeof homeStatus>;
 let profile: { id: string; userId: string; status: string; displayName: string };
@@ -129,6 +130,7 @@ it('preserves uncertain deletion across Account → Home → Account', async () 
   expect(fetcher.mock.calls.filter(([url, options]) => url === '/api/me' && options?.method === 'DELETE')).toHaveLength(1);
 });
 beforeEach(() => {
+  localStorage.removeItem(storageKey('u'));
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   home = emptyHome(); status = homeStatus(); profile = { id: 'p', userId: 'u', status: 'ACTIVE', displayName: 'Lucía' };
   user = { uid: 'f', emailVerified: true, getIdToken: vi.fn().mockResolvedValue('test'), reload: vi.fn() };
@@ -502,6 +504,95 @@ it('keeps active chat on Back and hides session chrome',async()=>{
   expect(screen.queryByRole('button',{name:'Volver a Inicio'})).toBeNull();
   act(()=>window.dispatchEvent(new PopStateEvent('popstate')));
   expect(screen.getByRole('region',{name:'Primer chat'})).toBeVisible();
+});
+it('reports a match from hidden polling without navigation, then acknowledges only after visible successful chat load', async () => {
+  installFirstChatBackend();
+  const ordinary = fetcher.getMockImplementation()!;
+  const first = { type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' };
+  const existing = { type: 'SCHEDULING', matchId: 'other', connectionId: 'other', requiresAction: false };
+  home.nextSteps = [existing];
+  let releaseHome: (() => void) | undefined, holdHome = false, failChat = true;
+  fetcher.mockImplementation(async (url, options) => {
+    if (url === '/api/me/home/pending') return json({ version: status.version, serverTime: status.serverTime, pendingActions: [first], nextSteps: [existing], passiveNotices: [] });
+    if (url === '/api/me/home' && holdHome) await new Promise<void>(done => { releaseHome = done; });
+    if (url === '/api/matches/m/chat' && failChat) return json({}, 503);
+    return ordinary(url, options);
+  });
+  mount(); await ready();
+  const heading = screen.getByRole('heading', { name: 'Inicio' });
+  heading.focus();
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  status.version++;
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(30_000); });
+  expect(document.title).toBe('(1) Reals');
+  expect(screen.queryByRole('region', { name: 'Primer chat' })).toBeNull();
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/matches/m')).toBe(false);
+  holdHome = true; home.pendingActions = [first];
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(0); });
+  expect(screen.getByRole('heading', { name: 'Inicio' })).toBe(heading);
+  expect(heading).toHaveFocus();
+  expect(screen.getByRole('button', { name: 'Ver Actividad' })).toHaveAccessibleDescription('1 novedad');
+  expect(releaseHome).toBeDefined();
+  await act(async () => releaseHome?.());
+  expect(screen.getByRole('region', { name: 'Primer chat' })).toBeVisible();
+  expect(document.title).toBe('(1) Reals');
+  expect(screen.getByRole('alert')).toHaveTextContent(/actualizar el chat/);
+  failChat = false;
+  await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+  expect(screen.getByRole('heading', { name: 'María' })).toBeVisible();
+  expect(document.title).toBe('Reals');
+});
+
+it('does not automatically open an operational first chat loaded while hidden', async () => {
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  installFirstChatBackend(); home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }];
+  mount(); await ready();
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/matches/m')).toBe(false);
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  expect(await screen.findByRole('heading', { name: 'María' })).toBeVisible();
+});
+
+it('holds automatic first-chat entry while the foreground verifies a match loaded hidden and now invalidated', async () => {
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  installFirstChatBackend();
+  home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }];
+  mount(); await ready();
+  const ordinary = fetcher.getMockImplementation()!;
+  let release: (() => void) | undefined;
+  fetcher.mockImplementation(async (url, options) => {
+    if (url === '/api/me/home') await new Promise<void>(resolve => { release = resolve; });
+    return ordinary(url, options);
+  });
+  home.pendingActions = []; status.version++;
+  visibility.mockReturnValue('visible');
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(release).toBeDefined());
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/matches/m')).toBe(false);
+  await act(async () => release?.());
+  expect(screen.getByRole('heading', { name: 'Inicio' })).toBeVisible();
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/matches/m')).toBe(false);
+});
+
+it('changes the Web preference locally while preserving the Android request and preference state', async () => {
+  const ordinary = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => url === '/api/me/notification-preferences'
+    ? Promise.resolve(json({ activityEnabled: true, remindersEnabled: false, availabilityEnabled: true }))
+    : ordinary(url, options));
+  mount(); await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
+  expect(await screen.findByRole('switch', { name: 'Actividad' })).toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Web' }));
+  const web = screen.getByRole('switch', { name: 'Novedades de actividad' });
+  expect(web).toBeChecked(); fireEvent.click(web); expect(web).not.toBeChecked();
+  expect(JSON.parse(localStorage.getItem(storageKey('u')) ?? '{}')).toMatchObject({ enabled: false, records: null });
+  fireEvent.click(screen.getByRole('button', { name: 'Android' }));
+  expect(screen.getByRole('switch', { name: 'Actividad' })).toBeChecked();
+  expect(screen.getByRole('switch', { name: 'Recordatorios' })).not.toBeChecked();
+  expect(fetcher.mock.calls.filter(([url]) => url === '/api/me/notification-preferences').map(([, options]) => options?.method)).toEqual(['GET']);
 });
 it('sign-out removes pending chat and aborts its resources',async()=>{
   installFirstChatBackend();home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByRole('heading',{name:'María'});

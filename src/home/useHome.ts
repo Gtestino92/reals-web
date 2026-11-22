@@ -9,17 +9,29 @@ import type { LocationFailureKind } from './location';
 interface Model { home: HomeData; name: string }
 export type SearchPhase = 'idle' | 'locating' | 'admitting' | 'queued' | 'canceling' | 'reconciling' | 'failed';
 interface State { model: Model | null; busy: boolean; blocked: boolean; error: string; returning: boolean; searchPhase: SearchPhase; locationFailure: LocationFailureKind | null }
-interface Owner { lifetime: AbortController; read: AbortController | null; location: AbortController | null; serial: number; mutation: boolean; cancelRequested: boolean; version: number | null; uncertain: boolean; reconcile: boolean }
-export function useHome(controller: SessionController, active = true) {
+interface Owner { lifetime: AbortController; read: AbortController | null; location: AbortController | null; serial: number; mutation: boolean; cancelRequested: boolean; version: number | null; uncertain: boolean; reconcile: boolean; foregroundVerified: boolean }
+interface HomeObserver {
+  beginHomeRead: (signal: AbortSignal) => (() => void) | undefined;
+  observeHome: (home: HomeData, status: ReturnType<typeof parseStatus>, statusReceivedAt: number) => void;
+}
+export function useHome(controller: SessionController, active = true, observer?: HomeObserver | null) {
+  const notificationObserver = useRef(observer);
+  notificationObserver.current = observer;
   const [state, setState] = useState<State>({ model: null, busy: true, blocked: true, returning: false, error: '', searchPhase: 'idle', locationFailure: null });
   const foreground = useRef(active); foreground.current = active;
   const owner = useRef<Owner | null>(null), latest = useRef<Model | null>(null);
   const valid = (r: Owner, serial: number) => owner.current === r && !r.lifetime.signal.aborted && r.serial === serial;
   const load = async (r: Owner, serial: number, signal: AbortSignal, queue = false) => {
+    const finish = notificationObserver.current?.beginHomeRead(signal);
+    try { return await loadSnapshot(r, serial, signal, queue); }
+    finally { finish?.(); }
+  };
+  const loadSnapshot = async (r: Owner, serial: number, signal: AbortSignal, queue: boolean) => {
     const account = controller.snapshot.account, profileId = controller.snapshot.profile?.id;
     if (!account) throw new ApiError('invalid');
     // Capture baseline before projection: a concurrent invalidation stays observable.
     const status = parseStatus(await controller.request('/me/home/status', signal));
+    const statusReceivedAt = Date.now();
     const [rawProfile, rawQueue, rawHome] = await Promise.all([
       controller.request('/me/profile', signal),
       queue ? controller.request('/matchmaking/queue', signal) : Promise.resolve(null),
@@ -35,8 +47,10 @@ export function useHome(controller: SessionController, active = true) {
     if (valid(r, serial)) {
       const model = { home, name: rawProfile.displayName };
       r.version = status.version; r.reconcile = false; latest.current = model;
+      r.foregroundVerified = document.visibilityState === 'visible';
       setState(s => ({ ...s, model, blocked: r.uncertain, locationFailure: home.matchmaking.inQueue ? null : s.locationFailure,
         error: r.uncertain || (s.locationFailure && !home.matchmaking.inQueue) ? s.error : '' }));
+      notificationObserver.current?.observeHome(home, status, statusReceivedAt);
       return home;
     }
     return null;
@@ -52,8 +66,12 @@ export function useHome(controller: SessionController, active = true) {
     try {
       if (poll) {
         const status = parseStatus(await controller.request('/me/home/status', signal));
+        signal.throwIfAborted();
         if (!valid(r, serial)) return null;
-        if (!r.reconcile && !r.uncertain && status.version === r.version && !status.dirty && !(status.nextRefreshAt && Date.parse(status.serverTime) >= Date.parse(status.nextRefreshAt))) return latest.current?.home ?? null;
+        if (!r.reconcile && !r.uncertain && status.version === r.version && !status.dirty && !(status.nextRefreshAt && Date.parse(status.serverTime) >= Date.parse(status.nextRefreshAt))) {
+          r.foregroundVerified = document.visibilityState === 'visible';
+          return latest.current?.home ?? null;
+        }
       }
       r.reconcile = true;
       return await load(r, serial, signal, !poll && r.cancelRequested);
@@ -170,13 +188,17 @@ export function useHome(controller: SessionController, active = true) {
     }
   };
   useEffect(() => {
-    const r: Owner = { lifetime: new AbortController(), read: null, location: null, serial: 0, mutation: false, cancelRequested: false, version: null, uncertain: false, reconcile: true };
+    const r: Owner = { lifetime: new AbortController(), read: null, location: null, serial: 0, mutation: false, cancelRequested: false, version: null, uncertain: false, reconcile: true, foregroundVerified: false };
     owner.current = r; latest.current = null;
     setState({ model: null, busy: true, blocked: true, returning: false, error: '', searchPhase: 'idle', locationFailure: null });
     queueMicrotask(() => { if (!r.lifetime.signal.aborted) void refresh(); });
     const resume = () => {
       if (foreground.current && document.visibilityState === 'visible') void refresh(latest.current !== null);
-      else if (!r.mutation) { r.read?.abort(); r.read = null; }
+      else {
+        // A retained snapshot may keep rendering, but it cannot auto-open a chat on return.
+        r.foregroundVerified = false;
+        if (!r.mutation) { r.read?.abort(); r.read = null; }
+      }
     };
     const timer = window.setInterval(() => { if (foreground.current && document.visibilityState === 'visible') void refresh(true); }, 5000);
     document.addEventListener('visibilitychange', resume);
@@ -194,5 +216,5 @@ export function useHome(controller: SessionController, active = true) {
   }, [active]);
   const canRetryLocation = state.searchPhase === 'failed' && state.locationFailure !== null && !state.busy && !state.blocked &&
     state.model?.home.profileStatus === 'ACTIVE' && state.model.home.matchmaking.canSearch && !state.model.home.matchmaking.inQueue;
-  return { ...state, refreshOnReturn, reconcileHome, dismissSecondChat, canRetryLocation, retryLocation: () => { if (canRetryLocation) void mutate(false); }, refresh: () => void refresh(), search: () => void mutate(false), cancel: () => void mutate(true), backFromSearch: () => { if (!state.busy && !state.blocked && !latest.current?.home.matchmaking.inQueue) setState(s => ({ ...s, searchPhase: 'idle', error: '', locationFailure: null })); } };
+  return { ...state, canAutoOpen: () => owner.current?.foregroundVerified === true, refreshOnReturn, reconcileHome, dismissSecondChat, canRetryLocation, retryLocation: () => { if (canRetryLocation) void mutate(false); }, refresh: () => void refresh(), search: () => void mutate(false), cancel: () => void mutate(true), backFromSearch: () => { if (!state.busy && !state.blocked && !latest.current?.home.matchmaking.inQueue) setState(s => ({ ...s, searchPhase: 'idle', error: '', locationFailure: null })); } };
 }

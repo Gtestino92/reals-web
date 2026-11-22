@@ -1,4 +1,6 @@
 import { useChatViewport } from './useChatViewport';
+import { activityId } from '../notifications/activityPolicy';
+import { usePresentedActivity } from '../notifications/usePresentedActivity';
 import type { HomeNavigation } from '../home/useHomeNavigation';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { SessionController } from '../auth/session';
@@ -58,6 +60,7 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation,
   },[session]);
   const s = state.status, p = session.rules, now = session.now;
   const presentation = secondPresentation(s,now);
+  usePresentedActivity(root, p.active && !state.returnHome ? activityId('SECOND_CHAT_AVAILABLE', connectionId, s?.scheduledAt) : null);
   const writable = p.writable && !state.blocked, ordinary = writable && !state.busy && !state.outgoing && !audioDirty;
   const canHome = session.canReturnHome;
   const home = () => { if (!session.canReturnHome) return; if ((draft || audioDirty || state.outgoing) && !window.confirm('Hay un borrador o envío pendiente. ¿Querés salir y descartarlo?')) return; onHome(); };

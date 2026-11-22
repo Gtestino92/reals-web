@@ -66,8 +66,7 @@ it('associates one switch with each complete label and description, including ro
   expect(screen.getByRole('switch', { name: 'Actividad' })).toHaveAccessibleDescription('Nuevos chats y cambios importantes en tus interacciones.');
   expect(screen.getByRole('switch', { name: 'Recordatorios' })).toHaveAccessibleDescription('Avisos sobre revisiones pendientes y próximas segundas charlas.');
   expect(screen.getByRole('switch', { name: 'Disponibilidad' })).toHaveAccessibleDescription('Avisame cuando pueda volver a buscar a alguien nuevo.');
-  expect(screen.getByText(/Estos ajustes se aplican actualmente/)).toHaveTextContent('notificaciones push de Android');
-  expect(screen.getByText(/Estos ajustes se aplican actualmente/)).toHaveTextContent('Las notificaciones del navegador se configurarán por separado');
+  expect(screen.getByText('Estos ajustes se aplican a las notificaciones push de Android.')).toBeVisible();
   fireEvent.click(screen.getByText('Nuevos chats y cambios importantes en tus interacciones.'));
   await waitFor(() => expect(controller.request).toHaveBeenCalledTimes(2));
   expect(controller.request).toHaveBeenLastCalledWith('/me/notification-preferences', expect.any(AbortSignal), 'PUT', { ...preferences, activityEnabled: false });

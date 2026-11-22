@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import type { SessionController } from '../auth/session';
 import { ApiError, object } from '../auth/api';
 import { errorCode } from '../auth/errors';
+import { useActivityNotificationContext } from '../notifications/useActivityNotifications';
 import './notification-settings.css';
 import './password-dialog.css';
 
@@ -19,6 +20,8 @@ function parse(value: unknown): Preferences {
   return { activityEnabled: value.activityEnabled, remindersEnabled: value.remindersEnabled, availabilityEnabled: value.availabilityEnabled };
 }
 export function AccountSection({ controller, disabled, setup = false, onBack, notificationsOpen = false, onNotificationsOpen, onNavigationBlockedChange }: { controller: SessionController; disabled: boolean; setup?: boolean; onBack?: () => void; notificationsOpen?: boolean; onNotificationsOpen?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
+  const web = useActivityNotificationContext();
+  const [platform, setPlatform] = useState<'android' | 'web'>('android');
   const [deleteOpen, setDeleteOpen] = useState(false);
   const dismissDelete = useCallback(() => setDeleteOpen(false), []);
   const [signOutOpen, setSignOutOpen] = useState(false);
@@ -81,7 +84,15 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
       <p>Elegí qué avisos querés recibir.</p>
       <div className="brand-divider" aria-hidden="true"><span/></div>
     </header>
-    <p className="notification-platform">Estos ajustes se aplican actualmente a las notificaciones push de Android. Las notificaciones del navegador se configurarán por separado cuando estén disponibles.</p>
+    {web && <div className="notification-platform-selector" role="group" aria-label="Plataforma">
+      <button type="button" className="login-button login-outlined" aria-pressed={platform === 'android'} onClick={() => setPlatform('android')}>Android</button>
+      <button type="button" className="login-button login-outlined" aria-pressed={platform === 'web'} onClick={() => setPlatform('web')}>Web</button>
+    </div>}
+    {web && platform === 'web' ? <div className="notification-rows"><label className="notification-row">
+      <span className="notification-copy"><span className="notification-title" id={`${notificationId}-web-title`}>Novedades de actividad</span><span className="notification-description" id={`${notificationId}-web-description`}>Mostrá indicadores de actividad mientras Reals esté abierto. Este ajuste solo se aplica a tu cuenta en este navegador.</span></span>
+      <span className="notification-switch-target"><input type="checkbox" role="switch" className="notification-switch" aria-labelledby={`${notificationId}-web-title`} aria-describedby={`${notificationId}-web-description`} checked={web.enabled} disabled={disabled || deleteUncertain} onChange={e => web.setEnabled(e.target.checked)}/></span>
+    </label></div> : <>
+    <p className="notification-platform">Estos ajustes se aplican a las notificaciones push de Android.</p>
     <div className="notification-rows">{!preferences && busy && groups.map(([key]) => <div className="notification-row home-placeholder" aria-hidden="true" key={key}><span/><span/></div>)}{preferences && groups.map(([key, label]) => <label className="notification-row" key={key}>
       <span className="notification-copy"><span className="notification-title" id={`${notificationId}-${key}-title`}>{label}</span><span className="notification-description" id={`${notificationId}-${key}-description`}>{descriptions[key]}</span></span>
       <span className="notification-switch-target"><input type="checkbox" role="switch" className="notification-switch" aria-labelledby={`${notificationId}-${key}-title`} aria-describedby={`${notificationId}-${key}-description`} checked={preferences[key]} disabled={blocked || uncertain} onChange={e => savePreference(key, e.target.checked)}/></span>
@@ -91,6 +102,7 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
       {error && <p role="alert" className="notification-error">{notificationAction.current === 'write' ? error : 'No pudimos cargar las preferencias. Revisá tu conexión y usá «Consultar estado».'}</p>}
     </div>
     {(uncertain || (error && notificationAction.current === 'read')) && <button className="login-button login-outlined" disabled={blocked} onClick={read}>Consultar estado</button>}
+    </>}
   </section>;
   return <section className={setup ? 'home-card home-account' : 'home-account'} aria-label="Cuenta" aria-busy={busy}>
     {setup ? <header className="home-heading"><h3>Cuenta</h3><button type="button" className="login-button login-outlined" aria-label="Cuenta" aria-expanded={expanded} aria-controls="account-options" disabled={blocked} onClick={() => setExpanded(v => !v)}>{expanded ? 'Ocultar' : 'Abrir'}</button></header> : <header className="home-heading"><h2>Cuenta</h2><button className="login-button login-outlined" disabled={busy || view === 'password'} onClick={onBack}>Volver a Inicio</button></header>}

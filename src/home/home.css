@@ -80,3 +80,13 @@ html:has(.home) { scrollbar-gutter: stable; }
 .home-priority-action { color:var(--color-primary); font-size:.875rem; }
 .home-priority-chevron { position:absolute; right:12px; top:50%; transform:translateY(-50%); }
 .home-priority-row:disabled { opacity:.5; cursor:default; }
+.activity-unread {
+  display: inline-block;
+  margin-inline-start: .5rem;
+  padding-inline: .35rem;
+  border-radius: var(--radius-row);
+  background: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
+  font: 600 .75rem/1.5 var(--font-body);
+  vertical-align: middle;
+}

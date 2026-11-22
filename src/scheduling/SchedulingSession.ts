@@ -1,6 +1,6 @@
 import { ApiError, object } from '../auth/api';
 import type { SessionController } from '../auth/session';
-import { parseHome, type Activity as HomeActivity } from '../home/contracts';
+import { parseHome, type Activity as HomeActivity, type HomeData } from '../home/contracts';
 import { sessionContext } from '../visual/VisualSession';
 import { parseAvailability, parseConnection, parseNegotiation, parseProposals, type Availability, type Connection, type Negotiation, type Proposal } from './contracts';
 import { reviewReason, roundState, validateSlots } from './policy';
@@ -11,6 +11,7 @@ const accessDenied = (error: unknown) => error instanceof ApiError && [401,403,4
 const messages: Record<string,string> = {
   SCHEDULING_NOT_AVAILABLE:'La coordinación ya no está disponible.', SCHEDULING_EXPIRED:'La coordinación venció. Consultamos el estado actual.', SCHEDULING_INVALID_PROPOSALS:'Revisá los horarios elegidos.', SCHEDULING_PROPOSALS_ALREADY_SUBMITTED:'Ya enviaste horarios en esta ronda.', SCHEDULING_ROUND_CHANGED:'La ronda cambió. Revisá las opciones de la ronda actual.', SCHEDULING_PARTNER_PROPOSALS_NOT_AVAILABLE:'La lista recibida ya no está disponible.', SCHEDULING_PROPOSAL_NOT_AVAILABLE:'Este horario ya no está disponible.', SCHEDULING_CANNOT_ACCEPT_OWN_PROPOSAL:'No podés aceptar tu propio horario.', SCHEDULING_SLOT_CONFLICT:'El horario se superpone o no está disponible para confirmar. Elegí otra opción.',
 };
+export type SchedulingHomeRead = { home: HomeData; startedAt: number; serverTime: number };
 export class SchedulingSession {
   private state: State = {activity:'loading',connection:null,negotiation:null,proposals:[],availability:null,calendarActivity:null,calendarReadFailed:false,draft:[],busy:true,pending:false,verified:false,uncertain:false,error:'',message:'',errorContext:'screen',offset:0,terminal:false};
   private listeners = new Set<()=>void>();
@@ -19,7 +20,7 @@ export class SchedulingSession {
   private background: { controller: AbortController; calendar: boolean } | null = null;
   private generation = 0;
   readonly context: string;
-  constructor(private controller: SessionController, readonly connectionId: string, readonly matchId: string, private finish: ()=>void, private lock: (pending: boolean)=>void = ()=>{}) {this.context=sessionContext(controller);}
+  constructor(private controller: SessionController, readonly connectionId: string, readonly matchId: string, private finish: ()=>void, private lock: (pending: boolean)=>void = ()=>{}, private observeHome?: (read: SchedulingHomeRead) => void) {this.context=sessionContext(controller);}
   subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>{this.listeners.delete(fn);};};
   getSnapshot=()=>this.state;
   private current=()=>!this.lifetime.signal.aborted && this.controller.getSnapshot().phase==='ready' && sessionContext(this.controller)===this.context;
@@ -62,11 +63,14 @@ export class SchedulingSession {
       Date.parse(confirmedAt) > Date.now() + next.offset;
     let calendarActivity: HomeActivity | null = null;
     let calendarReadFailed = false;
+    let validatedHome: SchedulingHomeRead | undefined;
     if (home === 'required' || (home === 'upcoming' && upcoming)) {
       try {
-        const { nextSteps } = parseHome(await this.controller.request('/me/home', signal));
+        const startedAt = Date.now();
+        const projection = parseHome(await this.controller.request('/me/home', signal));
+        if (this.observeHome) validatedHome = { home: projection, startedAt, serverTime: startedAt + next.offset };
         if (upcoming) {
-          const matches = nextSteps.filter(item => item.connectionId === this.connectionId && item.matchId === this.matchId);
+          const matches = projection.nextSteps.filter(item => item.connectionId === this.connectionId && item.matchId === this.matchId);
           const item = matches[0];
           if (matches.length === 1 && item?.type === 'SECOND_CHAT_SCHEDULED' && item.secondChat &&
             Date.parse(item.secondChat.availableAt) === Date.parse(confirmedAt)) calendarActivity = item;
@@ -84,6 +88,7 @@ export class SchedulingSession {
       return false;
     }
     const changed=this.state.negotiation?.roundNumber!==next.negotiation?.roundNumber;
+    if (validatedHome) this.observeHome?.(validatedHome);
     this.install({...next,calendarActivity,calendarReadFailed,verified:true,uncertain:false,...(changed?{draft:[]}:{}),...(next.negotiation?.status==='CONFIRMED'?{message:''}:{}),terminal:next.connection.state==='CLOSED'&&next.negotiation?.status!=='FAILED'});
     return true;
   }

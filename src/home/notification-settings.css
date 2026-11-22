@@ -2,6 +2,13 @@
 .account-notifications .notification-heading p { margin: 8px 0 0; color: var(--color-on-surface-variant); }
 .notification-heading .brand-divider { width: 100%; margin-top: 18px; }
 .account-notifications .notification-platform { margin: 0; font-size: .875rem; color: var(--color-on-surface-variant); }
+.notification-platform-selector { display: flex; gap: .5rem; }
+.notification-platform-selector > button { flex: 1; }
+.notification-platform-selector [aria-pressed=true] {
+  background: var(--color-secondary-container);
+  border-color: var(--color-secondary);
+  color: var(--color-on-secondary-container);
+}
 .notification-rows { display: grid; gap: 12px; }
 .account-notifications .notification-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 72px; padding: 16px; border: 1px solid var(--color-outline-variant); border-radius: var(--radius-row); background: var(--color-surface); cursor: pointer; }
 .notification-copy { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }

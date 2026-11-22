@@ -1876,3 +1876,34 @@ Audited Android `SchedulingScreen` / `ScheduledCard`, `SchedulingCoordinator`, `
 Validation on `feature/google-calendar-second-chat` at `58d848b`. Full Vitest passed 1,944 tests across 73 files. Final focused Vitest passed 123 tests, including the additional omitted-duration regression. Typecheck, architecture, synthetic Dev and Prod builds, and diff and UTF-8 checks passed. Synthetic Chromium passed 28 checks across four viewport/theme scenarios, including actual Scheduling polling and the Activity handoff. Screenshots are under ignored `artifacts/google-calendar/`. Physical devices, live accounts and the Google form remain unverified.
 
 Corrective validation at `2cb2643`. Focused Vitest passed 228 tests across six files, including both directions of surface synchronization, account and schedule isolation, blocked storage, pruning, and removal at start or authoritative closure. Synthetic Chromium verified the transition at 390px dark and 1440px light, keyboard focus, the same URL on retry, synchronization between two real browser tabs, and persistence across full document reload. The browser fixture intercepted the Google navigation.
+
+### Web activity notifications
+
+Web base `origin/development` at `b228266`. Android reference `97827fb`.
+The audit followed Android's [FCM dispatch and invalidation](../../reals-app/app/src/main/java/com/reals/app/notifications/RealsFirebaseMessagingService.kt), [foreground presentation policy](../../reals-app/app/src/main/java/com/reals/app/notifications/NotificationPresentationPolicy.kt), [root notification navigation](../../reals-app/app/src/main/java/com/reals/app/ui/root/RealsRootViewModel.kt), [Home polling](../../reals-app/app/src/main/java/com/reals/app/ui/root/HomeCoordinator.kt), [Home and pending surfaces](../../reals-app/app/src/main/java/com/reals/app/ui/matchmaking/HomePendingScreens.kt), and [account settings](../../reals-app/app/src/main/java/com/reals/app/ui/account/NotificationSettingsScreen.kt). Related Android policy, invalidation, coordinator and settings UI tests were inspected. No matching notification screenshots were found in the reference checkout. Backend implementation at local `dfbef8d` and tracked `origin/development` at `18906a6` was checked against the [Home API](../../reals-backend/docs/commons/api.md) and [lifecycle contract](../../reals-backend/docs/commons/domain.md).
+
+| Behavior | Web implementation and parity status |
+| --- | --- |
+| Match found and invalidation | COMPLETE for the Web activity model. `FIRST_CHAT` uses match/chat identity. Authoritative absence or replacement removes it silently. Actual chat presentation reads it. Foreground automatic opening stays with operational Home. |
+| Visual discovery and negotiation available | COMPLETE for the Web activity model. `VISUAL_REVIEW` and `SCHEDULING` map to their existing cards and loaded destinations. Card order and urgency priorities follow the existing Activity policy. |
+| Confirmed scheduling | PARTIAL by design. Android push chooses recipients from its push event. Web uses an unconsulted authoritative appointment and can acknowledge the visible Activity card or Scheduling confirmation. Home supplies the appointment instant and no push-recipient metadata. |
+| Second-chat availability | PARTIAL for exact eligibility. The lightweight Home stage and pending attendance cover ordinary entry before a chat row exists. Home lacks unresolved no-show claim details, so it cannot expose a claim that has just expired before lifecycle reconciliation. The existing second-chat status and entry path continue to enforce actual eligibility. |
+| Visual structure, focus, Back, and read state | COMPLETE for scoped simulated behavior. The Web title, favicon, unread count and card text share one model. Existing card controls, navigation, and retry paths stay with their surfaces. The appointment card requires viewport visibility. Native Chromium verified viewport behavior and horizontal fit at mobile and desktop widths with synthetic data. Native tab chrome, physical devices, and assistive technology remain unverified. |
+| Android and Web preference controls | COMPLETE for scoped Web behavior. Existing Android switches, load/error/recovery and GET/PUT stay in the Android segment. The Web switch uses account/browser storage independently. |
+| Push delivery while hidden or closed | PLATFORM-LIMITED. Android uses system notifications and external-open routing. Web observes current activity while its owning document can run, with best-effort hidden polling. No external-open route, notification history, wake-up delivery, or install badge is provided. |
+| Push-only events | MISSING by scope. Proposal receipt, matchmaking availability, visual/second-chat reminders, messages, audio, reactions, and private chat actions are excluded. Proposal submission and non-terminal rounds do not reliably invalidate Home. |
+
+See [coordinator architecture, request budget and invariants](frontend-architecture.md#web-activity-notifications).
+
+#### Validation
+
+The following focused command passed 403 tests across 14 files.
+
+```text
+npm run test:focused -- src/notifications/activityPolicy.test.ts src/notifications/useActivityNotifications.test.tsx src/notifications/presentation.test.tsx src/App.ownership.test.tsx src/home/Home.test.tsx src/home/useHome.polling.test.tsx src/home/Home.secondRestoration.test.tsx src/home/HomeSecondPresentation.test.tsx src/home/AccountSection.test.tsx src/scheduling/Scheduling.test.tsx src/scheduling/SchedulingSession.test.ts src/chat/FirstChat.test.tsx src/chat/SecondChat.test.tsx src/visual/VisualReview.test.tsx --maxWorkers=2
+```
+
+- `npm run build` passed with `VITE_REALS_ENVIRONMENT=dev` and `prod` using the synthetic CI variables. Both builds ran `npm run typecheck` and reported the existing chunk-size advisory.
+- `npm run check:architecture` passed with 99 production modules and zero runtime cycles. `git diff --check` and the UTF-8 scan passed.
+- `npm run dev -- --host 127.0.0.1 --port 5274` and an inline `node --input-type=module` check using the existing Chrome DevTools helper passed at 390px dark and 1440px light. Checks covered count and badges, scrolling the appointment into view, toggling Web settings, restoration of the three original favicon links, and horizontal fit. The fixture used local synthetic API data. Real tab chrome, background throttling on physical devices, deployed CSP, and live backend behavior remain open.
+- The full regression suite and broad browser smoke scenarios were outside this validation.
