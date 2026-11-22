@@ -1,4 +1,5 @@
 import { appCheckTokens } from './appCheck';
+import type { AppCheckTokenProvider } from './appCheck';
 import { isLocalVite, missingFirebaseSettings, resolveEnvironment } from '../config/environment';
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { getApps, initializeApp } from 'firebase/app';
@@ -10,7 +11,7 @@ export interface GoogleContext { provider: string | null; authTime: number }
 export interface AuthService {
   googleContext?: (identity: Identity) => Promise<GoogleContext>;
   reauthenticateGoogle?: (identity: Identity) => Promise<void>;
-  appCheckToken?: () => Promise<string>;
+  appCheckToken?: AppCheckTokenProvider;
   observe: (next: (user: Identity | null) => void, error: (error: unknown) => void) => () => void;
   signIn: (email: string, password: string, keepSignedIn: boolean) => Promise<Identity>;
   signUp: (email: string, password: string, keepSignedIn: boolean) => Promise<Identity>;

@@ -184,6 +184,12 @@ Targeted Chromium regression: start `npm run dev -- --host 127.0.0.1 --port 5174
 
 ## Local Web App Check Debug Provider
 
+For ordinary functional testing against the default `local-firebase` backend, use `VITE_REALS_ENVIRONMENT=local`, leave `VITE_API_BASE_URL` blank, and set `VITE_FIREBASE_APP_CHECK_DEBUG=false` or omit it. On `localhost` and `127.0.0.1` in Vite DEV, ordinary requests skip App Check initialization and the `X-Firebase-AppCheck` header. The provider and site key can be unset for this workflow. Firebase Auth Web settings and the user's ID token are still required wherever the API requires authentication. Restart Vite after changing the file.
+
+Admin eligibility and all protected Admin calls still require attestation, even when the local backend disables App Check for ordinary requests. The Admin status check can run during Google sign-in. If the provider or site key is missing, or the SDK cannot obtain a token, the Admin check fails before sending the request. Hosted `dev`, hosted `prod`, compiled builds, and non-loopback hosts have no exemption.
+
+To test explicit App Check locally, set `VITE_FIREBASE_APP_CHECK_DEBUG=true` and configure the provider and matching site key below. Switch back to ordinary testing by setting the flag to `false` or removing it, restarting Vite, and reloading the page.
+
 The ignored `.env.local` uses these public configuration names (never put a debug credential in an environment variable):
 
 ```dotenv
