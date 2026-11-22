@@ -24,7 +24,7 @@ it.each(['localhost', '127.0.0.1'])('enables official debug mode before SDK init
   sdk.getToken.mockResolvedValue({ token: 'synthetic-attestation' });
   sdk.initializeAppCheck.mockImplementationOnce(() => { expect(self.FIREBASE_APPCHECK_DEBUG_TOKEN).toBe(true); return {}; });
   const a = app(), config = { ...env, DEV: true, PROD: false, VITE_FIREBASE_APP_CHECK_DEBUG: 'true' };
-  await appCheckTokens(a, config)(); await appCheckTokens(a, config)();
+  await appCheckTokens(a, config)('ordinary'); await appCheckTokens(a, config)('administrative');
   expect(sdk.initializeAppCheck).toHaveBeenCalledOnce();
   expect(self.FIREBASE_APPCHECK_DEBUG_TOKEN).toBe(true);
 });
@@ -66,6 +66,83 @@ it.each([base, { ...env, VITE_FIREBASE_APP_CHECK_SITE_KEY: '' }, { ...env, VITE_
 });
 it.each([null, { token: '' }])('maps unavailable attestation to a safe error', async result => {
   sdk.getToken.mockResolvedValue(result); await expect(appCheckTokens(app(), env)()).rejects.toMatchObject({ code: 'APP_CHECK_VERIFICATION_UNAVAILABLE' });
+});
+it.each([
+  ['localhost', undefined], ['localhost', 'false'],
+  ['127.0.0.1', undefined], ['127.0.0.1', 'false'],
+])('sends ordinary requests on %s with debug=%s and without App Check setup', async (hostname, debug) => {
+  vi.stubGlobal('self', { location: { hostname } });
+  const config = { ...base, DEV: true, PROD: false, VITE_REALS_ENVIRONMENT: 'local', VITE_FIREBASE_APP_CHECK_DEBUG: debug };
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response('{}'));
+  const api = new ApiClient(fetcher).withAppCheck(appCheckTokens(app(), config)).withOwnership();
+  const user = { uid: 'u', emailVerified: true, reload: async () => {}, getIdToken: vi.fn().mockResolvedValue('synthetic-id') };
+  const signal = new AbortController().signal;
+  await api.request('/me', signal, user);
+  await api.request('/auth/password-reset', signal, undefined, 'POST', {});
+  expect(fetcher.mock.calls.map(([, options]) => new Headers(options?.headers).get('X-Firebase-AppCheck'))).toEqual([null, null]);
+  expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer synthetic-id');
+  expect(user.getIdToken).toHaveBeenCalledExactlyOnceWith(false);
+  for (const path of ['/admin-auth/status', '/admin-auth/verify', '/admin/photos']) {
+    await expect(api.request(path, signal, user)).rejects.toMatchObject({ code: 'APP_CHECK_NOT_CONFIGURED' });
+  }
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(sdk.initializeAppCheck).not.toHaveBeenCalled();
+  expect(sdk.getToken).not.toHaveBeenCalled();
+});
+
+it.each(['false', 'true'])('still attests protected local requests with debug=%s', async debug => {
+  vi.stubGlobal('self', { location: { hostname: 'localhost' } });
+  sdk.getToken.mockResolvedValue({ token: 'synthetic-attestation' });
+  const config = { ...env, DEV: true, PROD: false, VITE_REALS_ENVIRONMENT: 'local', VITE_FIREBASE_APP_CHECK_DEBUG: debug };
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response('{}'));
+  const api = new ApiClient(fetcher).withAppCheck(appCheckTokens(app(), config));
+  const signal = new AbortController().signal;
+  await api.request('/me', signal);
+  expect(sdk.initializeAppCheck).toHaveBeenCalledTimes(debug === 'true' ? 1 : 0);
+  await api.request('/admin/photos', signal, undefined, 'GET', undefined, undefined, false, 'synthetic-grant');
+  const headers = new Headers(fetcher.mock.calls[1]?.[1]?.headers);
+  expect(headers.get('X-Firebase-AppCheck')).toBe('synthetic-attestation');
+  expect(headers.get('X-Reals-Admin-Grant')).toBe('synthetic-grant');
+  expect(sdk.initializeAppCheck).toHaveBeenCalledOnce();
+  expect(self.FIREBASE_APPCHECK_DEBUG_TOKEN).toBe(debug === 'true' ? true : undefined);
+  sdk.getToken.mockRejectedValueOnce(new Error('attestation unavailable'));
+  await expect(api.request('/admin-auth/status', signal)).rejects.toMatchObject({ code: 'APP_CHECK_VERIFICATION_UNAVAILABLE' });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  ['local', true, false, 'example.com', 'false'],
+  ['local', true, false, '[::1]', undefined],
+  ['local', true, false, 'localhost', 'invalid'],
+  ['dev', true, false, 'localhost', undefined],
+  ['prod', true, false, '127.0.0.1', 'false'],
+  ['dev', false, true, '127.0.0.1', 'false'],
+  ['prod', false, true, 'localhost', undefined],
+])('requires ordinary attestation in %s (DEV=%s PROD=%s host=%s debug=%s)', async (name, DEV, PROD, hostname, debug) => {
+  vi.stubGlobal('self', { location: { hostname } });
+  const config = { ...base, DEV, PROD, VITE_REALS_ENVIRONMENT: name, VITE_FIREBASE_APP_CHECK_DEBUG: debug };
+  const fetcher = vi.fn<typeof fetch>();
+  const signal = new AbortController().signal;
+  const api = new ApiClient(fetcher);
+  await expect(api.withAppCheck(appCheckTokens(app(), config)).request('/me', signal)).rejects.toMatchObject({ code: 'APP_CHECK_NOT_CONFIGURED' });
+  expect(sdk.initializeAppCheck).not.toHaveBeenCalled();
+  const configured = api.withAppCheck(appCheckTokens(app(), { ...env, ...config }));
+  fetcher.mockResolvedValueOnce(new Response('{}'));
+  sdk.getToken.mockResolvedValueOnce({ token: 'synthetic-attestation' });
+  await configured.request('/me', signal);
+  expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get('X-Firebase-AppCheck')).toBe('synthetic-attestation');
+  sdk.getToken.mockRejectedValueOnce(new Error('attestation unavailable'));
+  await expect(configured.request('/me', signal)).rejects.toMatchObject({ code: 'APP_CHECK_VERIFICATION_UNAVAILABLE' });
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it('rejects a missing attestation from a configured provider on administrative paths', async () => {
+  const fetcher = vi.fn<typeof fetch>();
+  const token = vi.fn().mockResolvedValue(null);
+  const api = new ApiClient(fetcher).withAppCheck(token);
+  await expect(api.request('/admin-auth/status', new AbortController().signal)).rejects.toMatchObject({ code: 'APP_CHECK_VERIFICATION_UNAVAILABLE' });
+  expect(token).toHaveBeenCalledExactlyOnceWith('administrative');
+  expect(fetcher).not.toHaveBeenCalled();
 });
 it('sends App Check on ordinary and admin requests; grants only on admin paths, never caches or replays admin-auth', async () => {
   const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response('{}'));

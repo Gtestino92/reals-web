@@ -4,24 +4,30 @@ import type { AppCheck } from 'firebase/app-check';
 import { appCheckSettings, isLocalVite } from '../config/environment';
 import { ApiError } from './api';
 
-export type AppCheckTokenProvider = () => Promise<string>;
+export type AppCheckTokenProvider = (scope?: 'ordinary' | 'administrative') => Promise<string | null>;
 declare global {
   interface Window { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean | string }
 }
 const instances = new WeakMap<FirebaseApp, AppCheck>();
+function isLocalAppCheckHost(env: ImportMetaEnv, hostname: string): boolean {
+  return isLocalVite(env) && (hostname === 'localhost' || hostname === '127.0.0.1');
+}
 export function localAppCheckDebugEnabled(env: ImportMetaEnv, hostname: string): boolean {
-  return isLocalVite(env) && env.VITE_FIREBASE_APP_CHECK_DEBUG === 'true' && (hostname === 'localhost' || hostname === '127.0.0.1');
+  return isLocalAppCheckHost(env, hostname) && env.VITE_FIREBASE_APP_CHECK_DEBUG === 'true';
 }
 export function appCheckTokens(app: FirebaseApp, env: ImportMetaEnv): AppCheckTokenProvider {
   // Debug is explicit and local-only; the SDK owns generation/exchange of its debug credential.
-  return async () => {
+  return async (scope = 'administrative') => {
+    const hostname = self.location.hostname;
+    const debug = env.VITE_FIREBASE_APP_CHECK_DEBUG;
+    if (scope === 'ordinary' && isLocalAppCheckHost(env, hostname) && (debug === undefined || debug === 'false')) return null;
     const settings = appCheckSettings(env);
     if (!settings) throw new ApiError('authorization', 0, 'APP_CHECK_NOT_CONFIGURED');
     const { provider, siteKey } = settings;
     try {
       let instance = instances.get(app);
       if (!instance) {
-        if (localAppCheckDebugEnabled(env, self.location.hostname)) self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+        if (localAppCheckDebugEnabled(env, hostname)) self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
         else if (self.FIREBASE_APPCHECK_DEBUG_TOKEN !== undefined) self.FIREBASE_APPCHECK_DEBUG_TOKEN = false;
         instance = initializeAppCheck(app, { provider: provider === 'v3' ? new ReCaptchaV3Provider(siteKey) : new ReCaptchaEnterpriseProvider(siteKey), isTokenAutoRefreshEnabled: true });
         instances.set(app, instance);

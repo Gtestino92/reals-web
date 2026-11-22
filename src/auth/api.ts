@@ -34,6 +34,8 @@ export class ApiClient {
   async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true, adminGrant?: string): Promise<unknown> {
     this.ownership?.assert();
     if (this.ownership) signal = AbortSignal.any([signal, this.ownership.signal]);
+    const route = path.split('?', 1)[0];
+    const administrative = route === '/admin' || route === '/admin-auth' || path.startsWith('/admin/') || path.startsWith('/admin-auth/');
     for (let attempt = 0; attempt < 2; attempt++) {
       signal.throwIfAborted();
       const headers: Record<string, string> = {};
@@ -42,13 +44,17 @@ export class ApiClient {
         if (!token.trim()) throw new ApiError('authorization', 401, 'INVALID_TOKEN');
         headers.Authorization = `Bearer ${token}`;
       }
-      if (this.appCheckToken && path !== '/ping' && !path.startsWith('/local-dev/')) headers['X-Firebase-AppCheck'] = await abortable(this.appCheckToken(), signal);
-      if (adminGrant && (path.startsWith('/admin/') || path.startsWith('/admin-auth/'))) headers['X-Reals-Admin-Grant'] = adminGrant;
+      if (this.appCheckToken && path !== '/ping' && !path.startsWith('/local-dev/')) {
+        const attestation = await abortable(this.appCheckToken(administrative ? 'administrative' : 'ordinary'), signal);
+        if (attestation !== null && attestation.trim()) headers['X-Firebase-AppCheck'] = attestation;
+        else if (attestation !== null || administrative || this.environment.name !== 'local') throw new ApiError('backend', 503, 'APP_CHECK_VERIFICATION_UNAVAILABLE');
+      }
+      if (adminGrant && administrative) headers['X-Reals-Admin-Grant'] = adminGrant;
       signal.throwIfAborted();
       const multipart = body instanceof FormData;
       if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
       let response: Response;
-      try { response = await this.fetcher(`${this.environment.apiOrigin}/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...(method === 'GET' && /^\/matches\/[^/]+(?:\/visual-profile|\/personal-messages\/partner)?$/.test(path) ? { cache: 'no-store' as const } : {}), ...((path.startsWith('/admin/') || path.startsWith('/admin-auth/')) ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
+      try { response = await this.fetcher(`${this.environment.apiOrigin}/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...(method === 'GET' && /^\/matches\/[^/]+(?:\/visual-profile|\/personal-messages\/partner)?$/.test(path) ? { cache: 'no-store' as const } : {}), ...(administrative ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
       catch { signal.throwIfAborted(); throw new ApiError('network'); }
       signal.throwIfAborted();
       if (!response.ok) {
@@ -57,7 +63,7 @@ export class ApiClient {
         try { raw = await response.json(); } catch { signal.throwIfAborted(); throw new ApiError('invalid', response.status, '', {}, retryAfter); }
         signal.throwIfAborted();
         if (!object(raw) || typeof raw.code !== 'string') throw new ApiError('invalid', response.status, '', {}, retryAfter);
-        if (response.status === 401 && raw.code === 'INVALID_TOKEN' && user && attempt === 0 && refreshInvalidToken && !path.startsWith('/admin/') && !path.startsWith('/admin-auth/')) continue;
+        if (response.status === 401 && raw.code === 'INVALID_TOKEN' && user && attempt === 0 && refreshInvalidToken && !administrative) continue;
         throw new ApiError(response.status === 401 || response.status === 403 ? 'authorization' : 'backend', response.status, raw.code, {
           ...(typeof raw.error === 'string' ? { error: raw.error } : {}),
           ...(typeof raw.message === 'string' ? { message: raw.message } : {}),
