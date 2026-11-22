@@ -210,8 +210,7 @@ export function useActivityNotifications(controller: SessionController, accountI
   }, [accountId, administrative, controller, install, mode, ownsSession, saved.enabled]);
 
   const now = useMemo(() => Date.now() + metadata.current.offset, [clockRevision, projection]);
-  const nextBoundary = Math.min(...(projection?.updates.flatMap(item => [item.starts, item.ends]
-    .filter((at): at is number => at !== null && at > now)) ?? []));
+  const nextBoundary = Math.min(...(projection?.updates.flatMap(({ ends }) => ends !== null && ends > now ? [ends] : []) ?? []));
   useLayoutEffect(() => {
     if (!saved.enabled || administrative || !Number.isFinite(nextBoundary)) return;
     const timer = setTimeout(() => redraw(value => value + 1), Math.max(0, Math.min(2_147_483_647, nextBoundary - Date.now() - metadata.current.offset)));
@@ -220,7 +219,7 @@ export function useActivityNotifications(controller: SessionController, accountI
   const unread = useMemo(() => {
     if (!saved.enabled || administrative || !projection) return empty;
     const unseen = new Set(saved.records?.filter(([, seen]) => !seen).map(([id]) => id));
-    return new Set(projection.updates.filter(item => unseen.has(item.id) && isCurrent(item, now, projection.serverTime)).map(item => item.id));
+    return new Set(projection.updates.filter(item => unseen.has(item.id) && isCurrent(item, now)).map(item => item.id));
   }, [administrative, now, projection, saved]);
   useTabIndicators(saved.enabled && !administrative ? unread.size : null);
   return useMemo(() => ({ enabled: saved.enabled, setEnabled, unread, present, beginHomeRead, observeHome, observeSchedulingHome, setHomeMode }),

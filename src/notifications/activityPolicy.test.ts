@@ -27,8 +27,7 @@ it('detects five stable stages from lightweight data, including entry without a 
   for (const attendance of ['NO_SHOW', 'ON_TIME', 'LATE']) {
     expect(snapshot([], [{ ...available, secondChat: { ...secondChat, myAttendanceStatus: attendance } }])).toEqual([]);
   }
-  expect(isCurrent(updates[4]!, now + 20 * 60_000, now)).toBe(false);
-  expect(isCurrent(updates[4]!, now, now - 1)).toBe(false);
+  expect(isCurrent(updates[4]!, now + 20 * 60_000)).toBe(false);
 });
 
 it('baselines, groups replacements, quietly invalidates, and drops unsupported stages', () => {

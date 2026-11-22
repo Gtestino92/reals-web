@@ -99,6 +99,31 @@ it('reconciles known second-chat boundaries, using 10 seconds near the start and
   expect(t.result.current.unread.size).toBe(0);
 });
 
+it('shows operational availability crossing the start after status, once per appointment and only until entry closes', async () => {
+  const t = fixture(); t.mode('ordinary');
+  const startsAt = start + 2_000, cutoff = start + 12_000;
+  const card = { type: 'SECOND_CHAT_SCHEDULED', matchId: 'm', connectionId: 'c', requiresAction: false,
+    secondChat: { availableAt: iso(startsAt), entryClosesAt: iso(cutoff), expiresAt: iso(start + 90_000),
+      myAttendanceStatus: 'PENDING', durationMinutes: 1 } };
+  t.feed(false, [], [card]);
+  const previousStatus = t.status(), receivedAt = Date.now();
+  await tick(3_000);
+  expect(t.result.current.unread.size).toBe(0);
+  const home = emptyHome();
+  home.nextSteps = [{ ...card, type: 'SECOND_CHAT_AVAILABLE' }];
+  const present = () => act(() => t.result.current.observeHome(parseHome(home), previousStatus, receivedAt));
+  present();
+  const key = activityId('SECOND_CHAT_AVAILABLE', 'c', card.secondChat.availableAt);
+  expect(t.result.current.unread).toEqual(new Set([key]));
+  present(); await tick(5_000);
+  expect(t.result.current.unread).toEqual(new Set([key]));
+  await tick(4_000);
+  expect(t.result.current.unread.size).toBe(0);
+  present();
+  expect(t.result.current.unread.size).toBe(0);
+  expect(t.request).not.toHaveBeenCalled();
+});
+
 it('suspends for chat, administration and disabled preference and rebaselines on re-enable', async () => {
   const t = fixture(); t.mode('chat'); t.feed(); t.publish([visual]); t.invalidate();
   await tick(60_000); expect(t.request).not.toHaveBeenCalled();

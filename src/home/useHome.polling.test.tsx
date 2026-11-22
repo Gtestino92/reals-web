@@ -7,10 +7,10 @@ import { emptyHome } from './fixtures';
 
 const available = Date.parse('2026-11-16T12:00:10Z');
 const iso = (time: number) => new Date(time).toISOString();
-function fixture() {
+function fixture(initialMarker: string | null = iso(available)) {
   const controller = controllerFixture();
   let serverTime = available - 10000, version = 1, dirty = false;
-  let marker: string | null = iso(available), fail = '', hold = '';
+  let marker = initialMarker, fail = '', hold = '';
   const releases: (() => void)[] = [];
   const request = vi.spyOn(controller, 'request').mockImplementation(async path => {
     // Capture at request time; delayed replies deliberately ignore abort.
@@ -95,11 +95,28 @@ it('refreshes on version invalidation even without a due marker', async () => {
 });
 
 it('distinguishes an unannounced direct database edit from normal scheduling', async () => {
-  const f = fixture(), { result } = renderHook(() => useHome(f.controller)); await settle();
+  const f = fixture(null), { result } = renderHook(() => useHome(f.controller)); await settle();
   f.marker(null); f.time(available + 1); await tick(); await tick();
   expect(f.count('/me/home')).toBe(1); expect(result.current.model?.home.pendingActions).toHaveLength(0);
   act(() => result.current.refresh()); await settle();
   expect(result.current.model?.home.pendingActions).toHaveLength(1);
+});
+
+it.each([null, iso(available + 60_000)])('reconciles a previously advertised boundary when another device replaces it with %s', async marker => {
+  const f = fixture(null), { result } = renderHook(() => useHome(f.controller)); await settle();
+  f.marker(iso(available)); f.time(available - 1); await tick();
+  expect(f.count('/me/home')).toBe(1);
+  f.marker(marker); f.time(available); await tick();
+  expect(result.current.model?.home.pendingActions[0]?.type).toBe('VISUAL_REVIEW');
+  expect(f.count('/me/home')).toBe(2);
+  // A consumed marker can still be returned by status and must not reload Home.
+  f.marker(iso(available)); await tick(); await tick();
+  expect(f.count('/me/home')).toBe(2);
+  expect(f.count('/me/home/status')).toBe(5);
+  if (marker) {
+    f.marker(null); f.time(Date.parse(marker)); await tick(); await tick();
+    expect(f.count('/me/home')).toBe(3);
+  }
 });
 
 it('serializes concurrent manual refresh, online and interval reads', async () => {

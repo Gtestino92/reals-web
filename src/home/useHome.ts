@@ -9,10 +9,12 @@ import type { LocationFailureKind } from './location';
 interface Model { home: HomeData; name: string }
 export type SearchPhase = 'idle' | 'locating' | 'admitting' | 'queued' | 'canceling' | 'reconciling' | 'failed';
 interface State { model: Model | null; busy: boolean; blocked: boolean; error: string; returning: boolean; searchPhase: SearchPhase; locationFailure: LocationFailureKind | null }
-interface Owner { lifetime: AbortController; read: AbortController | null; location: AbortController | null; serial: number; mutation: boolean; cancelRequested: boolean; version: number | null; uncertain: boolean; reconcile: boolean; foregroundVerified: boolean }
+interface Owner { lifetime: AbortController; read: AbortController | null; location: AbortController | null; serial: number; mutation: boolean; cancelRequested: boolean; version: number | null; uncertain: boolean; reconcile: boolean; foregroundVerified: boolean; refreshBoundaries: Set<number>; consumedBoundaries: Set<number> }
+type HomeStatus = ReturnType<typeof parseStatus>;
+interface StatusSample { status: HomeStatus; receivedAt: number; serverTime: number }
 interface HomeObserver {
   beginHomeRead: (signal: AbortSignal) => (() => void) | undefined;
-  observeHome: (home: HomeData, status: ReturnType<typeof parseStatus>, statusReceivedAt: number) => void;
+  observeHome: (home: HomeData, status: HomeStatus, statusReceivedAt: number) => void;
 }
 export function useHome(controller: SessionController, active = true, observer?: HomeObserver | null) {
   const notificationObserver = useRef(observer);
@@ -21,17 +23,25 @@ export function useHome(controller: SessionController, active = true, observer?:
   const foreground = useRef(active); foreground.current = active;
   const owner = useRef<Owner | null>(null), latest = useRef<Model | null>(null);
   const valid = (r: Owner, serial: number) => owner.current === r && !r.lifetime.signal.aborted && r.serial === serial;
-  const load = async (r: Owner, serial: number, signal: AbortSignal, queue = false) => {
+  const readStatus = async (r: Owner, serial: number, signal: AbortSignal): Promise<StatusSample> => {
+    const status = parseStatus(await controller.request('/me/home/status', signal));
+    signal.throwIfAborted();
+    const boundary = status.nextRefreshAt ? Date.parse(status.nextRefreshAt) : null;
+    // Another device can consume or replace the shared marker before our snapshot catches up.
+    if (valid(r, serial) && boundary !== null && !r.consumedBoundaries.has(boundary)) r.refreshBoundaries.add(boundary);
+    return { status, receivedAt: Date.now(), serverTime: Date.parse(status.serverTime) };
+  };
+  const load = async (r: Owner, serial: number, signal: AbortSignal, queue = false, sample?: StatusSample) => {
     const finish = notificationObserver.current?.beginHomeRead(signal);
-    try { return await loadSnapshot(r, serial, signal, queue); }
+    try { return await loadSnapshot(r, serial, signal, queue, sample); }
     finally { finish?.(); }
   };
-  const loadSnapshot = async (r: Owner, serial: number, signal: AbortSignal, queue: boolean) => {
+  const loadSnapshot = async (r: Owner, serial: number, signal: AbortSignal, queue: boolean, sample?: StatusSample) => {
     const account = controller.snapshot.account, profileId = controller.snapshot.profile?.id;
     if (!account) throw new ApiError('invalid');
     // Capture baseline before projection: a concurrent invalidation stays observable.
-    const status = parseStatus(await controller.request('/me/home/status', signal));
-    const statusReceivedAt = Date.now();
+    const { status, receivedAt, serverTime } = sample ?? await readStatus(r, serial, signal);
+    signal.throwIfAborted();
     const [rawProfile, rawQueue, rawHome] = await Promise.all([
       controller.request('/me/profile', signal),
       queue ? controller.request('/matchmaking/queue', signal) : Promise.resolve(null),
@@ -47,10 +57,16 @@ export function useHome(controller: SessionController, active = true, observer?:
     if (valid(r, serial)) {
       const model = { home, name: rawProfile.displayName };
       r.version = status.version; r.reconcile = false; latest.current = model;
+      for (const boundary of r.refreshBoundaries) {
+        if (boundary <= serverTime) {
+          r.refreshBoundaries.delete(boundary);
+          r.consumedBoundaries.add(boundary);
+        }
+      }
       r.foregroundVerified = document.visibilityState === 'visible';
       setState(s => ({ ...s, model, blocked: r.uncertain, locationFailure: home.matchmaking.inQueue ? null : s.locationFailure,
         error: r.uncertain || (s.locationFailure && !home.matchmaking.inQueue) ? s.error : '' }));
-      notificationObserver.current?.observeHome(home, status, statusReceivedAt);
+      notificationObserver.current?.observeHome(home, status, receivedAt);
       return home;
     }
     return null;
@@ -64,17 +80,20 @@ export function useHome(controller: SessionController, active = true, observer?:
     if (returning) setState(s => ({ ...s, returning: true }));
     else if (!poll) { r.uncertain = false; r.reconcile = true; setState(s => ({ ...s, busy: true, blocked: true, error: '', locationFailure: null })); }
     try {
+      let sample: StatusSample | undefined;
       if (poll) {
-        const status = parseStatus(await controller.request('/me/home/status', signal));
+        sample = await readStatus(r, serial, signal);
         signal.throwIfAborted();
         if (!valid(r, serial)) return null;
-        if (!r.reconcile && !r.uncertain && status.version === r.version && !status.dirty && !(status.nextRefreshAt && Date.parse(status.serverTime) >= Date.parse(status.nextRefreshAt))) {
+        const { status, serverTime } = sample;
+        const due = [...r.refreshBoundaries].some(boundary => boundary <= serverTime);
+        if (!r.reconcile && !r.uncertain && status.version === r.version && !status.dirty && !due) {
           r.foregroundVerified = document.visibilityState === 'visible';
           return latest.current?.home ?? null;
         }
       }
       r.reconcile = true;
-      return await load(r, serial, signal, !poll && r.cancelRequested);
+      return await load(r, serial, signal, !poll && r.cancelRequested, sample);
     } catch {
       if (valid(r, serial) && !signal.aborted) { r.reconcile = true; setState(s => ({ ...s, blocked: true, locationFailure: null, error: 'No pudimos actualizar Inicio. Revisá tu conexión y usá Reintentar.' })); }
       return null;
@@ -188,7 +207,7 @@ export function useHome(controller: SessionController, active = true, observer?:
     }
   };
   useEffect(() => {
-    const r: Owner = { lifetime: new AbortController(), read: null, location: null, serial: 0, mutation: false, cancelRequested: false, version: null, uncertain: false, reconcile: true, foregroundVerified: false };
+    const r: Owner = { lifetime: new AbortController(), read: null, location: null, serial: 0, mutation: false, cancelRequested: false, version: null, uncertain: false, reconcile: true, foregroundVerified: false, refreshBoundaries: new Set(), consumedBoundaries: new Set() };
     owner.current = r; latest.current = null;
     setState({ model: null, busy: true, blocked: true, returning: false, error: '', searchPhase: 'idle', locationFailure: null });
     queueMicrotask(() => { if (!r.lifetime.signal.aborted) void refresh(); });

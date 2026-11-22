@@ -102,8 +102,8 @@ export function parsePendingUpdates(value: unknown) {
 }
 
 export type ActivityUpdate = Update;
-export const isCurrent = (item: Update, now: number, serverTime: number) =>
-  (item.rank !== 4 || item.starts === null || item.starts <= serverTime) && (item.ends === null || now < item.ends);
+// The projected stage establishes availability. Time can only hide an expired indicator.
+export const isCurrent = (item: Update, now: number) => item.ends === null || now < item.ends;
 
 export const fallbackInterval = 120_000;
 export function notificationInterval({ suspended, ordinary, visible, queued, nearSecondChat }: {
