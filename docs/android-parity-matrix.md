@@ -1909,3 +1909,49 @@ npm run test:focused -- src/notifications/activityPolicy.test.ts src/notificatio
 - The full regression suite and broad browser smoke scenarios were outside this validation.
 
 Temporal follow-up on base `e6e6e8e`. Foreground Home retains previously advertised wake-up times across shared marker replacement, and its successful full read consumes due markers once. An authoritative eligible `SECOND_CHAT_AVAILABLE` projection can update the indicator even when the preceding status was captured before the start. The focused Home and notification suites passed 140 tests across six files, including both races and the entry cutoff.
+
+### Mobile chat viewport and density
+
+Pre-change audit against Android `97827fb` and Web `89e9a59`. Both native chats route from `RealsApp.kt` into `ChatScreen.kt`. See the [Android source map](android-reference.md) and [resume review](resume-glitch.md).
+
+| Behavior | Android source and pre-change Web status |
+| --- | --- |
+| Header, guidance and message list | `ChatScreen.kt`, `ChatChrome.kt` and `FirstChatPanels.kt` place header/guidance outside the weighted message list. **PARTIAL** in `FirstChat.tsx` and `chat.css`: the keyboard compact rules independently scroll chrome and can hide guidance and status panels. The desktop layout already keeps them separate. |
+| Composer, scrolling and grouped messages | `ChatAudioComposer.kt` limits text to four lines and aligns composer controls. `ChatChrome.kt` uses 6 dp message spacing and preserves following on composer resize. **PARTIAL** in both Web chats: extra row spacing, large draft area on tall mobile and compact composer/chrome caps. System IME insets and launcher shell are **PLATFORM-LIMITED** in browsers. |
+| Interaction, Back and accessibility | `ChatChrome.kt`, `FirstChatPanels.kt` and `FirstChatInteractionPolicy.kt` own reply and action availability. **PARTIAL** in Web: gestures, pointer and accessible keyboard actions exist, but compact clipping blocks access. Native guidance dismissal and native scroll animation are outside this correction. Browser history handles Back. |
+| Loading, pending, errors, resume and lifecycle | `ChatScreen.kt`, `FirstChatCoordinator.kt`, `SecondChatCoordinator.kt` and `SecondChatPanels.kt` consume server-owned state and render the lifecycle panels. **PARTIAL** for compact layout of these panels. Existing Web refresh, mutation, confirmation and access policies own their state independently of the viewport. |
+
+| Web path | Invariant |
+| --- | --- |
+| Layout/visual resize, visual pan, draft growth | Keep the same timeline, composer and question nodes. A single frame consumes the latest geometry. Follow only when already following, preserve scrolled-up reading position. Visual panning updates the fixed frame independently of sizing. |
+| Draft, reply, send, confirmation and retry | React and the chat sessions own drafts and confirmed payloads. Geometry reads and styles never write draft text or trigger actions. |
+| Poll / resume / overlapping reads or writes | Existing session ownership and reconciled snapshots still control message, question and lifecycle installation. Slow/failed resume retains usable same-owner content with its existing error path. |
+| Terminal/access, identity replacement and unmount | The authorized view owns only its viewport listeners, observer and pending animation frame. Cleanup releases those resources. Session and root identity gates continue to own data retirement and sign-out. |
+
+**COMPLETE for the scoped layout behavior in Chromium.** `FirstChat.tsx`,
+`SecondChat.tsx` and `chat.css` keep the question, progress control and composer
+outside the scrollable timeline. Compact mode places approval in the header.
+The shared composer shows up to three mobile lines or two in short viewports,
+with a one-line field and compact quote preview when a reply is selected.
+Message rows use a smaller gap for consecutive messages from the same sender,
+with room for timestamps and reactions. The timeline keeps a minimum usable
+height, and the chat frame can scroll when unusually short or stacked with
+exceptional state panels. The Web keeps its existing own-send following policy;
+the native list's extra auto-follow and guidance dismissal are outside this
+layout change.
+
+`node tools/mobile-chat-browser.mjs` exercised both loaded chats with 48
+synthetic messages and a 934-character draft in Chromium at 360, 430 and
+1280px across light and dark themes. At simulated 320/290px visual heights,
+the header and question stayed visible, the timeline alone scrolled, and
+following/reading position survived resize. Tests also exercised first-chat
+touch swipe to quote, new-message navigation during a refresh, and access
+to the composer by scrolling the chat frame at 185px. Before/after screenshots
+are in `artifacts/mobile-chat/`. Viewport unit tests cover visual panning, zoom,
+layout resize, frame coalescing and cleanup. Focused chat tests cover guidance,
+replies, lifecycle, sign-out and in-flight refreshes, including an obsolete and
+failed second-chat foreground read with a retained draft.
+
+**PLATFORM-LIMITED:** Chromium metrics simulate a reduced viewport. Native
+Android and iOS keyboards, browser-specific focus panning, installed-app
+insets, and physical orientation changes still need device verification.

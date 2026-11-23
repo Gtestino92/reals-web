@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { useRef } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useChatViewport } from './useChatViewport';
 
 const resizeInput = () => {};
@@ -11,13 +11,18 @@ function Conversation() {
   return <section ref={root} aria-label="Chat">
     <ol ref={timeline} aria-label="Mensajes" onScroll={event=>{
       const list=event.currentTarget;
+      if (height.current !== 0 && height.current !== list.clientHeight) return;
       following.current=list.scrollHeight-list.scrollTop-list.clientHeight<100;
     }}/>
     <div className="chat-composer"><textarea aria-label="Mensaje"/><button>Enviar mensaje</button></div>
   </section>;
 }
 
-afterEach(()=>vi.unstubAllGlobals());
+beforeEach(() => vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] }));
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 it('tracks keyboard open and close, panning and rotation while honoring reading intent and zoom', () => {
   const viewport=Object.assign(new EventTarget(),{height:768,offsetTop:0,scale:1});
@@ -29,6 +34,7 @@ it('tracks keyboard open and close, panning and rotation while honoring reading 
   draft.focus(); fireEvent.change(draft,{target:{value:'Borrador'}});
   viewport.height=320; viewport.offsetTop=48;
   viewport.dispatchEvent(new Event('resize'));
+  vi.advanceTimersToNextFrame();
   expect(chat.style.getPropertyValue('--chat-viewport')).toBe('320px');
   expect(chat.style.getPropertyValue('--chat-viewport-top')).toBe('48px');
   expect(chat).toHaveAttribute('data-compact-viewport');
@@ -36,10 +42,12 @@ it('tracks keyboard open and close, panning and rotation while honoring reading 
   list.scrollTop=120; fireEvent.scroll(list);
   viewport.offsetTop=64;
   viewport.dispatchEvent(new Event('scroll'));
+  vi.advanceTimersToNextFrame();
   expect(chat.style.getPropertyValue('--chat-viewport-top')).toBe('64px');
   expect(list.scrollTop).toBe(120);
   viewport.height=245;
   fireEvent(window,new Event('resize'));
+  vi.advanceTimersToNextFrame();
   expect(chat.style.getPropertyValue('--chat-viewport')).toBe('245px');
   expect(list.scrollTop).toBe(120);
   expect(draft).toHaveFocus();
@@ -48,10 +56,12 @@ it('tracks keyboard open and close, panning and rotation while honoring reading 
   draft.blur();
   Object.assign(viewport,{height:768,offsetTop:0});
   viewport.dispatchEvent(new Event('resize'));
+  vi.advanceTimersToNextFrame();
   expect(chat).not.toHaveAttribute('data-compact-viewport');
   expect(list.scrollTop).toBe(120);
   viewport.scale=1.5;
   viewport.dispatchEvent(new Event('resize'));
+  vi.advanceTimersToNextFrame();
   expect(chat).not.toHaveAttribute('data-visual-viewport');
   expect(chat.style.getPropertyValue('--chat-viewport-top')).toBe('');
   view.unmount();
@@ -68,6 +78,7 @@ it('updates from layout viewport resize when VisualViewport is unavailable', () 
   screen.getByRole('textbox').focus();
   vi.stubGlobal('innerHeight',330);
   fireEvent(window,new Event('resize'));
+  vi.advanceTimersToNextFrame();
   expect(chat.style.getPropertyValue('--chat-viewport')).toBe('330px');
   expect(chat).not.toHaveAttribute('data-visual-viewport');
   expect(chat).toHaveAttribute('data-compact-viewport');
@@ -84,10 +95,36 @@ it('compacts when visual and layout heights shrink together and restores on clos
   vi.stubGlobal('innerHeight',300);
   viewport.height=300;
   viewport.dispatchEvent(new Event('resize'));
+  vi.advanceTimersToNextFrame();
   expect(chat).toHaveAttribute('data-compact-viewport');
   vi.stubGlobal('innerHeight',760);
   viewport.height=760;
   viewport.dispatchEvent(new Event('resize'));
+  vi.advanceTimersToNextFrame();
   expect(chat).not.toHaveAttribute('data-compact-viewport');
   expect(screen.getByRole('textbox')).toHaveFocus();
+});
+
+it('uses the latest viewport geometry per frame and cancels queued work when the chat leaves', () => {
+  const viewport = Object.assign(new EventTarget(), { height: 800, offsetTop: 0, scale: 1 });
+  vi.stubGlobal('visualViewport', viewport);
+  const view = render(<Conversation/>);
+  const chat = screen.getByRole('region', { name: 'Chat' });
+
+  viewport.height = 319.75;
+  viewport.dispatchEvent(new Event('resize'));
+  fireEvent(window, new Event('resize'));
+  viewport.offsetTop = 12;
+  viewport.dispatchEvent(new Event('scroll'));
+  expect(vi.getTimerCount()).toBe(1);
+  vi.advanceTimersToNextFrame();
+  expect(chat.style.getPropertyValue('--chat-viewport')).toBe('319px');
+  expect(chat.style.getPropertyValue('--chat-viewport-top')).toBe('12px');
+
+  viewport.height = 250;
+  viewport.dispatchEvent(new Event('resize'));
+  view.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+  vi.advanceTimersToNextFrame();
+  expect(chat.style.getPropertyValue('--chat-viewport')).toBe('319px');
 });

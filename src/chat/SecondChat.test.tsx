@@ -16,7 +16,7 @@ it('tracks the visual viewport with the loaded second-chat composer and retains 
    fireEvent.change(input,{target:{value:'Te respondo'}});
    viewport.height=310; viewport.offsetTop=50;
    viewport.dispatchEvent(new Event('resize'));
-   expect(screen.getByRole('region',{name:'Segundo chat'}).style.getPropertyValue('--chat-viewport-top')).toBe('50px');
+   await waitFor(() => expect(screen.getByRole('region',{name:'Segundo chat'}).style.getPropertyValue('--chat-viewport-top')).toBe('50px'));
    expect(input).toHaveFocus(); expect(input).toHaveValue('Te respondo');
    expect(screen.getByRole('button',{name:'Quitar respuesta'})).toBeEnabled();
    expect(screen.getByRole('button',{name:'Enviar mensaje'})).toBeEnabled();
