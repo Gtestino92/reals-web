@@ -1,4 +1,12 @@
 ﻿.affinities { display: grid; gap: 16px; min-width: 0; }
+.affinities > .home-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) fit-content(50%);
+  align-items: start;
+  gap: 12px;
+}
+.affinities > .home-heading h2 { margin: 0; overflow-wrap: anywhere; }
+.affinities > .home-heading button { overflow-wrap: anywhere; }
 .affinities > progress { width: 100%; accent-color: var(--color-secondary); }
 .affinity-actions { display: grid; gap: 12px; }
 .affinity-actions fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }

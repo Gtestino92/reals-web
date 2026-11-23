@@ -35,7 +35,7 @@
 .visual-progress.warning { accent-color: var(--color-secondary); }
 .visual-progress.critical { accent-color: var(--color-error); }
 
-.visual-review { margin-block-start: 24px; }
+.visual-review { margin-block-start: calc(24px - var(--session-header-spacing, 0px)); }
 .visual-header { display: grid; gap: 24px; }
 .visual-header h2 { margin: 0; }
 .visual-toolbar h2 { min-width:0; overflow-wrap:anywhere; }

@@ -82,7 +82,8 @@ html:has(.home) { scrollbar-gutter: stable; }
 
 .home-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .home-admin-entry { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; width: auto; padding: 8px 12px; }
-.session-header { position: relative; }
+.login-panel:has(> .session-header) { --session-header-spacing: 16px; }
+.session-header { position: relative; padding-block-end: var(--session-header-spacing); }
 .session-admin-entry { position: absolute; right: 0; top: 0; }
 
 .management-placeholder .placeholder-field { margin-block: 24px; }
