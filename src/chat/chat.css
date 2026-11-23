@@ -13,12 +13,47 @@
 .first-chat .chat-decision-approve { background:var(--color-primary); color:var(--color-on-primary); border-color:var(--color-primary); }
 .first-chat .chat-composer[hidden] { display:none; }
 .chat-history { position:relative; flex:1 1 0; min-height:60px; display:grid; grid-template-rows:minmax(0, 1fr); }
-.chat-timeline { overflow:auto; list-style:none; padding:10px; margin:0; display:flex; flex-direction:column; gap:4px; background:var(--color-background); border:1px solid var(--color-outline-variant); border-radius:var(--radius-card); }
+.chat-timeline { overflow:auto; list-style:none; padding:10px; margin:0; display:flex; flex-direction:column; gap:4px; border-radius:var(--radius-card); }
+/* ChatChrome.kt uses a lighter wash for the second chat. Keep the border width stable. */
+.chat-timeline {
+  background: color-mix(in srgb, var(--color-surface) 38%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-outline) 48%, transparent);
+}
+.second-chat .chat-timeline {
+  background: color-mix(in srgb, var(--color-surface) 16%, transparent);
+  border-color: transparent;
+}
 .first-chat .chat-new-messages { position:absolute; z-index:2; bottom:8px; left:50%; transform:translateX(-50%); width:max-content; max-width:calc(100% - 24px); }
 .chat-message { max-width:85%; padding:12px; border:1px solid var(--color-outline-variant); border-radius:var(--radius-card); overflow-wrap:anywhere; flex-shrink:0; }
 .chat-message p { white-space:pre-wrap; margin:6px 0; }
-.chat-message.outgoing { align-self:flex-end; background:var(--color-secondary-container); }
-.chat-message.incoming { align-self:flex-start; background:var(--color-surface); }
+.chat-message.outgoing {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+.chat-message.incoming {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  border-color: color-mix(in srgb, var(--color-outline) 42%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  .chat-timeline {
+    background: color-mix(in srgb, var(--color-surface) 50%, transparent);
+    border-color: color-mix(in srgb, var(--color-outline-variant) 68%, transparent);
+  }
+  .second-chat .chat-timeline {
+    background: color-mix(in srgb, var(--color-surface) 26%, transparent);
+    border-color: color-mix(in srgb, var(--color-outline-variant) 30%, transparent);
+  }
+  .chat-message.outgoing {
+    background: color-mix(in srgb, var(--color-surface-container-high) 98%, transparent);
+    border-color: color-mix(in srgb, var(--color-outline-variant) 46%, transparent);
+  }
+  .chat-message.incoming {
+    background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+    border-color: color-mix(in srgb, var(--color-outline-variant) 72%, transparent);
+  }
+}
 .chat-message blockquote { border-left:3px solid var(--color-secondary); margin:4px 0; padding-left:8px; white-space:pre-wrap; }
 .chat-message time, .chat-sender { font-size:.8rem; }
 .chat-message audio, .chat-audio-composer audio { width:100%; max-width:280px; }
