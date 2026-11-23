@@ -1,16 +1,18 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type { AudioPolicy } from './contracts';
 import { prepareRecording, recordingMime } from './audio';
 import { ChatIcon } from './ChatIcon';
+import { preserveTextDraftFocus } from './ChatControls';
 
 type Phase = 'idle' | 'permission' | 'recording' | 'checking';
 type Draft = { file: Blob; url: string; duration: number };
-export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payloadLocked = false, confirmedFile, delivery, onRetry, children, textConfirmationVersion = 0 }: {
+export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payloadLocked = false, confirmedFile, delivery, onRetry, children, textDraft, textConfirmationVersion = 0 }: {
   policy: AudioPolicy | null; disabled: boolean; onSend: (file: Blob) => Promise<void> | void;
   onDirtyChange: (dirty: boolean) => void; payloadLocked?: boolean; confirmedFile?: Blob | null;
   delivery?: 'pending' | 'failed' | 'uncertain' | null; onRetry?: () => Promise<void>;
   children?: (microphone: ReactNode) => ReactNode;
+  textDraft?: RefObject<HTMLTextAreaElement | null>;
   textConfirmationVersion?: number;
 }) {
   const [phase, setPhase] = useState<Phase>('idle'), [draft, setDraft] = useState<Draft | null>(null);
@@ -137,6 +139,6 @@ export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payload
     {phase==='permission' && <div className={`chat-permission-notice ${children?'chat-permission-inline':''}`}><span role="status">Esperando permiso de micrófono…</span><button type="button" className="chat-text-action" onClick={cancel}>Cancelar solicitud</button></div>}
     <span id={explanationId} className="chat-visually-hidden">{explanation}</span>
     {error && <p role="alert">{error}</p>}
-    {policy && unavailable && policy.unavailableReason!=='FEATURE_DISABLED' && !dismissed.includes(unavailable) && <div className="chat-composer-support"><p>{explanation}</p><button type="button" className="chat-icon-button" aria-label="Ocultar aviso de audio" onClick={()=>setDismissed(current=>[...current,unavailable])}><ChatIcon name="close"/></button></div>}
+    {policy && unavailable && policy.unavailableReason!=='FEATURE_DISABLED' && !dismissed.includes(unavailable) && <div className="chat-composer-support"><p>{explanation}</p><button type="button" className="chat-icon-button" aria-label="Ocultar aviso de audio" onMouseDown={event => preserveTextDraftFocus(event, textDraft?.current)} onClick={()=>setDismissed(current=>[...current,unavailable])}><ChatIcon name="close"/></button></div>}
   </section>;
 }

@@ -2074,3 +2074,16 @@ and iPhone Safari remain **PLATFORM-LIMITED** checks for IME and real keyboard
 behavior.
 
 `npm test -- --maxWorkers=2` passed all 2,005 tests across 79 files.
+
+### Inline audio notice focus
+
+Reviewed Android's [composer supporting rows](../../reals-app/app/src/main/java/com/reals/app/ui/chat/ChatAudioComposer.kt), [audio state tests](../../reals-app/app/src/test/java/com/reals/app/ui/chat/ChatAudioComposerUiStateTest.kt) and [audio session](../../reals-app/app/src/main/java/com/reals/app/ui/chat/ChatAudioSession.kt). Android uses a dismissible inline row and tracks notice visibility separately from recording eligibility.
+
+| Path | Web status and invariant |
+| --- | --- |
+| Dismiss while writing | **COMPLETE** in Chromium for DOM focus. [AudioComposer](../src/chat/AudioComposer.tsx) uses the same primary `mousedown` guard as text send when the owning textarea is active. Native click dismisses only the supporting row. The textarea node, draft and disabled microphone survive. |
+| Dismiss after blur or via keyboard | **COMPLETE** in Chromium. Blur is respected and Space activates the native button. Permission and recording cancellation manage audio resources, and clearing a reply changes the pending message target. They retain their existing focus paths. |
+| Confirmed text, policy refresh and lifecycle | Existing confirmation and policy paths retain authority over quota and recording. Dismissal has no request or lifecycle transition. Read-only and navigation paths continue to own composer availability. |
+| Physical keyboard and assistive technology | **PLATFORM-LIMITED**. Chromium touch emulation verifies DOM focus and blur events. Physical Android Chrome still needs a tap with the keyboard open and after Android Back hides it. TalkBack, iPhone Safari and VoiceOver remain unverified. |
+
+`textSend.test.tsx` reproduces the old blur in both chats and covers focused/blurred tap, draft and quota retention. Chromium fixture checks passed for First and Second Chat at 390×844 and 1440×900 in light and dark, including desktop Space activation.
