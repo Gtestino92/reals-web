@@ -1,37 +1,190 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { withIdentityChrome } from './identity-chrome.mjs';
-const base=process.argv.find(a=>a.startsWith('--url='))?.slice(6) ?? 'http://127.0.0.1:5175';
-const visible=process.argv.includes('--visible'),scale=Number(process.argv.find(a=>a.startsWith('--scale='))?.slice(8) ?? 1);
-const specs=[['/favicon-16.png',16],['/favicon-32.png',32],['/apple-touch-icon.png',180],['/icons/icon-192.png',192],['/icons/icon-512.png',512],['/icons/icon-maskable-512.png',512]];
-for(const [path,size] of specs){const r=await fetch(base+path);assert.equal(r.status,200,path);assert.match(r.headers.get('content-type'),/^image\/png/);const png=Buffer.from(await r.arrayBuffer());assert.equal(png.readUInt32BE(16),size);assert.equal(png.readUInt32BE(20),size);}
-const icoResponse=await fetch(base+'/favicon.ico');assert.equal(icoResponse.status,200);assert.match(icoResponse.headers.get('content-type'),/^image\/(?:x-icon|vnd.microsoft.icon)/);
-const ico=Buffer.from(await icoResponse.arrayBuffer());assert.equal(ico.readUInt16LE(2),1);assert.equal(ico.readUInt16LE(4),2);
-for(let i=0;i<2;i++){const at=6+i*16;assert.equal(ico[at],[16,32][i]);const offset=ico.readUInt32LE(at+12),length=ico.readUInt32LE(at+8);assert.deepEqual(ico.subarray(offset,offset+length),await readFile(`public/favicon-${[16,32][i]}.png`));}
-const mr=await fetch(base+'/manifest.webmanifest');assert.equal(mr.status,200);assert.match(mr.headers.get('content-type'),/^application\/manifest\+json/);const manifest=await mr.json();
-assert.equal(manifest.name,'Reals');assert.equal(manifest.short_name,'Reals');assert.equal(manifest.display,'standalone');for(const key of ['id','scope','start_url'])assert.equal(manifest[key],'/');
-assert.equal(manifest.theme_color,'#f7f2e8');assert.equal(manifest.background_color,'#f7f2e8');
-assert.deepEqual(manifest.icons.map(i=>[i.src,i.sizes,i.type,i.purpose]),[['/icons/icon-192.png','192x192','image/png','any'],['/icons/icon-512.png','512x512','image/png','any'],['/icons/icon-maskable-512.png','512x512','image/png','maskable']]);
-await mkdir('artifacts/identity',{recursive:true});
-await withIdentityChrome(async({call,evaluate})=>{
-  await call('Page.enable');await call('Page.navigate',{url:base});
-  for(let i=0;i<100;i++){try{if(await evaluate("document.title==='Reals' && !!document.querySelector('link[rel=manifest]')"))break;}catch(error){if(!/Inspected target navigated|Execution context was destroyed|Cannot find context/.test(error.message))throw error;}await new Promise(r=>setTimeout(r,100));}
-  assert.equal(await evaluate('document.title'),'Reals');
-  const links=await evaluate("[...document.querySelectorAll('link[rel=icon],link[rel=apple-touch-icon],link[rel=manifest]')].map(n=>n.getAttribute('href'))");
-  assert.deepEqual(links,['/favicon.ico','/favicon-16.png','/favicon-32.png','/apple-touch-icon.png','/manifest.webmanifest']);
-  for(const [scheme,color] of [['light','#f7f2e8'],['dark','#08111f']]){
-    await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:scheme}]});
-    assert.equal(await evaluate("[...document.querySelectorAll('meta[name=theme-color]')].find(n=>matchMedia(n.media).matches)?.content"),color);
+
+const base = process.argv.find(arg => arg.startsWith('--url='))?.slice(6) ?? 'http://127.0.0.1:5175';
+const visible = process.argv.includes('--visible');
+const scale = Number(process.argv.find(arg => arg.startsWith('--scale='))?.slice(8) ?? 1);
+const versioned = path => path + '?v=2';
+const tabs = [16, 32].map(size => ({ path: versioned(`/favicon-${size}.png`), size }));
+const apple = { path: versioned('/apple-touch-icon.png'), size: 180 };
+const pwa = [
+  { path: versioned('/icons/icon-192.png'), size: 192, purpose: 'any' },
+  { path: versioned('/icons/icon-512.png'), size: 512, purpose: 'any' },
+  { path: versioned('/icons/icon-maskable-512.png'), size: 512, purpose: 'maskable' },
+];
+const pngs = [...tabs, apple, ...pwa];
+for (const { path, size } of pngs) {
+  const response = await fetch(base + path);
+  assert.equal(response.status, 200, path);
+  assert.match(response.headers.get('content-type'), /^image\/png/);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.equal(bytes.readUInt32BE(16), size);
+  assert.equal(bytes.readUInt32BE(20), size);
+  assert.ok([2, 6].includes(bytes[25]), 'Icon must use full color PNG');
+}
+const icoPath = versioned('/favicon.ico');
+const icoResponse = await fetch(base + icoPath);
+assert.equal(icoResponse.status, 200);
+assert.match(icoResponse.headers.get('content-type'), /^image\/(?:x-icon|vnd.microsoft.icon)/);
+const ico = Buffer.from(await icoResponse.arrayBuffer());
+assert.equal(ico.readUInt16LE(2), 1);
+assert.equal(ico.readUInt16LE(4), 2);
+for (const [index, { size }] of tabs.entries()) {
+  const entry = 6 + index * 16;
+  assert.equal(ico[entry], size);
+  const offset = ico.readUInt32LE(entry + 12), length = ico.readUInt32LE(entry + 8);
+  assert.deepEqual(ico.subarray(offset, offset + length), await readFile(`public/favicon-${size}.png`));
+}
+const manifestPath = '/manifest.webmanifest';
+const response = await fetch(base + manifestPath);
+assert.equal(response.status, 200);
+assert.match(response.headers.get('content-type'), /^application\/manifest\+json/);
+const manifest = await response.json();
+assert.equal(manifest.name, 'Reals');
+assert.equal(manifest.short_name, 'Reals');
+assert.equal(manifest.display, 'standalone');
+for (const field of ['id', 'scope', 'start_url']) assert.equal(manifest[field], '/');
+assert.equal(manifest.theme_color, '#f7f2e8');
+assert.equal(manifest.background_color, '#f7f2e8');
+assert.deepEqual(manifest.icons, pwa.map(({ path, size, purpose }) => ({
+  src: path, sizes: size + 'x' + size, type: 'image/png', purpose,
+})));
+
+const foreground = process.argv.includes('--android-reference') ?
+  (await readFile('../reals-app/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.webp')).toString('base64') : null;
+await mkdir('artifacts/identity', { recursive: true });
+await withIdentityChrome(async ({ call, evaluate }) => {
+  await call('Page.enable');
+  await call('Page.navigate', { url: base });
+  for (let i = 0; i < 100; i++) {
+    try { if (await evaluate("document.title === 'Reals'")) break; }
+    catch (error) {
+      if (!/Inspected target navigated|Execution context was destroyed|Cannot find context/.test(error.message)) throw error;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
-  const app=await call('Page.getAppManifest');assert.equal(app.url,base+'/manifest.webmanifest');assert.deepEqual(app.errors,[]);assert.equal(JSON.parse(app.data).id,'/');
-  const pixelReport=await evaluate(`(async()=>{const specs=${JSON.stringify(specs)},out=[];for(const [path,size] of specs){const image=new Image();image.src=path;await image.decode();const c=document.createElement('canvas');c.width=c.height=size;const x=c.getContext('2d');x.drawImage(image,0,0);const p=x.getImageData(0,0,size,size).data;let min=255,max=0,radius=0,artPixels=0;for(let y=0;y<size;y++)for(let z=0;z<size;z++){const i=(y*size+z)*4;min=Math.min(min,p[i+3]);max=Math.max(max,p[i+3]);if(path.includes('maskable')&&p[i]<210&&p[i+1]<190&&p[i+2]<170){radius=Math.max(radius,Math.hypot(z+.5-size/2,y+.5-size/2));artPixels++;}}out.push({path,size,alpha:[min,max],radius,artPixels});}return out;})()`);
-  for(const item of pixelReport){if(item.path.includes('favicon'))assert.deepEqual(item.alpha,[0,255]);else if(!item.path.includes('192'))assert.deepEqual(item.alpha,[255,255]);if(item.path.includes('maskable')){assert.ok(item.artPixels>1000);assert.ok(item.radius<512*.4,JSON.stringify(item));}}
-  const tabMarks=await evaluate(`(async()=>{const out=[];for(const size of [16,32]){const im=new Image();im.src='/favicon-'+size+'.png';await im.decode();const c=document.createElement('canvas');c.width=c.height=size;const x=c.getContext('2d');x.drawImage(im,0,0);const p=x.getImageData(0,0,size,size).data;let left=size,top=size,right=-1,bottom=-1,count=0;const ringSectors=Array(8).fill(0);for(let y=0;y<size;y++)for(let z=0;z<size;z++){const i=(y*size+z)*4,dx=z+.5-size/2,dy=y+.5-size/2,r=Math.hypot(dx,dy)/(size/2);if(r>.78&&r<1&&p[i+3]>128&&p[i]<210&&p[i+1]<190&&p[i+2]<170)ringSectors[Math.floor((Math.atan2(dy,dx)+Math.PI)/(Math.PI/4))%8]++;if(p[i+3]>128){left=Math.min(left,z);right=Math.max(right,z);top=Math.min(top,y);bottom=Math.max(bottom,y);count++;}}out.push({size,ringSectors,coverage:count/(size*size),center:[(left+right+1)/2,(top+bottom+1)/2],corners:[0,size-1,size*(size-1),size*size-1].map(i=>p[i*4+3])});}return out;})()`);
-  for(const mark of tabMarks){assert.deepEqual(mark.corners,[0,0,0,0]);assert.ok(mark.ringSectors.every(count=>count>0),'Seal must retain the outer ring in all eight sectors');assert.ok(mark.coverage>.65&&mark.coverage<.9,'Circular seal must retain its ivory interior and transparent surround');for(const center of mark.center)assert.ok(Math.abs(center-mark.size/2)<=1,'Seal must stay centered');}
-  const installability=await call('Page.getInstallabilityErrors');
-  console.log(JSON.stringify({base,scale,manifest:'PASS',pixels:pixelReport,tabMarks,installability:installability.installabilityErrors}));
-  // Separate review sheet: actual 16/32 px samples and common launcher masks.
-  const board=await evaluate(`(async()=>{const c=document.createElement('canvas');c.width=800;c.height=520;const x=c.getContext('2d');for(let row=0;row<2;row++){x.fillStyle=row?'#08111f':'#f7f2e8';x.fillRect(0,row*110,800,110);x.fillStyle=row?'white':'black';x.font='16px sans-serif';x.fillText(row?'Dark tab background':'Light tab background',12,row*110+22);for(const [i,size] of [16,32].entries()){const im=new Image();im.src='/favicon-'+size+'.png';await im.decode();x.drawImage(im,230+i*100,row*110+32,size,size);}}const mask=new Image();mask.src='/icons/icon-maskable-512.png';await mask.decode();for(let i=0;i<3;i++){x.save();x.beginPath();if(i===0)x.arc(130,365,105,0,Math.PI*2);else if(i===1)x.roundRect(275,260,210,210,45);else x.rect(535,260,210,210);x.clip();x.drawImage(mask,25+i*255,260,210,210);x.restore();}return c.toDataURL().split(',')[1];})()`);
-  await writeFile(`artifacts/identity/review-${scale}x.png`,Buffer.from(board,'base64'));
-  if(visible){console.log('Native Chrome ready for tab inspection (60 seconds)');await new Promise(r=>setTimeout(r,60000));}
-},{visible,scale});
+  assert.equal(await evaluate('document.title'), 'Reals');
+  const links = await evaluate(`[...document.querySelectorAll('link[rel=icon], link[rel=apple-touch-icon], link[rel=manifest]')].map(node => node.getAttribute('href'))`);
+  assert.deepEqual(links, [icoPath, ...tabs.map(tab => tab.path), apple.path, manifestPath]);
+  for (const [scheme, color] of [['light', '#f7f2e8'], ['dark', '#08111f']]) {
+    await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+    assert.equal(await evaluate("[...document.querySelectorAll('meta[name=theme-color]')].find(node => matchMedia(node.media).matches)?.content"), color);
+  }
+  const app = await call('Page.getAppManifest');
+  assert.equal(app.url, base + manifestPath);
+  assert.deepEqual(app.errors, []);
+  assert.deepEqual(JSON.parse(app.data), manifest);
+
+  const { board, report } = await evaluate(`(async () => {
+    const specs = ${JSON.stringify(pngs)};
+    async function load(src) {
+      const image = new Image();
+      image.src = src;
+      await image.decode();
+      return image;
+    }
+    const images = await Promise.all(specs.map(spec => load(spec.path)));
+    const report = specs.map(({ path, size }, index) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      const x = canvas.getContext('2d');
+      x.drawImage(images[index], 0, 0);
+      const pixels = x.getImageData(0, 0, size, size).data;
+      const at = (col, row) => (row * size + col) * 4;
+      const colors = new Set(), ringSectors = Array(8).fill(0);
+      let minAlpha = 255, maxAlpha = 0, radius = 0, coverage = 0;
+      for (let y = 0; y < size; y++) for (let col = 0; col < size; col++) {
+        const pixel = at(col, y);
+        const [r, g, b, a] = pixels.subarray(pixel, pixel + 4);
+        if (a === 255) colors.add((r * 256 + g) * 256 + b);
+        minAlpha = Math.min(minAlpha, a);
+        maxAlpha = Math.max(maxAlpha, a);
+        if (a > 128) coverage++;
+        if (a <= 128 || r >= 210 || g >= 190 || b >= 170) continue;
+        const dx = col + .5 - size / 2, dy = y + .5 - size / 2, distance = Math.hypot(dx, dy);
+        radius = Math.max(radius, distance);
+        if (distance > .78 * size / 2 && distance < size / 2) {
+          ringSectors[Math.floor((Math.atan2(dy, dx) + Math.PI) / (Math.PI / 4))]++;
+        }
+      }
+      return {
+        path, size, alpha: [minAlpha, maxAlpha], radius, colors: colors.size, ringSectors,
+        coverage: coverage / size ** 2,
+        corner: [...pixels.subarray(0, 4)],
+        corners: [0, size - 1, size * (size - 1), size ** 2 - 1].map(index => pixels[4 * index + 3]),
+      };
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 920;
+    canvas.height = 540;
+    const x = canvas.getContext('2d');
+    x.imageSmoothingQuality = 'high';
+    x.font = '15px sans-serif';
+    for (const [row, color] of ['#f7f2e8', '#08111f'].entries()) {
+      x.fillStyle = color;
+      x.fillRect(0, row * 42, 920, 42);
+      x.fillStyle = row ? '#fff' : '#08111f';
+      x.fillText(row ? 'Dark tab' : 'Light tab', 16, row * 42 + 25);
+      x.drawImage(images[0], 120, row * 42 + 13);
+      x.drawImage(images[1], 170, row * 42 + 5);
+    }
+    x.fillStyle = '#ddd';
+    x.fillRect(0, 84, 920, 456);
+    const tile = (label, col, row, draw, mask) => {
+      const left = col * 230 + 15, top = row * 220 + 116, size = 182;
+      x.fillStyle = '#08111f';
+      x.fillText(label, left, top - 8);
+      x.save();
+      if (mask) {
+        x.beginPath();
+        if (mask === 'circle') x.arc(left + size / 2, top + size / 2, size / 2, 0, Math.PI * 2);
+        else x.roundRect(left, top, size, size, 37);
+        x.clip();
+      }
+      draw(left, top, size);
+      x.restore();
+    };
+    const reference = ${JSON.stringify(foreground)};
+    if (reference) {
+      const native = await load('data:image/webp;base64,' + reference);
+      tile('Android adaptive reference', 0, 0, (left, top, size) => {
+        x.fillStyle = '#F1EAE3';
+        x.fillRect(left, top, size, size);
+        x.drawImage(native, 72, 72, 288, 288, left, top, size, size);
+      }, 'circle');
+    }
+    const draw = index => (left, top, size) => x.drawImage(images[index], left, top, size, size);
+    tile('PWA 192, circle preview', 1, 0, draw(3), 'circle');
+    tile('PWA 512, circle preview', 2, 0, draw(4), 'circle');
+    tile('Maskable, circle preview', 3, 0, draw(5), 'circle');
+    tile('Apple Touch preview', 1, 1, draw(2), 'rounded');
+    tile('Maskable, rounded preview', 2, 1, draw(5), 'rounded');
+    tile('Maskable, full canvas', 3, 1, draw(5));
+    return { board: canvas.toDataURL('image/png').split(',')[1], report };
+  })()`);
+  for (const icon of report) {
+    assert.ok(icon.ringSectors.every(count => count > 0), 'Retain the ring across all eight sectors');
+    if (icon.path.includes('favicon')) {
+      assert.deepEqual(icon.alpha, [0, 255]);
+      assert.deepEqual(icon.corners, [0, 0, 0, 0]);
+      assert.ok(icon.coverage > .65 && icon.coverage < .9);
+    } else {
+      assert.deepEqual(icon.alpha, [255, 255]);
+      assert.ok(icon.colors > 1000, 'Preserve source color detail without quantization');
+      const [red, green, blue] = icon.corner;
+      assert.ok(red >= 242 && red <= 248 && green >= 228 && green <= 233 && blue >= 212 && blue <= 219,
+        `Preserve the foreground cream tone from the launcher (${icon.path}: ${icon.corner})`);
+    }
+    if (icon.path.includes('maskable')) assert.ok(icon.radius < icon.size * .4, JSON.stringify(icon));
+  }
+  const { installabilityErrors } = await call('Page.getInstallabilityErrors');
+  console.log(JSON.stringify({ base, scale, manifest: 'PASS', report, installabilityErrors }));
+  await writeFile(`artifacts/identity/review-${scale}x.png`, Buffer.from(board, 'base64'));
+  if (visible) {
+    console.log('Native Chrome ready for tab inspection (60 seconds)');
+    await new Promise(resolve => setTimeout(resolve, 60000));
+  }
+}, { visible, scale });

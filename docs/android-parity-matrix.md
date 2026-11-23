@@ -1955,3 +1955,11 @@ failed second-chat foreground read with a retained draft.
 **PLATFORM-LIMITED:** Chromium metrics simulate a reduced viewport. Native
 Android and iOS keyboards, browser-specific focus panning, installed-app
 insets, and physical orientation changes still need device verification.
+
+### PWA launcher and installation
+
+| Android / browser reference | Web mapping and validation |
+| --- | --- |
+| Android manifest `ic_launcher` / `ic_launcher_round`, v26 adaptive XML and 432px launcher foreground (`97827fb`) | **COMPLETE** for the source artwork and browser assets. `tools/generate-browser-icons.mjs` uses the actual adaptive crop for full-color 192px, 512px and Apple Touch PNGs, with separate safe-area and tab crops. The previous notification-seal variants used lighter colors and an indexed palette. |
+| Launcher masks and installed app icon updates | **PLATFORM-LIMITED.** The same-size Chromium comparison sheet shows the cream, navy, gold and ring alignment against the source. The maskable art is within the 40% safe circle. Chrome parsed the manifest without errors in development and production preview. Launcher effects, install/update behavior and actual icon appearance still need Android and iPhone verification. |
+| iPhone Safari installation | **COMPLETE** for documentation. The [installation guide](browser-identity.md#instalar-reals-web) describes the manual Share flow and the optional Open as Web App setting. The app uses browser installation controls on both platforms. |
