@@ -2017,3 +2017,60 @@ bundle-size advisory.
 `npm test -- --maxWorkers=2` passed all 1,994 tests across 78 files on the final
 isolated run. An earlier concurrent run hit an onboarding timeout and loaded
 the pre-correction storage code alongside the malformed-v2 regression.
+
+### Chat menu alignment and send focus
+
+Audit at `aa31385`. Android's `ChatScreen.kt` and `ChatChrome.kt` keep the
+header's trailing controls next to an independently sized partner name.
+`ChatAudioComposer.kt` keeps the text field editable during an ordinary send
+while its send action is gated. Reviewed `MessageComposerUiStateTest.kt` and
+the existing Web keyboard, menu and send-reconciliation tests. The
+[backend chat contract](../../reals-backend/docs/commons/user-flow.md) owns
+message confirmation, lifecycle and idempotent retry.
+
+| Behavior | Pre-change parity |
+| --- | --- |
+| Header layout and menu | **PARTIAL**. The menu remains a distinct accessible control, but compact flex puts approval after the menu and shifts the trigger left. Long names need an independently sized column. |
+| Send focus, keyboard and accessibility | **PARTIAL**. In Chromium touch emulation, pressing send in either chat blurs the existing textarea before confirmation. The Web field stays mounted and editable while pending. The physical IME is **PLATFORM-LIMITED**. |
+| Navigation, pending, empty, errors, audio, polling and lifecycle | **COMPLETE** for the existing scoped Web flows' ownership. Back, dialogs, blocked or dismissed focus, read-only/terminal transitions, draft comparison and retry semantics continue through their existing paths. |
+
+| Path | Invariant |
+| --- | --- |
+| Compact resize and partner-name update | The existing menu node and its focus boundary remain at the trailing edge. Header controls never become a separate scroll region. |
+| Primary pointer send from a focused textarea | Cancel the button's default pointer focus transfer. Native click still submits through the existing form exactly once. Keyboard and assistive activation keep their native behavior. |
+| Pending, confirmed, failed and uncertain | Only the session and matching confirmation own draft clearing and retry. Focus never changes in response to a send result. IME composition is not submitted mid-edit. |
+| Blur, dialog, background reads, navigation and access/lifecycle changes | The original field owns focus until the user or existing access/layout policy moves it. No focus recovery effect, timer or listener. |
+
+**COMPLETE in the Chromium fixture.** The first-chat header grid keeps the
+menu at the trailing edge and puts approval before it in the compact row.
+The compact name display wraps and shows up to two lines. The full name remains
+available to assistive technology. The menu keeps its existing focus boundary,
+and its popup height uses the tracked chat viewport.
+
+At 360px, the pre-change menu right edge moved from 348px to about 241px when
+the fixture resized from 780px high to 320px. After the change it stayed at
+348px. `node tools/mobile-chat-browser.mjs` covered 360, 430 and 1280px, and a
+320px long-name case with the root font set to 200%. It exercised the dropdown
+with touch, End and Escape. For each mobile size and chat, native Chromium
+touch input completed three consecutive sends without blurring or replacing
+the textarea. An explicit blur during a fourth held send survived confirmation.
+Desktop activation of the send button via Space remained native in both chats.
+The fixture recorded active element, node identity, focus events, viewport
+height, POST count and the confirmed message.
+
+```text
+npm run test:focused -- src/chat/textSend.test.tsx src/chat/FirstChat.test.tsx src/chat/SecondChat.test.tsx src/chat/SecondChat.review.test.tsx src/chat/useChatViewport.test.tsx --maxWorkers=2
+npm run typecheck
+npm run check:architecture
+npm run build
+git diff --check
+```
+
+The focused run passed 110 tests across five files, including IME, send deduplication,
+draft retention on failure and uncertainty, and terminal, navigation and
+authorization transitions. The production build used isolated synthetic
+settings and reported the existing bundle-size advisory. Physical Android Chrome
+and iPhone Safari remain **PLATFORM-LIMITED** checks for IME and real keyboard
+behavior.
+
+`npm test -- --maxWorkers=2` passed all 2,005 tests across 79 files.

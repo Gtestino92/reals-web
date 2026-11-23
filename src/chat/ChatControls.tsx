@@ -1,7 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { plainText } from './contracts';
 import { ChatIcon } from './ChatIcon';
 type DialogAction = 'mutual' | 'cancel' | 'safety' | 'block';
+
+export function TextSendButton({ draft, disabled, className, children }: {
+  draft: RefObject<HTMLTextAreaElement | null>; disabled: boolean; className?: string; children: ReactNode;
+}) {
+  return <button type="submit" className={className} aria-label="Enviar mensaje" disabled={disabled} onMouseDown={event => {
+    // A tap can dispatch a compatibility mousedown. Cancel only its focus
+    // transfer, leaving the native click, form submission and keyboard intact.
+    if (event.button === 0 && draft.current && document.activeElement === draft.current) event.preventDefault();
+  }}>{children}</button>;
+}
+
 export function ConfirmDialog({ kind, busy, close, confirm }: { kind: DialogAction; busy: boolean; close: () => void; confirm: (body?: unknown) => void }) {
   const ref = useRef<HTMLDialogElement>(null), [details,setDetails] = useState(''), [reason,setReason] = useState('INAPPROPRIATE_BEHAVIOR'), [block,setBlock] = useState(false);
   useEffect(() => { const d = ref.current; d?.showModal(); return () => d?.close(); }, []);

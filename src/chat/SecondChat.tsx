@@ -12,7 +12,7 @@ import { MessageAudio } from './MessageAudio';
 import { ReplySwipe } from './ReplySwipe';
 import { ReplyQuote, replyPreview } from './ReplyQuote';
 import { ReactionLane } from './ReactionLane';
-import { ChatMenu, ConfirmDialog } from './ChatControls';
+import { ChatMenu, ConfirmDialog, TextSendButton } from './ChatControls';
 import './chat.css';
 const endedCopy: Record<string,string> = {
   SECOND_CHAT_MUTUAL_COMPLETION: 'Finalizaron el chat de común acuerdo.', SECOND_CHAT_PARTNER_INACTIVITY: 'El chat terminó por falta de respuesta.',
@@ -42,6 +42,7 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation,
   const [unseen,setUnseen] = useState(false), [coachmark,setCoachmark] = useState(false);
   const coach = useRef<{ previous: boolean | null; shown: boolean }>({ previous: null, shown: false });
   const root = useRef<HTMLElement>(null), observedHeight = useRef(0), timeline = useRef<HTMLOListElement>(null), atBottom = useRef(true), input = useRef<HTMLTextAreaElement>(null), heading = useRef<HTMLHeadingElement>(null);
+  const composing = useRef(false);
   const lease = useRef(0);
   // StrictMode replay must not dispose the freshly verified restoration snapshot.
   // A real unmount retires the session in the next microtask; listeners/timers stop now.
@@ -128,9 +129,10 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation,
       {m.senderId === me ? m.reactionType && <span role="img" aria-label={(partner || 'La otra persona') + ' reaccionó con corazón'}>♥</span> : <ReactionLane confirmed={m.reactionType === 'HEART'} eligible={eligible.has(m.id)} disabled={!ordinary} react={() => session.react(m.id)}/>}</li>)}
       {state.outgoing && p.active && !p.expired && <li className="chat-message outgoing"><p>{state.outgoing.content ?? 'Audio pendiente'}</p><p role="status">{state.outgoing.phase === 'pending' ? 'Enviando…' : state.outgoing.phase === 'uncertain' ? 'Sin confirmar' : 'Falló el envío'}</p>{state.outgoing.phase !== 'pending' && <button disabled={state.busy || !p.writable || state.retryBlocked} onClick={() => void session.retry()}>Reconciliar y reintentar el mismo envío</button>}{state.outgoing.phase === 'failed' && <button disabled={state.busy} onClick={() => { session.discardFailed(); setAudioEpoch(v => v+1); setAudioDirty(false); }}>Descartar envío fallido</button>}</li>}
     </ol>{unseen && <button className="chat-new-messages" onClick={() => { const l = timeline.current; if (l) l.scrollTop=l.scrollHeight; atBottom.current=true; setUnseen(false); }}>Ver mensajes nuevos</button>}</div>}
-    {p.writable && <form className="chat-composer" onSubmit={e => { e.preventDefault(); if (ordinary) void session.send(draft,reply ? {type:'MESSAGE',targetId:reply.targetId} : null); }}>
+    {p.writable && <form className="chat-composer" onSubmit={e => { e.preventDefault(); if (ordinary && !composing.current) void session.send(draft,reply ? {type:'MESSAGE',targetId:reply.targetId} : null); }}>
       {reply && <aside className="chat-reply-preview"><ReplyQuote {...replyPreview(reply,me,state.partnerId,state.partnerName)}/><button type="button" disabled={!!state.outgoing} onClick={() => setReply(null)}>Quitar respuesta</button></aside>}
-      <AudioComposer key={audioEpoch} policy={s?.audioPolicy ?? null} disabled={!writable || state.busy || !!state.outgoing || dialog !== null} payloadLocked={!!state.outgoing} confirmedFile={state.confirmed?.file ?? null} delivery={state.outgoing?.file ? state.outgoing.phase : null} textConfirmationVersion={state.confirmed?.file === null ? state.confirmationVersion : 0} onRetry={session.retry} onDirtyChange={setAudioDirty} onSend={file => session.send('',reply ? {type:'MESSAGE',targetId:reply.targetId} : null,file)}>{microphone => <div className="chat-composer-row"><label className="chat-visually-hidden" htmlFor="second-draft">Mensaje</label><textarea ref={setInput} id="second-draft" placeholder="Mensaje" rows={1} maxLength={1000} value={draft} disabled={!writable || audioDirty} onChange={e => setDraft(e.target.value)}/>{microphone}<button disabled={!ordinary || !plainText(draft)}>Enviar mensaje</button></div>}</AudioComposer>
+      <AudioComposer key={audioEpoch} policy={s?.audioPolicy ?? null} disabled={!writable || state.busy || !!state.outgoing || dialog !== null} payloadLocked={!!state.outgoing} confirmedFile={state.confirmed?.file ?? null} delivery={state.outgoing?.file ? state.outgoing.phase : null} textConfirmationVersion={state.confirmed?.file === null ? state.confirmationVersion : 0} onRetry={session.retry} onDirtyChange={setAudioDirty} onSend={file => session.send('',reply ? {type:'MESSAGE',targetId:reply.targetId} : null,file)}>{microphone => <div className="chat-composer-row"><label className="chat-visually-hidden" htmlFor="second-draft">Mensaje</label><textarea ref={setInput} id="second-draft" placeholder="Mensaje" rows={1} maxLength={1000} value={draft} disabled={!writable || audioDirty} onChange={e => setDraft(e.target.value)}
+        onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onBlur={() => { composing.current = false; }}/>{microphone}<TextSendButton draft={input} disabled={!ordinary || !plainText(draft)}>Enviar mensaje</TextSendButton></div>}</AudioComposer>
     </form>}
     {(dialog === 'safety' || dialog === 'block') && <ConfirmDialog kind={dialog} busy={state.busy} close={() => setDialog(null)} confirm={body => { void session.action(dialog,body)?.then(() => setDialog(null)); }}/>}
     {(dialog === 'completion' || dialog === 'inactivity') && <ResolutionDialog partner={partner} kind={dialog} busy={state.busy} close={() => setDialog(null)} confirm={() => { void session.action(dialog)?.then(() => setDialog(null)); }}/>}

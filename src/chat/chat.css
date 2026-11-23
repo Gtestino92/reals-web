@@ -32,15 +32,20 @@
 .chat-shell { width:100%; min-width:0; }
 .first-chat { position:relative; box-sizing:border-box; height:var(--chat-viewport, 100dvh); max-width:1280px; margin:0 auto; padding:max(16px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); gap:8px; overflow:auto; overscroll-behavior:contain; }
 .first-chat > *, .chat-chrome > * { flex-shrink:0; min-width:0; }
-.chat-chrome, .chat-heading-actions { display:contents; }
+.chat-chrome { display:contents; }
 .first-chat[data-visual-viewport] { position:fixed; inset:var(--chat-viewport-top) 0 auto; }
 .chat-heading { flex-wrap:nowrap; border-bottom:1px solid var(--color-secondary); padding-bottom:10px; }
 .chat-heading h2 { font-family:var(--font-display); color:var(--color-primary); font-size:2rem; overflow-wrap:anywhere; }
+.chat-heading-actions { display:grid; grid-template-areas:"identity menu" "divider divider" "approve approve"; grid-template-columns:minmax(0,1fr) auto; gap:0 8px; padding:0; border:0; }
+.chat-heading-actions::after { content:""; grid-area:divider; margin-top:10px; border-bottom:1px solid var(--color-secondary); }
+.chat-heading-actions .chat-identity { grid-area:identity; min-width:0; }
+.chat-heading-actions > .chat-overflow { grid-area:menu; align-self:start; }
+.chat-heading-actions > .chat-approve { grid-area:approve; min-width:0; margin-top:8px; overflow-wrap:anywhere; }
 .chat-phase { font-size:.75rem; letter-spacing:.08em; color:var(--color-secondary); }
 .first-chat .chat-approve { background:var(--color-primary); color:var(--color-on-primary); border-color:var(--color-secondary); font-weight:600; min-height:48px; }
 .chat-overflow { position:relative; flex:none !important; }
 .chat-overflow > button { display:grid; place-items:center; min-width:44px; width:44px; padding:8px; }
-.chat-menu { position:absolute; right:0; top:100%; z-index:10; display:flex; flex-direction:column; box-sizing:border-box; width:260px; max-width:calc(100vw - 32px); max-height:60dvh; overflow:auto; padding:6px; background:var(--color-surface); border:1px solid var(--color-outline); border-radius:var(--radius-card); box-shadow:0 8px 24px #0006; }
+.chat-menu { position:absolute; right:0; top:100%; z-index:10; display:flex; flex-direction:column; box-sizing:border-box; width:260px; max-width:calc(100vw - 32px); max-height:calc(var(--chat-viewport, 100dvh) * .6); overflow:auto; padding:6px; background:var(--color-surface); border:1px solid var(--color-outline); border-radius:var(--radius-card); box-shadow:0 8px 24px #0006; }
 .first-chat .chat-menu button { width:100%; text-align:left; flex-shrink:0; border:0; border-radius:0; background:transparent; padding:10px 12px; }
 .first-chat .chat-menu button:hover:enabled { background:var(--color-surface-variant); }
 .first-chat .chat-menu button:focus-visible { background:var(--color-secondary-container); outline:2px solid var(--color-secondary); outline-offset:-2px; }
@@ -129,8 +134,10 @@
 .first-chat[data-compact-viewport] { padding-block:max(4px, env(safe-area-inset-top)) max(4px, env(safe-area-inset-bottom)); gap:4px; }
 .first-chat[data-compact-viewport] .chat-heading { padding-bottom:2px; }
 .first-chat[data-compact-viewport] .chat-heading h2 { font-size:1.25rem; line-height:1.2; }
-.first-chat[data-compact-viewport] .chat-heading-actions { display:flex; align-items:center; gap:6px; border-bottom:1px solid var(--color-secondary); }
-.first-chat[data-compact-viewport] .chat-heading-actions .chat-heading { flex:1; min-width:0; border:0; }
+.first-chat[data-compact-viewport] .chat-heading-actions { grid-template-areas:"identity approve menu"; grid-template-columns:minmax(0,1fr) fit-content(45%) auto; align-items:start; gap:0 6px; border-bottom:1px solid var(--color-secondary); }
+.first-chat[data-compact-viewport] .chat-heading-actions::after { display:none; }
+.first-chat[data-compact-viewport] .chat-heading-actions h2 { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.first-chat[data-compact-viewport] .chat-heading-actions > .chat-approve { margin-top:0; }
 .first-chat[data-compact-viewport] .chat-chrome > p { margin-block:0; }
 .first-chat[data-compact-viewport] .chat-approve { min-height:44px; padding:4px 8px; font-size:.875rem; }
 .first-chat[data-compact-viewport] .chat-guidance { padding:4px 8px; line-height:1.3; }

@@ -51,6 +51,7 @@ it('menu supports keyboard traversal, Escape, outside dismissal and focus restor
   fireEvent.keyDown(document.activeElement!,{key:'Escape'});expect(trigger).toHaveFocus();expect(screen.queryByRole('menu')).toBeNull();
   fireEvent.click(trigger);fireEvent.pointerDown(screen.getByRole('textbox',{name:'Mensaje'}));expect(screen.queryByRole('menu')).toBeNull();
   expect(screen.getByRole('heading',{name:'María'}).compareDocumentPosition(screen.getByRole('button',{name:'Aprobar chat'})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByRole('button',{name:'Aprobar chat'}).compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 it.each([
   ['Salida consensuada','/chats/c/exit-requests'],

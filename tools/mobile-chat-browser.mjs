@@ -5,6 +5,7 @@ import { fixtureServer, iso, scenario } from './second-chat-synthetic.mjs';
 
 const base = process.argv.find(arg => arg.startsWith('--url='))?.slice(6) ?? 'http://127.0.0.1:5187';
 const baseline = process.argv.includes('--baseline');
+const focusBaseline = process.argv.includes('--focus-baseline');
 const directory = 'artifacts/mobile-chat';
 const draft = 'Estoy escribiendo un borrador que debería conservarse. '.repeat(17).trim();
 const question = '¿Qué aprendiste de la última conversación que te hizo cambiar de opinión?';
@@ -36,7 +37,7 @@ try {
         if (await evaluate(expression)) return;
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      throw Error('Fixture did not become ready');
+      throw Error('Fixture did not become ready: ' + expression);
     }
     const inspect = () => evaluate(`(() => {
       const root = document.querySelector('.first-chat'), list = root.querySelector('ol');
@@ -54,20 +55,80 @@ try {
         list: box(list), heading: box(heading), guidance: box(guidance), advance: box(advance), form: box(form), send: box(send), mic: box(mic), input: box(input),
         inputScroll: scrollRange(input), listScroll: scrollRange(list), scrollTop: list.scrollTop,
         focused: document.activeElement === input, draft: input.value, sameSenderGap: gap(1), newSenderGap: gap(3),
+        menu: box(root.querySelector('[aria-label="Opciones del chat"]')),
+        approval: box(root.querySelector('.chat-approve')),
       };
     })()`);
     async function capture(chat, width, variant) {
       const { data } = await call('Page.captureScreenshot', { format: 'png' });
       await writeFile(`${directory}/${baseline ? 'before' : 'after'}-${chat}-${width}-${variant}.png`, Buffer.from(data, 'base64'));
     }
+    const setDraft = value => evaluate(`(() => {
+      const input = document.querySelector('.chat-composer textarea');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    async function tap(rect) {
+      const point = { x: Math.round((rect.left + rect.right) / 2), y: Math.round((rect.top + rect.bottom) / 2) };
+      await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+      await call('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    }
+    const focusState = () => evaluate(`({
+      same: trackedInput === document.querySelector('.chat-composer textarea'),
+      active: document.activeElement === trackedInput ? 'draft' : document.activeElement?.tagName,
+      events: [...draftFocusEvents],
+      count: textSends.length, viewport: visualViewport.height, draft: trackedInput.value,
+    })`);
+    async function checkSends(chat, width, height) {
+      await evaluate(`(() => {
+        window.trackedInput = document.querySelector('.chat-composer textarea');
+        window.draftFocusEvents = [];
+        for (const type of ['focus', 'blur']) trackedInput.addEventListener(type, () => draftFocusEvents.push(type));
+        trackedInput.focus();
+      })()`);
+      await metrics(width, 320);
+      await settle();
+      for (let i = 1; i <= (focusBaseline ? 1 : 4); i++) {
+        const text = 'Prueba de envío ' + i;
+        await setDraft(text);
+        await until("!!document.querySelector('.chat-composer button[aria-label=\"Enviar mensaje\"]:enabled')");
+        await settle();
+        const before = await focusState();
+        const { send } = await inspect();
+        assert.ok(await evaluate(`document.elementFromPoint(${(send.left + send.right) / 2}, ${(send.top + send.bottom) / 2})
+          ?.closest('button')?.getAttribute('aria-label') === 'Enviar mensaje'`), JSON.stringify(send));
+        await tap(send);
+        await until(`textSends.length === ${i}`);
+        const pending = await focusState();
+        if (i === 4) {
+          await evaluate('trackedInput.blur()');
+          await metrics(width, height);
+          await settle();
+        }
+        await evaluate('releaseTextSend()');
+        await until(`trackedInput.value === '' && [...document.querySelectorAll('.chat-message-row')].some(row => row.textContent.includes(${JSON.stringify(text)}))`);
+        const confirmed = await focusState();
+        console.log(JSON.stringify({ chat, width, send: i, before, pending, confirmed }));
+        if (focusBaseline) continue;
+        const { events: pendingEvents, ...pendingState } = pending;
+        const { events: confirmedEvents, ...confirmedState } = confirmed;
+        assert.deepEqual(pendingState, { same: true, active: 'draft', count: i, viewport: 320, draft: text });
+        assert.ok(!pendingEvents.includes('blur') && pendingEvents.length <= 1);
+        assert.deepEqual(confirmedState, i === 4
+          ? { same: true, active: 'BODY', count: i, viewport: height, draft: '' }
+          : { same: true, active: 'draft', count: i, viewport: 320, draft: '' });
+        assert.deepEqual(confirmedEvents, i === 4 ? [...pendingEvents, 'blur'] : pendingEvents);
+      }
+    }
 
-    for (const chat of ['first', 'second']) {
+    for (const check of focusBaseline ? ['send'] : baseline ? ['layout'] : ['layout', 'send']) for (const chat of ['first', 'second']) {
       for (const [width, height, scheme] of [[360, 780, 'light'], [430, 900, 'dark'], [1280, 800, 'light']]) {
+        if (focusBaseline && width !== 360) continue;
         second.messages = [...messages];
         await metrics(width, height);
         await call('Emulation.setTouchEmulationEnabled', { enabled: width < 768 });
         await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
-        const url = base + '/?layout=' + chat + '-' + width;
+        const url = base + '/?layout=' + check + '-' + chat + '-' + width;
         await call('Page.navigate', { url });
         await until(`location.href === ${JSON.stringify(url)} && document.title === 'Reals'`);
         await evaluate(`(async () => {
@@ -80,18 +141,34 @@ try {
           const first = ${JSON.stringify(chat === 'first')};
           const messages = ${JSON.stringify(messages)};
           window.appendFixtureMessage = () => messages.push(${JSON.stringify(incoming)});
+          window.fixturePartner = 'María';
+          window.textSends = [];
           const identity = { phase: 'ready', account: { id: 'a' } };
-          const controller = { snapshot: identity, getSnapshot: () => identity, subscribe: () => () => {}, request: async (path, signal) => {
+          const controller = { snapshot: identity, getSnapshot: () => identity, subscribe: () => () => {}, request: async (path, signal, method = 'GET', body) => {
+            const textSend = method === 'POST' && path === '/chats/c/messages';
+            if (textSend) {
+              textSends.push(body);
+              await new Promise(resolve => { window.releaseTextSend = resolve; });
+              signal.throwIfAborted();
+            }
             if (!first) {
-              const response = await fetch(${JSON.stringify(origin + '/mobile/a')} + path, { signal });
+              const response = await fetch(${JSON.stringify(origin + '/mobile/a')} + path, {
+                signal, method, ...(body ? { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } } : {}),
+              });
               if (!response.ok) throw Error('Unexpected fixture response');
               return response.json();
+            }
+            if (textSend) {
+              const message = { ...messages[0], ...body, id: String(messages.length + 1), senderId: 'a',
+                sentAt: new Date().toISOString(), replyTo: null };
+              messages.push(message);
+              return structuredClone(message);
             }
             signal.throwIfAborted();
             if (path === '/matches/m') return { id: 'm', userAId: 'a', userBId: 'b', state: 'CHAT_ACTIVE' };
             if (path === '/matches/m/chat') return {
               id: 'c', matchId: 'm', chatType: 'FIRST_CHAT', status: 'ACTIVE',
-              partner: { userId: 'b', displayName: 'María' }, myDecision: 'PENDING', partnerDecision: 'PENDING',
+              partner: { userId: 'b', displayName: window.fixturePartner }, myDecision: 'PENDING', partnerDecision: 'PENDING',
               timeoutAt: new Date(Date.now() + 600000).toISOString(), inactivityExpiresAt: new Date(Date.now() + 300000).toISOString(),
               serverTime: new Date().toISOString(), guidance: {
                 question: { id: 'q', instanceId: 'q1', text: ${JSON.stringify(question)} },
@@ -113,13 +190,52 @@ try {
         })()`);
         await until("document.querySelectorAll('.chat-timeline li').length === 48 && !!document.querySelector('textarea')");
         await settle();
+        const normal = await inspect();
+        if (check === 'send') {
+          if (width >= 768) {
+            await setDraft('Envío con teclado');
+            await settle();
+            await evaluate("document.querySelector('[aria-label=\"Enviar mensaje\"]').focus()");
+            assert.equal(await evaluate("document.activeElement.getAttribute('aria-label')"), 'Enviar mensaje');
+            await call('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32 });
+            await call('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
+            await until('textSends.length === 1');
+            await evaluate('releaseTextSend()');
+            await until("document.querySelector('.chat-composer textarea').value === ''");
+            assert.equal(await evaluate("document.activeElement === document.querySelector('.chat-composer textarea')"), false);
+          } else await checkSends(chat, width, height);
+          if (chat === 'first' && width < 768 && !focusBaseline) {
+            const longName = 'María del Carmen Fernández de la Cruz ' + 'Larguísimo'.repeat(4);
+            await evaluate(`window.fixturePartner = ${JSON.stringify(longName)};
+              document.documentElement.style.fontSize = '200%'; window.dispatchEvent(new Event('online'));`);
+            await until(`document.querySelector('.chat-heading h2').textContent === ${JSON.stringify(longName)}`);
+            await metrics(320, height);
+            await settle();
+            const largeNormal = await inspect();
+            await metrics(320, 400);
+            await settle();
+            const largeCompact = await inspect();
+            assert.equal(largeNormal.menu.right, largeCompact.menu.right);
+            assert.equal(largeCompact.pageScroll, 0);
+            assert.ok(largeCompact.heading.right <= largeCompact.approval.left);
+            assert.ok(largeCompact.approval.right <= largeCompact.menu.left);
+            await tap(largeCompact.menu);
+            await until("!!document.querySelector('[role=menu]')");
+            const popup = await evaluate("document.querySelector('[role=menu]').getBoundingClientRect().toJSON()");
+            assert.ok(popup.left >= 0 && popup.bottom <= 400 && popup.right === largeCompact.menu.right);
+            await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End' });
+            assert.equal(await evaluate('document.activeElement.textContent'), 'Bloquear');
+            await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
+            assert.equal(await evaluate("document.activeElement.getAttribute('aria-label')"), 'Opciones del chat');
+            await capture(chat, width, 'large-font-header');
+          }
+          if (focusBaseline) console.log(JSON.stringify({ chat, normalMenuRight: normal.menu.right, compactMenuRight: (await inspect()).menu.right }));
+          await evaluate('window.unmountChatFixture()');
+          continue;
+        }
         await capture(chat, width, 'normal');
-        await evaluate(`(() => {
-          const input = document.querySelector('textarea');
-          input.focus();
-          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(draft)});
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-        })()`);
+        await evaluate("document.querySelector('.chat-composer textarea').focus()");
+        await setDraft(draft);
         if (width < 768) await metrics(width, 320);
         await settle();
         const following = await inspect();
@@ -163,6 +279,8 @@ try {
         assert.equal(resized.scrollTop, reading.scrollTop);
         assert.equal(restored.scrollTop, reading.scrollTop);
         if (width < 768) {
+          for (const layout of [following, resized, restored]) assert.equal(layout.menu.right, normal.menu.right);
+          if (chat === 'first') assert.ok(following.approval.right <= following.menu.left);
           await metrics(width, 320);
           await settle();
           const beforeIncoming = await inspect();
