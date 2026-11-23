@@ -41,6 +41,41 @@ it('scrubs private data and rejects ignored-abort responses after account replac
 it('unmounts timeline and media when sign-out replaces the authenticated owner',async()=>{
  const h=secondHarness();h.messages.push(messageFixture());const view=render(<SecondChat controller={h.controller} connectionId="connection" matchId="m" onHome={vi.fn()}/>);await screen.findByText('Hola, ¿cómo estás?');act(()=>{h.controller.snapshot={...h.controller.snapshot,phase:'signingOut',account:null};view.rerender(<SecondChat controller={h.controller} connectionId="connection" matchId="m" onHome={vi.fn()}/>);});expect(screen.queryByRole('region',{name:'Segundo chat'})).not.toBeInTheDocument();
 });
+
+it('retains the same draft and timeline across delayed, superseded and failed foreground reads', async () => {
+  const h = secondHarness();
+  h.messages.push(messageFixture());
+  render(<SecondChat controller={h.controller} connectionId="connection" matchId="m" onHome={vi.fn()}/>);
+  const original = await screen.findByText('Hola, ¿cómo estás?');
+  const list = screen.getByRole('list', { name: 'Mensajes' });
+  const input = screen.getByRole('textbox', { name: 'Mensaje' });
+  const draft = 'Un borrador largo que sigue en edición. '.repeat(20);
+  fireEvent.change(input, { target: { value: draft } });
+  act(() => input.focus());
+
+  const base = h.request.getMockImplementation()!;
+  const pending: { signal: AbortSignal; fail: () => void }[] = [];
+  h.request.mockImplementation((...args) => args[0].endsWith('/status') ?
+    new Promise((_, reject) => pending.push({ signal: args[1], fail: () => reject(new ApiError('network')) })) :
+    base(...args));
+  fireEvent(document, new Event('visibilitychange'));
+  await waitFor(() => expect(pending).toHaveLength(1));
+  expect(input).toHaveFocus();
+  expect(input).toBeEnabled();
+  fireEvent(window, new Event('online'));
+  await waitFor(() => expect(pending).toHaveLength(2));
+  expect(pending[0]?.signal.aborted).toBe(true);
+  await act(async () => pending[0]?.fail());
+  expect(screen.queryByRole('alert')).toBeNull();
+  await act(async () => pending[1]?.fail());
+
+  expect(screen.getByRole('alert')).toHaveTextContent('No pudimos actualizar el chat');
+  expect(screen.getByRole('button', { name: 'Reintentar conexión' })).toBeEnabled();
+  expect(screen.getByRole('list', { name: 'Mensajes' })).toBe(list);
+  expect(screen.getByText('Hola, ¿cómo estás?')).toBe(original);
+  expect(screen.getByRole('textbox', { name: 'Mensaje' })).toBe(input);
+  expect(input).toHaveValue(draft);
+});
 it('keeps safety UI reachable after a failed outgoing message',async()=>{
  const h=secondHarness(),base=h.request.getMockImplementation()!;h.request.mockImplementation(async(...args)=>{if(args[0].endsWith('/messages')&&args[2]==='POST')throw new ApiError('network');return base(...args);});render(<SecondChat controller={h.controller} connectionId="connection" matchId="m" onHome={vi.fn()}/>);fireEvent.change(await screen.findByRole('textbox',{name:'Mensaje'}),{target:{value:'Hola'}});fireEvent.click(screen.getByRole('button',{name:'Enviar mensaje'}));await screen.findByText('Sin confirmar');fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));fireEvent.click(screen.getByRole('menuitem',{name:'Bloquear'}));await screen.findByRole('heading',{name:'Bloquear a esta persona'});
 });

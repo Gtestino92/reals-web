@@ -2,9 +2,12 @@ import { ApiError, object } from '../auth/api';
 import type { Activity, HomeData } from '../home/contracts';
 import { parseOffsetTimestamp } from '../shared/offsetTimestamp';
 
-const stages = ['FIRST_CHAT', 'VISUAL_REVIEW', 'SCHEDULING', 'SECOND_CHAT_SCHEDULED', 'SECOND_CHAT_AVAILABLE'];
+export const activityTypes = ['FIRST_CHAT', 'VISUAL_REVIEW', 'SCHEDULING', 'SECOND_CHAT_SCHEDULED', 'SECOND_CHAT_AVAILABLE'] as const;
+export type ActivityType = typeof activityTypes[number];
+const activityType = (value: unknown): value is ActivityType => activityTypes.some(type => type === value);
 interface Update {
   id: string;
+  type: ActivityType;
   matchId: string;
   rank: number;
   starts: number | null;
@@ -13,7 +16,7 @@ interface Update {
 }
 
 export function activityId(type: string, resource: string, detail?: string | null) {
-  if (!resource || !stages.includes(type)) return null;
+  if (!resource || !activityType(type)) return null;
   if (type === 'FIRST_CHAT') return detail ? JSON.stringify([type, resource, detail]) : null;
   if (type === 'SECOND_CHAT_SCHEDULED' || type === 'SECOND_CHAT_AVAILABLE') {
     const instant = parseOffsetTimestamp(detail);
@@ -22,28 +25,29 @@ export function activityId(type: string, resource: string, detail?: string | nul
   return JSON.stringify([type, resource]);
 }
 
-export function isActivityId(value: string) {
+export function activityTypeForId(value: string): ActivityType | null {
   try {
     const parts: unknown = JSON.parse(value);
-    if (!Array.isArray(parts)) return false;
+    if (!Array.isArray(parts)) return null;
     const [stage, resource, detail] = parts;
-    if (typeof stage !== 'string' || typeof resource !== 'string' || !resource.trim()) return false;
+    if (!activityType(stage) || typeof resource !== 'string' || !resource.trim()) return null;
     if (stage === 'SECOND_CHAT_SCHEDULED' || stage === 'SECOND_CHAT_AVAILABLE') {
-      return parts.length === 3 && Number.isSafeInteger(detail);
+      return parts.length === 3 && Number.isSafeInteger(detail) ? stage : null;
     }
-    return stage === 'FIRST_CHAT' ? parts.length === 3 && typeof detail === 'string' && !!detail.trim()
-      : parts.length === 2 && stages.includes(stage);
-  } catch { return false; }
+    const valid = stage === 'FIRST_CHAT' ? parts.length === 3 && typeof detail === 'string' && !!detail.trim() : parts.length === 2;
+    return valid ? stage : null;
+  } catch { return null; }
 }
 
 export function updateFor(item: Pick<Activity, 'type' | 'matchId' | 'connectionId' | 'chatId' | 'visualExpiresAt' | 'schedulingExpiresAt'> & {
   secondChat: Pick<NonNullable<Activity['secondChat']>, 'availableAt' | 'entryClosesAt' | 'expiresAt' | 'myAttendanceStatus'> & { chatStatus?: string | null } | null;
 }): Update | null {
   const { type, matchId, connectionId, chatId, secondChat } = item;
-  const rank = stages.indexOf(type);
+  if (!activityType(type)) return null;
+  const rank = activityTypes.indexOf(type);
   const id = activityId(type, rank < 2 ? matchId : connectionId ?? '', type === 'FIRST_CHAT' ? chatId : secondChat?.availableAt);
   if (!id) return null;
-  if (rank < 3) return { id, matchId, rank, starts: null, ends: parseOffsetTimestamp(item.visualExpiresAt ?? item.schedulingExpiresAt), entryEnds: null };
+  if (rank < 3) return { id, type, matchId, rank, starts: null, ends: parseOffsetTimestamp(item.visualExpiresAt ?? item.schedulingExpiresAt), entryEnds: null };
   if (!secondChat || secondChat.myAttendanceStatus !== 'PENDING' ||
       (secondChat.chatStatus && !['ACTIVE', 'AVAILABLE'].includes(secondChat.chatStatus))) return null;
   const starts = parseOffsetTimestamp(secondChat.availableAt);
@@ -51,7 +55,7 @@ export function updateFor(item: Pick<Activity, 'type' | 'matchId' | 'connectionI
   const expiry = parseOffsetTimestamp(secondChat.expiresAt);
   if (starts === null || cutoff === null || expiry === null || starts >= Math.min(cutoff, expiry)) return null;
   const entryEnds = Math.min(cutoff, expiry);
-  return { id, matchId, rank, starts, ends: type === 'SECOND_CHAT_SCHEDULED' ? starts : entryEnds, entryEnds };
+  return { id, type, matchId, rank, starts, ends: type === 'SECOND_CHAT_SCHEDULED' ? starts : entryEnds, entryEnds };
 }
 
 function group(items: (Update | null)[]) {

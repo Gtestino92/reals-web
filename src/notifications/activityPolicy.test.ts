@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { activityId, isCurrent, parsePendingUpdates } from './activityPolicy';
-import { acknowledge, freshPreferences, loadPreferences, reconcilePreferences, savePreferences, storageKey } from './activityStorage';
+import { activityId, activityTypes, isCurrent, parsePendingUpdates } from './activityPolicy';
+import { acknowledge, freshPreferences, loadPreferences, reconcilePreferences, savePreferences, setActivityPreference, storageKey } from './activityStorage';
 
 const at = '2026-11-22T12:00:00Z';
 const now = Date.parse(at);
@@ -57,7 +57,7 @@ it('retains persisted current unread updates across reload and remembers consult
 it('ignores invalid persistence, preserves disabled state and works in memory on a quota failure', () => {
   localStorage.setItem(storageKey('account'), '{');
   expect(loadPreferences('account')).toEqual(freshPreferences());
-  localStorage.setItem(storageKey('account'), JSON.stringify({ enabled: true, records: [['id', 'seen']], presented: [] }));
+  localStorage.setItem(storageKey('account'), JSON.stringify({ ...freshPreferences(), records: [['id', 'seen']] }));
   expect(loadPreferences('account')).toEqual(freshPreferences());
   savePreferences('account', freshPreferences(false));
   expect(loadPreferences('account')).toEqual(freshPreferences(false));
@@ -67,6 +67,42 @@ it('ignores invalid persistence, preserves disabled state and works in memory on
   expect(reconcilePreferences(memory, snapshot([visual, first]), now).records?.[1]?.[1]).toBe(false);
   vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => { throw new DOMException('Storage', 'SecurityError'); });
   expect(loadPreferences('account')).toEqual(freshPreferences());
+});
+
+it('migrates each account independently and gives v2 precedence over explicit v1 opt-out', () => {
+  const visualId = activityId('VISUAL_REVIEW', 'visual')!;
+  const firstId = activityId('FIRST_CHAT', 'first', 'chat')!;
+  localStorage.setItem('reals:web-notifications:v1:off', JSON.stringify({ enabled: false, records: 'damaged' }));
+  localStorage.setItem('reals:web-notifications:v1:on', JSON.stringify({
+    enabled: true, records: [[visualId, false]], presented: [[firstId, now]],
+  }));
+  expect(loadPreferences('off')).toEqual(freshPreferences(false));
+  const migrated = loadPreferences('on');
+  expect(migrated).toEqual({ ...freshPreferences(), records: [[visualId, false]], presented: [[firstId, now]] });
+  expect(reconcilePreferences(migrated, snapshot([visual, first]), now).records).toEqual([[visualId, false], [firstId, true]]);
+  const changed = setActivityPreference(loadPreferences('off'), 'FIRST_CHAT', true);
+  localStorage.setItem(storageKey('off'), JSON.stringify({ ...changed, categories: { FIRST_CHAT: true, VISUAL_REVIEW: null } }));
+  expect(loadPreferences('off')).toEqual(changed);
+  savePreferences('off', changed);
+  expect(loadPreferences('off')).toEqual(changed);
+  expect(loadPreferences('on')).toEqual(migrated);
+  expect(loadPreferences('new')).toEqual(freshPreferences());
+});
+
+it.each(activityTypes)('excludes disabled %s records and acknowledgements and baselines them after reload', type => {
+  const updates = snapshot([first, visual], [scheduling, confirmed, available]);
+  const target = updates.find(update => update.type === type)!;
+  const enabled = reconcilePreferences(reconcilePreferences(freshPreferences(), [], now), updates, now);
+  const disabled = setActivityPreference(enabled, type, false);
+  expect(acknowledge(disabled, target.id, now)).toBe(disabled);
+  expect(reconcilePreferences(disabled, updates, now).records).toEqual(enabled.records?.filter(([id]) => id !== target.id));
+  savePreferences('account', setActivityPreference(disabled, type, true));
+  const waiting = loadPreferences('account');
+  expect(waiting.needsBaseline).toEqual([type]);
+  expect(reconcilePreferences(waiting, updates, now, () => false).records).toEqual(disabled.records);
+  const restored = reconcilePreferences(waiting, updates, now);
+  expect(restored.needsBaseline).toEqual([]);
+  expect(restored.records).toEqual(enabled.records?.map(([id, seen]) => [id, id === target.id || seen]));
 });
 
 it('rejects malformed pending payloads instead of projecting them as empty', () => {

@@ -7,7 +7,7 @@ import { ApiError } from '../auth/api';
 import { SecondChatCard } from '../home/SecondChatCard';
 import { homeSecondFixture } from '../home/secondHome.fixtures';
 import { ActivityNotifications, useActivityNotifications } from '../notifications/useActivityNotifications';
-import { loadPreferences, savePreferences } from '../notifications/activityStorage';
+import { freshPreferences, loadPreferences, savePreferences } from '../notifications/activityStorage';
 import { activityId } from '../notifications/activityPolicy';
 function view(f=setup()) {const back=vi.fn(),browse=vi.fn(),blocked=vi.fn();const props={controller:f.controller,connectionId:'c',matchId:'m',partnerName:'María',onBack:back,onFinished:back,onBlocked:blocked,browse:false,onBrowse:browse,onCloseBrowse:back};const v=render(<Scheduling {...props}/>);return {...f,...v,props,back,browse,blocked};}
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();localStorage.clear();});
@@ -84,7 +84,7 @@ it('observes a locally accepted appointment after its presentation without gener
   const f = setup(), read = f.request.getMockImplementation()!;
   const slot = proposal().proposedDateTime;
   f.state.p = [proposal()];
-  savePreferences('me', { enabled: true, records: [], presented: [] });
+  savePreferences('me', { ...freshPreferences(), records: [] });
   f.request.mockImplementation(async (path, signal, method, body) => {
     if (method === 'POST') {
       f.state.n = negotiation({ status: 'CONFIRMED', confirmedDateTime: slot });

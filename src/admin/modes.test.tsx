@@ -39,7 +39,6 @@ function setup(provider = 'google.com', login = false, draft = false) {
       case '/api/admin-auth/revoke': state.issued = false; return new Response(null, { status: 204 });
       case '/api/admin/diagnostics/matchmaking': return json(diag);
       case '/api/admin/profile-photos/review': return json([{ ...photo, displayName: 'Dato privado admin' }]);
-      case '/api/me/notification-preferences': return json({ activityEnabled: true, remindersEnabled: false, availabilityEnabled: true });
       default: return json({ code: 'NOT_FOUND' }, 404);
     }
   });

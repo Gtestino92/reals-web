@@ -15,7 +15,6 @@ const server=createServer(async(req,res)=>{const current=fixture;
     if(method==='DELETE'){current.deletions=(current.deletions??0)+1;if(current.failDeletion){current.deleted=true;status=503;result={code:'SERVICE_UNAVAILABLE'};}else result=undefined;}
     else result={id:'me',status:current.deleted?'DELETED':'ACTIVE'};
   }
-  else if(path==='/me/notification-preferences'){if(method==='PUT')current.preferences=JSON.parse(body);result=current.preferences??{activityEnabled:true,remindersEnabled:false,availabilityEnabled:true};}
   else if(path==='/reference/countries')result=[{code:'AR',displayName:'Argentina'}];
   else if(path==='/me/legal-status')result={requirementsSatisfied:true,documents:[]};
   else if(path==='/legal/documents/current')result={documents:[]};
@@ -93,7 +92,7 @@ try {
       await evaluate('history.forward()');await waitFor("history.state.trail.at(-1)==='activity'",'Forward restores Activity');
       await evaluate('history.back()');await waitFor("history.state.trail.length===1",'Back restores Activity Home');
       await evaluate("document.querySelector('button[aria-label=Cuenta]').click()");await waitFor("!!document.querySelector('.home-account')?.getClientRects().length",'Account for nested history');
-      await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Notificaciones'&&n.getClientRects().length).click()");await waitFor("document.querySelectorAll('.home-account input').length===3",'notifications loaded');
+      await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Notificaciones'&&n.getClientRects().length).click()");await waitFor("document.querySelectorAll('.account-notifications [role=switch]').length===5",'notifications loaded');
       await evaluate('history.back()');await waitFor("history.state.trail.at(-1)==='account'&&!document.querySelector('.account-notifications')",'Back restores Account only');
       await evaluate('history.forward()');await waitFor("!!document.querySelector('.account-notifications')",'Forward restores notifications');
       await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Volver a Cuenta').click()");await waitFor("history.state.trail.at(-1)==='account'",'explicit nested return');

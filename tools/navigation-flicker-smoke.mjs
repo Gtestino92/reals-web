@@ -117,9 +117,9 @@ try {
       }
     }
     if(baseline) continue;
-    // Notifications have a stable Account shell and keep confirmed switches on revisit.
+    // Notifications have a stable Account shell and keep local switches on revisit.
     reset();await evaluate('renderFixture()');await waitFor("!!document.querySelector('.home-search button:not(:disabled)')",'notifications Home');await button('Cuenta');
-    for(const visit of ['first','repeat','failed']) {fixture.failPath=visit==='failed'?'/me/notification-preferences':null;fixture.delay=200;await button('Notificaciones');await delay(40);await screenshot(`${baseline?'before':'after'}-${width}-notifications-${visit}`);if(visit!=='first')check(await evaluate("document.querySelectorAll('.account-notifications input').length===3"),'retained notification switches');await waitFor("document.querySelectorAll('.account-notifications input').length===3&&!document.querySelector('.account-notifications button').disabled",'notifications loaded');await button('Volver a Cuenta');await delay(100);check(await evaluate("document.activeElement?.textContent==='Notificaciones'"),'notification focus restored');}
+    for(const visit of ['first','repeat']) {await button('Notificaciones');await waitFor("document.querySelectorAll('.account-notifications [role=switch]').length===5",'Web notifications loaded');await screenshot(`after-${width}-notifications-${visit}`);await button('Volver a Cuenta');await delay(100);check(await evaluate("document.activeElement?.textContent==='Notificaciones'"),'notification focus restored');}
     reset('chat');await evaluate('renderFixture()');await waitFor("!!document.querySelector('.chat-timeline')",'actual First Chat');
     await evaluate("window.chatHome=document.querySelector('.home-search');void 0");
     await screenshot(`after-${width}-chat`);

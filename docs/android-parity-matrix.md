@@ -1909,3 +1909,168 @@ npm run test:focused -- src/notifications/activityPolicy.test.ts src/notificatio
 - The full regression suite and broad browser smoke scenarios were outside this validation.
 
 Temporal follow-up on base `e6e6e8e`. Foreground Home retains previously advertised wake-up times across shared marker replacement, and its successful full read consumes due markers once. An authoritative eligible `SECOND_CHAT_AVAILABLE` projection can update the indicator even when the preceding status was captured before the start. The focused Home and notification suites passed 140 tests across six files, including both races and the entry cutoff.
+
+### Mobile chat viewport and density
+
+Pre-change audit against Android `97827fb` and Web `89e9a59`. Both native chats route from `RealsApp.kt` into `ChatScreen.kt`. See the [Android source map](android-reference.md) and [resume review](resume-glitch.md).
+
+| Behavior | Android source and pre-change Web status |
+| --- | --- |
+| Header, guidance and message list | `ChatScreen.kt`, `ChatChrome.kt` and `FirstChatPanels.kt` place header/guidance outside the weighted message list. **PARTIAL** in `FirstChat.tsx` and `chat.css`: the keyboard compact rules independently scroll chrome and can hide guidance and status panels. The desktop layout already keeps them separate. |
+| Composer, scrolling and grouped messages | `ChatAudioComposer.kt` limits text to four lines and aligns composer controls. `ChatChrome.kt` uses 6 dp message spacing and preserves following on composer resize. **PARTIAL** in both Web chats: extra row spacing, large draft area on tall mobile and compact composer/chrome caps. System IME insets and launcher shell are **PLATFORM-LIMITED** in browsers. |
+| Interaction, Back and accessibility | `ChatChrome.kt`, `FirstChatPanels.kt` and `FirstChatInteractionPolicy.kt` own reply and action availability. **PARTIAL** in Web: gestures, pointer and accessible keyboard actions exist, but compact clipping blocks access. Native guidance dismissal and native scroll animation are outside this correction. Browser history handles Back. |
+| Loading, pending, errors, resume and lifecycle | `ChatScreen.kt`, `FirstChatCoordinator.kt`, `SecondChatCoordinator.kt` and `SecondChatPanels.kt` consume server-owned state and render the lifecycle panels. **PARTIAL** for compact layout of these panels. Existing Web refresh, mutation, confirmation and access policies own their state independently of the viewport. |
+
+| Web path | Invariant |
+| --- | --- |
+| Layout/visual resize, visual pan, draft growth | Keep the same timeline, composer and question nodes. A single frame consumes the latest geometry. Follow only when already following, preserve scrolled-up reading position. Visual panning updates the fixed frame independently of sizing. |
+| Draft, reply, send, confirmation and retry | React and the chat sessions own drafts and confirmed payloads. Geometry reads and styles never write draft text or trigger actions. |
+| Poll / resume / overlapping reads or writes | Existing session ownership and reconciled snapshots still control message, question and lifecycle installation. Slow/failed resume retains usable same-owner content with its existing error path. |
+| Terminal/access, identity replacement and unmount | The authorized view owns only its viewport listeners, observer and pending animation frame. Cleanup releases those resources. Session and root identity gates continue to own data retirement and sign-out. |
+
+**COMPLETE for the scoped layout behavior in Chromium.** `FirstChat.tsx`,
+`SecondChat.tsx` and `chat.css` keep the question, progress control and composer
+outside the scrollable timeline. Compact mode places approval in the header.
+The shared composer shows up to three mobile lines or two in short viewports,
+with a one-line field and compact quote preview when a reply is selected.
+Message rows use a smaller gap for consecutive messages from the same sender,
+with room for timestamps and reactions. The timeline keeps a minimum usable
+height, and the chat frame can scroll when unusually short or stacked with
+exceptional state panels. The Web keeps its existing own-send following policy;
+the native list's extra auto-follow and guidance dismissal are outside this
+layout change.
+
+`node tools/mobile-chat-browser.mjs` exercised both loaded chats with 48
+synthetic messages and a 934-character draft in Chromium at 360, 430 and
+1280px across light and dark themes. At simulated 320/290px visual heights,
+the header and question stayed visible, the timeline alone scrolled, and
+following/reading position survived resize. Tests also exercised first-chat
+touch swipe to quote, new-message navigation during a refresh, and access
+to the composer by scrolling the chat frame at 185px. Before/after screenshots
+are in `artifacts/mobile-chat/`. Viewport unit tests cover visual panning, zoom,
+layout resize, frame coalescing and cleanup. Focused chat tests cover guidance,
+replies, lifecycle, sign-out and in-flight refreshes, including an obsolete and
+failed second-chat foreground read with a retained draft.
+
+**PLATFORM-LIMITED:** Chromium metrics simulate a reduced viewport. Native
+Android and iOS keyboards, browser-specific focus panning, installed-app
+insets, and physical orientation changes still need device verification.
+
+### PWA launcher and installation
+
+| Android / browser reference | Web mapping and validation |
+| --- | --- |
+| Android manifest `ic_launcher` / `ic_launcher_round`, v26 adaptive XML and 432px launcher foreground (`97827fb`) | **COMPLETE** for the source artwork and browser assets. `tools/generate-browser-icons.mjs` uses the actual adaptive crop for full-color 192px, 512px and Apple Touch PNGs, with separate safe-area and tab crops. The previous notification-seal variants used lighter colors and an indexed palette. |
+| Launcher masks and installed app icon updates | **PLATFORM-LIMITED.** The same-size Chromium comparison sheet shows the cream, navy, gold and ring alignment against the source. The maskable art is within the 40% safe circle. Chrome parsed the manifest without errors in development and production preview. Launcher effects, install/update behavior and actual icon appearance still need Android and iPhone verification. |
+| iPhone Safari installation | **COMPLETE** for documentation. The [installation guide](browser-identity.md#instalar-reals-web) describes the manual Share flow and the optional Open as Web App setting. The app uses browser installation controls on both platforms. |
+
+### Independent Web activity preferences
+
+Pre-change audit at Web `1909ae3`. Android's `NotificationSettingsScreen.kt`,
+`MatchmakingHomeScreen.kt`, `NotificationPreferencesCoordinator.kt`, and their
+presentation, coordinator and instrumentation tests define the native rows,
+navigation, loading, retry, and single-flight push preference updates. The
+[backend contract](../../reals-backend/docs/commons/api.md) owns those groups.
+
+| Behavior | Pre-change Web parity and scope |
+| --- | --- |
+| Settings structure, accessibility and Back | **PARTIAL**. Web uses the Android-style editorial rows and named switches with browser Back/focus restoration, but opens a platform selector and reads Android settings by default. Keep the layout, guards and navigation for Web-only settings. |
+| State, pending, errors and recovery | **PARTIAL**. The single Web switch stores account-local state. Android-style backend loading and retry belong to the native settings. Web storage failure uses an in-memory session copy. |
+| Badges, timing and background/resume | **PARTIAL**. Web has five projected event IDs with one shared switch. Android system delivery is **PLATFORM-LIMITED** and handled by the native app. Web uses its existing foreground and background cadence. |
+
+| Mutation or response path | Invariant |
+| --- | --- |
+| Load or migrate account settings | Each explicit flag belongs to one account and browser. Existing v1 opt-out maps to five disabled flags. Valid v1 unread history and presentation receipts survive opt-in migration. |
+| Toggle while a projection or presentation is in flight | Update only the selected flag and its records/receipts. A disabled category has no unread count or acknowledgement. Re-enabled categories wait for a fresh baseline without altering other categories. |
+| Home, scheduling, background and resume responses | Reconcile against current preferences. Failed, retired and pre-enable reads do not consume the pending baseline. Existing Home and chat ownership and timing rules remain authoritative. |
+| All categories off, admin, sign-out or account replacement | Preserve existing notification polling gates and tab cleanup. Only the current authenticated owner can save. No Android preference requests originate from Web settings. |
+
+**COMPLETE for Web settings and local indicators.** `AccountSection.tsx` shows
+five switches with the existing row design, keyboard focus and Back behavior.
+The notification coordinator filters unread IDs and acknowledgements by the
+same flags used by settings. Current operational Activity cards and deadlines
+still come from Home. Native Android's three push preferences retain their
+existing flow and API. See [storage and polling behavior](frontend-architecture.md#web-activity-notifications).
+
+Chromium `node tools/notification-settings-smoke.mjs` passed at 320, 390 and
+1440px in light and dark mode with synthetic data and the actual Account
+navigation. It covered the accessibility tree, keyboard switching, title and
+favicon counts, Back/Forward focus, full reload persistence and zero Android
+preference requests. Screenshots are in `artifacts/notification-settings/`.
+Physical devices and native screen readers were outside this check.
+
+Focused validation passed 202 tests in seven files. The additional malformed-v2
+migration check passed in the 11-test storage and policy run.
+
+```text
+npm run test:focused -- src/notifications/activityPolicy.test.ts src/notifications/useActivityNotifications.test.tsx src/notifications/presentation.test.tsx src/home/AccountSection.test.tsx src/home/Home.test.tsx src/scheduling/Scheduling.test.tsx src/admin/modes.test.tsx --maxWorkers=2
+npm run test:focused -- src/notifications/activityPolicy.test.ts
+npm run typecheck
+npm run check:architecture
+npm run build
+git diff --check
+```
+
+The production build used isolated synthetic settings and reported the existing
+bundle-size advisory.
+
+`npm test -- --maxWorkers=2` passed all 1,994 tests across 78 files on the final
+isolated run. An earlier concurrent run hit an onboarding timeout and loaded
+the pre-correction storage code alongside the malformed-v2 regression.
+
+### Chat menu alignment and send focus
+
+Audit at `aa31385`. Android's `ChatScreen.kt` and `ChatChrome.kt` keep the
+header's trailing controls next to an independently sized partner name.
+`ChatAudioComposer.kt` keeps the text field editable during an ordinary send
+while its send action is gated. Reviewed `MessageComposerUiStateTest.kt` and
+the existing Web keyboard, menu and send-reconciliation tests. The
+[backend chat contract](../../reals-backend/docs/commons/user-flow.md) owns
+message confirmation, lifecycle and idempotent retry.
+
+| Behavior | Pre-change parity |
+| --- | --- |
+| Header layout and menu | **PARTIAL**. The menu remains a distinct accessible control, but compact flex puts approval after the menu and shifts the trigger left. Long names need an independently sized column. |
+| Send focus, keyboard and accessibility | **PARTIAL**. In Chromium touch emulation, pressing send in either chat blurs the existing textarea before confirmation. The Web field stays mounted and editable while pending. The physical IME is **PLATFORM-LIMITED**. |
+| Navigation, pending, empty, errors, audio, polling and lifecycle | **COMPLETE** for the existing scoped Web flows' ownership. Back, dialogs, blocked or dismissed focus, read-only/terminal transitions, draft comparison and retry semantics continue through their existing paths. |
+
+| Path | Invariant |
+| --- | --- |
+| Compact resize and partner-name update | The existing menu node and its focus boundary remain at the trailing edge. Header controls never become a separate scroll region. |
+| Primary pointer send from a focused textarea | Cancel the button's default pointer focus transfer. Native click still submits through the existing form exactly once. Keyboard and assistive activation keep their native behavior. |
+| Pending, confirmed, failed and uncertain | Only the session and matching confirmation own draft clearing and retry. Focus never changes in response to a send result. IME composition is not submitted mid-edit. |
+| Blur, dialog, background reads, navigation and access/lifecycle changes | The original field owns focus until the user or existing access/layout policy moves it. No focus recovery effect, timer or listener. |
+
+**COMPLETE in the Chromium fixture.** The first-chat header grid keeps the
+menu at the trailing edge and puts approval before it in the compact row.
+The compact name display wraps and shows up to two lines. The full name remains
+available to assistive technology. The menu keeps its existing focus boundary,
+and its popup height uses the tracked chat viewport.
+
+At 360px, the pre-change menu right edge moved from 348px to about 241px when
+the fixture resized from 780px high to 320px. After the change it stayed at
+348px. `node tools/mobile-chat-browser.mjs` covered 360, 430 and 1280px, and a
+320px long-name case with the root font set to 200%. It exercised the dropdown
+with touch, End and Escape. For each mobile size and chat, native Chromium
+touch input completed three consecutive sends without blurring or replacing
+the textarea. An explicit blur during a fourth held send survived confirmation.
+Desktop activation of the send button via Space remained native in both chats.
+The fixture recorded active element, node identity, focus events, viewport
+height, POST count and the confirmed message.
+
+```text
+npm run test:focused -- src/chat/textSend.test.tsx src/chat/FirstChat.test.tsx src/chat/SecondChat.test.tsx src/chat/SecondChat.review.test.tsx src/chat/useChatViewport.test.tsx --maxWorkers=2
+npm run typecheck
+npm run check:architecture
+npm run build
+git diff --check
+```
+
+The focused run passed 110 tests across five files, including IME, send deduplication,
+draft retention on failure and uncertainty, and terminal, navigation and
+authorization transitions. The production build used isolated synthetic
+settings and reported the existing bundle-size advisory. Physical Android Chrome
+and iPhone Safari remain **PLATFORM-LIMITED** checks for IME and real keyboard
+behavior.
+
+`npm test -- --maxWorkers=2` passed all 2,005 tests across 79 files.

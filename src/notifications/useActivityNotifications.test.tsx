@@ -4,7 +4,8 @@ import { controllerFixture } from '../chat/fixtures';
 import { ApiError } from '../auth/api';
 import { parseHome } from '../home/contracts';
 import { emptyHome } from '../home/fixtures';
-import { activityId } from './activityPolicy';
+import { activityId, activityTypes } from './activityPolicy';
+import { loadPreferences } from './activityStorage';
 import { useActivityNotifications } from './useActivityNotifications';
 
 const start = Date.parse('2026-11-22T12:00:00Z');
@@ -46,7 +47,7 @@ beforeEach(() => {
   vi.setSystemTime(start);
   visibility('visible');
 });
-afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); vi.useRealTimers(); });
 
 it.each([[true, 10_000], [false, 30_000]] as const)('reuses visible Home and uses the hidden cadence for queue=%s', async (queue, cadence) => {
   const t = fixture(); t.mode('ordinary'); t.feed(queue);
@@ -131,12 +132,66 @@ it('suspends for chat, administration and disabled preference and rebaselines on
   await tick(60_000); expect(t.request).not.toHaveBeenCalled();
   t.rerender({ admin: false }); await tick(0);
   expect(t.result.current.unread.size).toBe(1);
-  act(() => t.result.current.setEnabled(false));
+  act(() => activityTypes.forEach(type => t.result.current.setCategory(type, false)));
   expect(document.title).toBe('Original');
   t.request.mockClear(); await tick(60_000); expect(t.request).not.toHaveBeenCalled();
-  act(() => t.result.current.setEnabled(true));
+  act(() => t.result.current.setCategory('VISUAL_REVIEW', true));
   await tick(0); expect(t.calls('pending')).toHaveLength(1);
   expect(t.result.current.unread.size).toBe(0);
+});
+
+it('uses current category preferences for late and failed resume reads without changing another category or the cadence', async () => {
+  const t = fixture();
+  const first = { type: 'FIRST_CHAT', matchId: 'first', chatId: 'chat' };
+  const firstId = activityId(first.type, first.matchId, first.chatId)!;
+  t.mode('elsewhere'); t.feed(); t.feed(false, [visual, first]);
+  expect(document.title).toBe('(2) Reals');
+  act(() => t.result.current.setCategory('VISUAL_REVIEW', false));
+  expect(t.result.current.unread).toEqual(new Set([firstId]));
+  expect(document.title).toBe('(1) Reals');
+  act(() => t.result.current.present(id!));
+  expect(loadPreferences('me').presented).toEqual([]);
+
+  const duringOptOut = { ...visual, matchId: 'during-opt-out' };
+  t.invalidate(); t.publish([visual, first]);
+  let release!: (value: unknown) => void;
+  t.request.mockImplementationOnce(async () => t.status());
+  t.request.mockImplementationOnce(() => new Promise(done => { release = done; }));
+  await tick(29_999); expect(t.request).not.toHaveBeenCalled();
+  await tick(1); expect(t.calls('pending')).toHaveLength(1);
+  await tick(1);
+  act(() => t.result.current.setCategory('VISUAL_REVIEW', true));
+  await act(async () => release(t.data()));
+  expect(loadPreferences('me').needsBaseline).toEqual(['VISUAL_REVIEW']);
+  expect(t.result.current.unread).toEqual(new Set([firstId]));
+
+  t.fail(true); t.invalidate(); t.publish([visual, first, duringOptOut]);
+  await tick(30_000);
+  expect(loadPreferences('me').needsBaseline).toEqual(['VISUAL_REVIEW']);
+  t.fail(false);
+  await tick(30_000);
+  expect(loadPreferences('me').needsBaseline).toEqual([]);
+  expect(t.result.current.unread).toEqual(new Set([firstId]));
+  const later = { ...visual, matchId: 'new' };
+  t.feed(false, [first, duringOptOut, later]);
+  expect(t.result.current.unread).toEqual(new Set([firstId, activityId(later.type, later.matchId)]));
+});
+
+it('keeps preferences in memory on storage failure and rejects a stale owner changing another account', () => {
+  vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => { throw new DOMException('Storage', 'SecurityError'); });
+  const t = fixture(); t.feed();
+  act(() => t.result.current.setCategory('VISUAL_REVIEW', false));
+  t.feed(false, [visual]);
+  expect(t.result.current.categories.VISUAL_REVIEW).toBe(false);
+  expect(t.result.current.unread.size).toBe(0);
+  const retiredToggle = t.result.current.setCategory;
+  const next = controllerFixture();
+  next.snapshot = { ...next.snapshot, account: { id: 'next', status: 'ACTIVE' } };
+  const nextView = renderHook(() => useActivityNotifications(next, 'next', false));
+  t.controller.snapshot = { ...t.controller.snapshot, phase: 'signingOut', account: null };
+  act(() => retiredToggle('FIRST_CHAT', false));
+  expect(t.result.current.categories.FIRST_CHAT).toBe(true);
+  expect(nextView.result.current.categories).toEqual(Object.fromEntries(activityTypes.map(type => [type, true])));
 });
 
 it('retains unread updates on failure, recovers on resume and discards a late complementary read after an operational handoff', async () => {

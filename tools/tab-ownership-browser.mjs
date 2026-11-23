@@ -12,7 +12,6 @@ const server=createServer(async(req,res)=>{const current=fixture;
   let body='';for await(const chunk of req)body+=chunk;let result;let status=200;
   if(path==='/me/home/status')result={version:current.version,dirty:false,nextRefreshAt:null,serverTime:new Date().toISOString()};
   else if(path==='/me')result={id:'me',status:'ACTIVE'};
-  else if(path==='/me/notification-preferences'){if(method==='PUT')current.preferences=JSON.parse(body);result=current.preferences??{activityEnabled:true,remindersEnabled:false,availabilityEnabled:true};}
   else if(path==='/reference/countries')result=[{code:'AR',displayName:'Argentina'}];
   else if(path==='/me/legal-status')result={requirementsSatisfied:true,documents:[]};
   else if(path==='/legal/documents/current')result={documents:[]};
