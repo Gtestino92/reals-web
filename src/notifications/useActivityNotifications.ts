@@ -2,8 +2,8 @@ import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRe
 import { ApiError } from '../auth/api';
 import type { SessionController } from '../auth/session';
 import { parseStatus, type HomeData } from '../home/contracts';
-import { fallbackInterval, homeUpdates, isCurrent, notificationInterval, parsePendingUpdates, type ActivityUpdate } from './activityPolicy';
-import { acknowledge, freshPreferences, loadPreferences, reconcilePreferences, savePreferences, type ActivityPreferences } from './activityStorage';
+import { fallbackInterval, homeUpdates, isCurrent, notificationInterval, parsePendingUpdates, type ActivityType, type ActivityUpdate } from './activityPolicy';
+import { acknowledge, freshPreferences, hasEnabledActivity, loadPreferences, reconcilePreferences, savePreferences, setActivityPreference, type ActivityPreferences } from './activityStorage';
 import { useTabIndicators } from './tabIndicators';
 
 type HomeMode = 'ordinary' | 'elsewhere' | 'chat';
@@ -15,7 +15,10 @@ const nearWindow = 5 * 60_000;
 export function useActivityNotifications(controller: SessionController, accountId: string | undefined, administrative: boolean) {
   const profileId = controller.getSnapshot().profile?.id;
   const [saved, setSaved] = useState(() => accountId ? loadPreferences(accountId) : freshPreferences(false));
+  const [persistenceFailed, setPersistenceFailed] = useState(false);
   const preferences = useRef(saved);
+  const enabled = hasEnabledActivity(saved);
+  const enabledAt = useRef<Partial<Record<ActivityType, number>>>({});
   const [mode, setHomeMode] = useState<HomeMode | null>(null);
   const [projection, setProjection] = useState<Projection | null>(null);
   const [clockRevision, redraw] = useState(0);
@@ -37,37 +40,45 @@ export function useActivityNotifications(controller: SessionController, accountI
     const previous = preferences.current;
     preferences.current = next;
     if (JSON.stringify(previous) !== JSON.stringify(next)) {
-      savePreferences(accountId, next);
+      setPersistenceFailed(!savePreferences(accountId, next));
       setSaved(next);
     }
   }, [accountId, ownsSession]);
-  const setEnabled = useCallback((enabled: boolean) => {
-    if (!ownsSession() || preferences.current.enabled === enabled) return;
-    activeRead.current?.abort();
-    metadata.current.projection = null;
-    metadata.current.advertised = null;
-    metadata.current.checkedAt = null;
-    metadata.current.recovery = false;
-    setProjection(null);
-    save(freshPreferences(enabled));
+  const setCategory = useCallback((type: ActivityType, checked: boolean) => {
+    if (!ownsSession()) return;
+    const current = preferences.current, next = setActivityPreference(current, type, checked);
+    if (next === current) return;
+    if (checked) enabledAt.current[type] = Date.now();
+    else delete enabledAt.current[type];
+    if (!hasEnabledActivity(next)) {
+      activeRead.current?.abort();
+      metadata.current.projection = null;
+      metadata.current.advertised = null;
+      metadata.current.checkedAt = null;
+      metadata.current.recovery = false;
+      setProjection(null);
+    }
+    save(next);
   }, [ownsSession, save]);
   const present = useCallback((id: string) => {
-    if (ownsSession() && preferences.current.enabled && document.visibilityState === 'visible') {
+    if (ownsSession() && document.visibilityState === 'visible') {
       save(acknowledge(preferences.current, id, Date.now()));
     }
   }, [ownsSession, save]);
-  const install = useCallback((next: Projection) => {
-    if (!ownsSession() || !preferences.current.enabled) return;
+  const install = useCallback((next: Projection, startedAt: number) => {
+    if (!ownsSession() || !hasEnabledActivity(preferences.current)) return;
     const m = metadata.current;
     m.projection = next;
     m.recovery = false;
     if (m.advertised !== null && m.advertised <= next.serverTime) m.advertised = null;
-    save(reconcilePreferences(preferences.current, next.updates, next.at));
+    // A cached or in-flight pre-enable projection cannot finalize a category baseline.
+    save(reconcilePreferences(preferences.current, next.updates, next.at, type =>
+      startedAt >= (enabledAt.current[type] ?? -Infinity)));
     setProjection(next);
     wake.current?.();
   }, [ownsSession, save]);
   const beginHomeRead = useCallback((signal: AbortSignal) => {
-    if (!ownsSession() || !preferences.current.enabled || signal.aborted) return undefined;
+    if (!ownsSession() || !hasEnabledActivity(preferences.current) || signal.aborted) return undefined;
     operationalReads.current.add(signal);
     activeRead.current?.abort();
     const finish = () => {
@@ -82,17 +93,17 @@ export function useActivityNotifications(controller: SessionController, accountI
     if (!ownsSession()) return;
     const m = metadata.current;
     m.queued = home.matchmaking.inQueue;
-    if (!preferences.current.enabled) return;
+    if (!hasEnabledActivity(preferences.current)) return;
     const at = Date.now(), serverTime = Date.parse(status.serverTime);
     activeRead.current?.abort();
     m.checkedAt = at;
     m.offset = serverTime - statusReceivedAt;
     const advertised = status.nextRefreshAt ? Date.parse(status.nextRefreshAt) : null;
     if (advertised !== null && advertised > serverTime) m.advertised = Math.min(m.advertised ?? Infinity, advertised);
-    install({ version: status.version, serverTime, at, updates: homeUpdates(home) });
+    install({ version: status.version, serverTime, at, updates: homeUpdates(home) }, statusReceivedAt);
   }, [install, ownsSession]);
   const observeSchedulingHome = useCallback((home: HomeData, startedAt: number, serverTime: number) => {
-    if (!ownsSession() || !preferences.current.enabled) return;
+    if (!ownsSession() || !hasEnabledActivity(preferences.current)) return;
     const m = metadata.current;
     const previous = m.projection;
     if (previous && previous.at > startedAt) return;
@@ -100,11 +111,11 @@ export function useActivityNotifications(controller: SessionController, accountI
     m.offset = serverTime - startedAt;
     // The existing scheduling read has no Home version. Keep the last
     // version so a later status read can still detect an invalidation.
-    install({ version: previous?.version ?? null, serverTime, at: Date.now(), updates: homeUpdates(home) });
+    install({ version: previous?.version ?? null, serverTime, at: Date.now(), updates: homeUpdates(home) }, startedAt);
   }, [install, ownsSession]);
 
   useLayoutEffect(() => {
-    if (!saved.enabled || administrative || !mode || mode === 'chat' || !accountId) return;
+    if (!enabled || administrative || !mode || mode === 'chat' || !accountId) return;
     const m = metadata.current;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let live = true, pageActive = true, visible = document.visibilityState === 'visible';
@@ -129,12 +140,13 @@ export function useActivityNotifications(controller: SessionController, accountI
       }, Math.min(delay, nearAt - now));
     };
     const poll = async () => {
-      if (!live || !ownsSession() || !preferences.current.enabled || interval() === null || read || operationalReads.current.size) return;
+      if (!live || !ownsSession() || !hasEnabledActivity(preferences.current) || interval() === null || read || operationalReads.current.size) return;
       const request = new AbortController();
       read = request; activeRead.current = request;
-      m.checkedAt = Date.now();
+      const startedAt = Date.now();
+      m.checkedAt = startedAt;
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]);
-      const current = () => live && read === request && !signal.aborted && ownsSession() && preferences.current.enabled;
+      const current = () => live && read === request && !signal.aborted && ownsSession() && hasEnabledActivity(preferences.current);
       let fetchingPending = false;
       try {
         const status = parseStatus(await controller.request('/me/home/status', signal));
@@ -154,7 +166,7 @@ export function useActivityNotifications(controller: SessionController, accountI
           const at = Date.now();
           if (next.version < status.version) { m.recovery = true; return; }
           m.offset = next.serverTime - at;
-          install({ ...next, at });
+          install({ ...next, at }, startedAt);
         }
       } catch (error) {
         // Keep the last valid projection and retry only on the normal cadence.
@@ -207,23 +219,23 @@ export function useActivityNotifications(controller: SessionController, accountI
       window.removeEventListener('pageshow', resume);
       window.removeEventListener('pagehide', pause);
     };
-  }, [accountId, administrative, controller, install, mode, ownsSession, saved.enabled]);
+  }, [accountId, administrative, controller, enabled, install, mode, ownsSession]);
 
   const now = useMemo(() => Date.now() + metadata.current.offset, [clockRevision, projection]);
   const nextBoundary = Math.min(...(projection?.updates.flatMap(({ ends }) => ends !== null && ends > now ? [ends] : []) ?? []));
   useLayoutEffect(() => {
-    if (!saved.enabled || administrative || !Number.isFinite(nextBoundary)) return;
+    if (!enabled || administrative || !Number.isFinite(nextBoundary)) return;
     const timer = setTimeout(() => redraw(value => value + 1), Math.max(0, Math.min(2_147_483_647, nextBoundary - Date.now() - metadata.current.offset)));
     return () => clearTimeout(timer);
-  }, [administrative, nextBoundary, saved.enabled, projection, clockRevision]);
+  }, [administrative, nextBoundary, enabled, projection, clockRevision]);
   const unread = useMemo(() => {
-    if (!saved.enabled || administrative || !projection) return empty;
+    if (!enabled || administrative || !projection) return empty;
     const unseen = new Set(saved.records?.filter(([, seen]) => !seen).map(([id]) => id));
-    return new Set(projection.updates.filter(item => unseen.has(item.id) && isCurrent(item, now)).map(item => item.id));
-  }, [administrative, now, projection, saved]);
-  useTabIndicators(saved.enabled && !administrative ? unread.size : null);
-  return useMemo(() => ({ enabled: saved.enabled, setEnabled, unread, present, beginHomeRead, observeHome, observeSchedulingHome, setHomeMode }),
-    [saved.enabled, setEnabled, unread, present, beginHomeRead, observeHome, observeSchedulingHome]);
+    return new Set(projection.updates.filter(item => saved.categories[item.type] && unseen.has(item.id) && isCurrent(item, now)).map(item => item.id));
+  }, [administrative, enabled, now, projection, saved]);
+  useTabIndicators(enabled && !administrative ? unread.size : null);
+  return useMemo(() => ({ enabled, categories: saved.categories, persistenceFailed, setCategory, unread, present, beginHomeRead, observeHome, observeSchedulingHome, setHomeMode }),
+    [enabled, saved.categories, persistenceFailed, setCategory, unread, present, beginHomeRead, observeHome, observeSchedulingHome]);
 }
 
 export const ActivityNotifications = createContext<ReturnType<typeof useActivityNotifications> | null>(null);

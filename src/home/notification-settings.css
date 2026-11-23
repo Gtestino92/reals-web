@@ -1,14 +1,6 @@
 .account-notifications { gap: 18px; }
 .account-notifications .notification-heading p { margin: 8px 0 0; color: var(--color-on-surface-variant); }
 .notification-heading .brand-divider { width: 100%; margin-top: 18px; }
-.account-notifications .notification-platform { margin: 0; font-size: .875rem; color: var(--color-on-surface-variant); }
-.notification-platform-selector { display: flex; gap: .5rem; }
-.notification-platform-selector > button { flex: 1; }
-.notification-platform-selector [aria-pressed=true] {
-  background: var(--color-secondary-container);
-  border-color: var(--color-secondary);
-  color: var(--color-on-secondary-container);
-}
 .notification-rows { display: grid; gap: 12px; }
 .account-notifications .notification-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 72px; padding: 16px; border: 1px solid var(--color-outline-variant); border-radius: var(--radius-row); background: var(--color-surface); cursor: pointer; }
 .notification-copy { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
@@ -22,12 +14,7 @@
 .notification-switch:focus-visible { outline: 3px solid var(--color-secondary); outline-offset: 4px; }
 .notification-row:focus-within { border-color: var(--color-secondary); }
 .notification-switch:disabled { opacity: .5; }
-.account-notifications[data-saving=true] .notification-switch:disabled,
-.account-notifications[data-saving=true] .login-button:disabled { opacity: 1; }
 .notification-row:has(:disabled) { cursor: default; }
-.notification-feedback { min-block-size: 6rem; }
-.account-notifications .notification-feedback p { margin: 0; }
-.notification-error { color: var(--color-error); }
 @media (prefers-reduced-motion: reduce) { .notification-switch, .notification-switch::before { transition: none; } }
 @media (forced-colors: active) {
   .account-notifications .notification-switch[type=checkbox] { appearance: auto; }

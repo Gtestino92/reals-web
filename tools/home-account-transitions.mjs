@@ -12,7 +12,6 @@ const server=createServer(async(req,res)=>{const current=fixture;
   let body='';for await(const chunk of req)body+=chunk;let result;let status=200;
   if(path==='/me/home/status')result={version:current.version,dirty:false,nextRefreshAt:null,serverTime:new Date().toISOString()};
   else if(path==='/me')result={id:'me',status:'ACTIVE'};
-  else if(path==='/me/notification-preferences'){if(method==='PUT')current.preferences=JSON.parse(body);result=current.preferences??{activityEnabled:true,remindersEnabled:false,availabilityEnabled:true};}
   else if(path==='/reference/countries')result=[{code:'AR',displayName:'Argentina'}];
   else if(path==='/me/legal-status')result={requirementsSatisfied:true,documents:[]};
   else if(path==='/legal/documents/current')result={documents:[]};
@@ -85,11 +84,11 @@ try {
       check(homeNode&&await evaluate("homeNode===document.querySelector('.home')"),'browser Back retains Home node');
       await evaluate("document.querySelector('button[aria-label=Cuenta]').click()");
       await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Notificaciones'&&b.getClientRects().length).click()");
-      await waitFor("document.querySelectorAll('.home-account input[type=checkbox]').length===3",'preferences loaded');
-      const start=requests.length;
-      await evaluate("(()=>{const input=document.querySelector('.home-account input[type=checkbox]');input.click();input.click()})()");
-      await delay(150);
-      check(requests.slice(start).filter(r=>r.method==='PUT').length===1,'notification duplicate excluded');
+      await waitFor("document.querySelectorAll('.account-notifications [role=switch]').length===5",'preferences loaded');
+      const currentPreference=await evaluate("document.querySelector('.account-notifications [role=switch]').checked");
+      await evaluate("document.querySelector('.account-notifications [role=switch]').click()");
+      await waitFor(`document.querySelector('.account-notifications [role=switch]').checked !== ${currentPreference}`,'preference toggled locally');
+      check(!requests.some(r=>r.path==='/me/notification-preferences'),'Web settings avoid the Android preferences API');
       check(!await evaluate('document.documentElement.scrollWidth>innerWidth'),'no horizontal overflow');
       await screenshot('account-'+width);
       reset();await evaluate('renderFixture()');await waitFor("!!document.querySelector('.home-search button:not(:disabled)')&&!document.querySelector('.home-search')?.closest('[hidden]')",'profile Home');

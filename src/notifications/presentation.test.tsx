@@ -4,7 +4,7 @@ import { useRef } from 'react';
 import { controllerFixture } from '../chat/fixtures';
 import { homeSecondFixture } from '../home/secondHome.fixtures';
 import { SecondChatCard } from '../home/SecondChatCard';
-import { savePreferences, loadPreferences } from './activityStorage';
+import { freshPreferences, savePreferences, loadPreferences } from './activityStorage';
 import { activityId } from './activityPolicy';
 import { ActivityNotifications, useActivityNotifications } from './useActivityNotifications';
 import { usePresentedActivity } from './usePresentedActivity';
@@ -15,7 +15,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.use
 it('acknowledges a loaded visible surface only after it is presented, including after a hidden load', () => {
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
   const controller = controllerFixture(), id = activityId('VISUAL_REVIEW', 'm')!;
-  savePreferences('me', { enabled: true, records: [[id, false]], presented: [] });
+  savePreferences('me', { ...freshPreferences(), records: [[id, false]] });
   function Surface({ loaded }: { loaded: boolean }) {
     const ref = useRef<HTMLDivElement>(null);
     usePresentedActivity(ref, loaded ? id : null);
@@ -41,7 +41,7 @@ it('acknowledges a confirmed Activity card only when the appointment reaches the
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   const controller = controllerFixture(), item = homeSecondFixture();
   const id = activityId(item.type, item.connectionId!, item.secondChat!.availableAt)!;
-  savePreferences('me', { enabled: true, records: [[id, false]], presented: [] });
+  savePreferences('me', { ...freshPreferences(), records: [[id, false]] });
   let intersection: (ratio: number) => void = () => {};
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: (entries: { isIntersecting: boolean; intersectionRatio: number }[]) => void) {

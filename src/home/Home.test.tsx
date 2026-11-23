@@ -8,7 +8,7 @@ import { OperationalApp as App } from '../App';
 import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
 import { emptyHome, homeStatus } from './fixtures';
-import { storageKey } from '../notifications/activityStorage';
+import { freshPreferences, loadPreferences, savePreferences, setActivityPreference, storageKey } from '../notifications/activityStorage';
 
 let home: ReturnType<typeof emptyHome>, status: ReturnType<typeof homeStatus>;
 let profile: { id: string; userId: string; status: string; displayName: string };
@@ -109,10 +109,8 @@ it('does not show a transient loading row while reconciling a loaded Home on ret
   await act(async () => finish(json(status))); await ready();
 });
 it('restores the Notifications entry focus for explicit and browser Back to Account', async () => {
-  const base = fetcher.getMockImplementation()!;
-  fetcher.mockImplementation((path, options) => path === '/api/me/notification-preferences' ? Promise.resolve(json({ activityEnabled: true, remindersEnabled: false, availabilityEnabled: true })) : base(path, options));
   mount(); await ready(); fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' })); await screen.findByRole('switch', { name: 'Actividad' });
+  fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' })); await screen.findByRole('switch', { name: 'Primer chat disponible' });
   fireEvent.click(screen.getByRole('button', { name: 'Volver a Cuenta' })); await screen.findByRole('heading', { name: 'Cuenta' });
   expect(screen.getByRole('button', { name: 'Notificaciones' })).toHaveFocus();
   act(() => history.forward()); await screen.findByRole('heading', { name: 'Notificaciones' });
@@ -576,23 +574,34 @@ it('holds automatic first-chat entry while the foreground verifies a match loade
   expect(fetcher.mock.calls.some(([url]) => url === '/api/matches/m')).toBe(false);
 });
 
-it('changes the Web preference locally while preserving the Android request and preference state', async () => {
-  const ordinary = fetcher.getMockImplementation()!;
-  fetcher.mockImplementation((url, options) => url === '/api/me/notification-preferences'
-    ? Promise.resolve(json({ activityEnabled: true, remindersEnabled: false, availabilityEnabled: true }))
-    : ordinary(url, options));
+it('uses the same category filter for Activity cards, the Home count and the tab title', async () => {
+  const preferences = { ...freshPreferences(), records: [] };
+  savePreferences('u', setActivityPreference(preferences, 'VISUAL_REVIEW', false));
+  home.pendingActions = [{ type: 'VISUAL_REVIEW', matchId: 'visual', partner: { displayName: 'Ana' } }];
+  home.nextSteps = [{ type: 'SCHEDULING', matchId: 'schedule', connectionId: 'connection', requiresAction: true }];
+  mount(); await ready();
+  const activity = screen.getByRole('button', { name: 'Ver Actividad' });
+  expect(activity).toHaveAccessibleDescription('1 novedad');
+  expect(document.title).toBe('(1) Reals');
+  fireEvent.click(activity);
+  expect(screen.getByRole('button', { name: /Descubrí el perfil/ })).not.toHaveTextContent('Nuevo');
+  expect(screen.getAllByText('Nuevo')).toHaveLength(1);
+});
+
+it('keeps Web preferences through sign-out and relogin without requesting Android preferences', async () => {
   mount(); await ready();
   fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
   fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
-  expect(await screen.findByRole('switch', { name: 'Actividad' })).toBeChecked();
-  fireEvent.click(screen.getByRole('button', { name: 'Web' }));
-  const web = screen.getByRole('switch', { name: 'Novedades de actividad' });
-  expect(web).toBeChecked(); fireEvent.click(web); expect(web).not.toBeChecked();
-  expect(JSON.parse(localStorage.getItem(storageKey('u')) ?? '{}')).toMatchObject({ enabled: false, records: null });
-  fireEvent.click(screen.getByRole('button', { name: 'Android' }));
-  expect(screen.getByRole('switch', { name: 'Actividad' })).toBeChecked();
-  expect(screen.getByRole('switch', { name: 'Recordatorios' })).not.toBeChecked();
-  expect(fetcher.mock.calls.filter(([url]) => url === '/api/me/notification-preferences').map(([, options]) => options?.method)).toEqual(['GET']);
+  const toggle = await screen.findByRole('switch', { name: 'Revisión visual disponible' });
+  expect(toggle).toBeChecked(); fireEvent.click(toggle);
+  expect(loadPreferences('u').categories).toMatchObject({ FIRST_CHAT: true, VISUAL_REVIEW: false });
+  act(() => observer(null)); await screen.findByRole('button', { name: 'Ingresar' });
+  act(() => observer(user)); await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Notificaciones' }));
+  expect(await screen.findByRole('switch', { name: 'Revisión visual disponible' })).not.toBeChecked();
+  expect(screen.getByRole('switch', { name: 'Primer chat disponible' })).toBeChecked();
+  expect(fetcher.mock.calls.filter(([url]) => url === '/api/me/notification-preferences')).toEqual([]);
 });
 it('sign-out removes pending chat and aborts its resources',async()=>{
   installFirstChatBackend();home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByRole('heading',{name:'María'});

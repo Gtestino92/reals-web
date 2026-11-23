@@ -1963,3 +1963,57 @@ insets, and physical orientation changes still need device verification.
 | Android manifest `ic_launcher` / `ic_launcher_round`, v26 adaptive XML and 432px launcher foreground (`97827fb`) | **COMPLETE** for the source artwork and browser assets. `tools/generate-browser-icons.mjs` uses the actual adaptive crop for full-color 192px, 512px and Apple Touch PNGs, with separate safe-area and tab crops. The previous notification-seal variants used lighter colors and an indexed palette. |
 | Launcher masks and installed app icon updates | **PLATFORM-LIMITED.** The same-size Chromium comparison sheet shows the cream, navy, gold and ring alignment against the source. The maskable art is within the 40% safe circle. Chrome parsed the manifest without errors in development and production preview. Launcher effects, install/update behavior and actual icon appearance still need Android and iPhone verification. |
 | iPhone Safari installation | **COMPLETE** for documentation. The [installation guide](browser-identity.md#instalar-reals-web) describes the manual Share flow and the optional Open as Web App setting. The app uses browser installation controls on both platforms. |
+
+### Independent Web activity preferences
+
+Pre-change audit at Web `1909ae3`. Android's `NotificationSettingsScreen.kt`,
+`MatchmakingHomeScreen.kt`, `NotificationPreferencesCoordinator.kt`, and their
+presentation, coordinator and instrumentation tests define the native rows,
+navigation, loading, retry, and single-flight push preference updates. The
+[backend contract](../../reals-backend/docs/commons/api.md) owns those groups.
+
+| Behavior | Pre-change Web parity and scope |
+| --- | --- |
+| Settings structure, accessibility and Back | **PARTIAL**. Web uses the Android-style editorial rows and named switches with browser Back/focus restoration, but opens a platform selector and reads Android settings by default. Keep the layout, guards and navigation for Web-only settings. |
+| State, pending, errors and recovery | **PARTIAL**. The single Web switch stores account-local state. Android-style backend loading and retry belong to the native settings. Web storage failure uses an in-memory session copy. |
+| Badges, timing and background/resume | **PARTIAL**. Web has five projected event IDs with one shared switch. Android system delivery is **PLATFORM-LIMITED** and handled by the native app. Web uses its existing foreground and background cadence. |
+
+| Mutation or response path | Invariant |
+| --- | --- |
+| Load or migrate account settings | Each explicit flag belongs to one account and browser. Existing v1 opt-out maps to five disabled flags. Valid v1 unread history and presentation receipts survive opt-in migration. |
+| Toggle while a projection or presentation is in flight | Update only the selected flag and its records/receipts. A disabled category has no unread count or acknowledgement. Re-enabled categories wait for a fresh baseline without altering other categories. |
+| Home, scheduling, background and resume responses | Reconcile against current preferences. Failed, retired and pre-enable reads do not consume the pending baseline. Existing Home and chat ownership and timing rules remain authoritative. |
+| All categories off, admin, sign-out or account replacement | Preserve existing notification polling gates and tab cleanup. Only the current authenticated owner can save. No Android preference requests originate from Web settings. |
+
+**COMPLETE for Web settings and local indicators.** `AccountSection.tsx` shows
+five switches with the existing row design, keyboard focus and Back behavior.
+The notification coordinator filters unread IDs and acknowledgements by the
+same flags used by settings. Current operational Activity cards and deadlines
+still come from Home. Native Android's three push preferences retain their
+existing flow and API. See [storage and polling behavior](frontend-architecture.md#web-activity-notifications).
+
+Chromium `node tools/notification-settings-smoke.mjs` passed at 320, 390 and
+1440px in light and dark mode with synthetic data and the actual Account
+navigation. It covered the accessibility tree, keyboard switching, title and
+favicon counts, Back/Forward focus, full reload persistence and zero Android
+preference requests. Screenshots are in `artifacts/notification-settings/`.
+Physical devices and native screen readers were outside this check.
+
+Focused validation passed 202 tests in seven files. The additional malformed-v2
+migration check passed in the 11-test storage and policy run.
+
+```text
+npm run test:focused -- src/notifications/activityPolicy.test.ts src/notifications/useActivityNotifications.test.tsx src/notifications/presentation.test.tsx src/home/AccountSection.test.tsx src/home/Home.test.tsx src/scheduling/Scheduling.test.tsx src/admin/modes.test.tsx --maxWorkers=2
+npm run test:focused -- src/notifications/activityPolicy.test.ts
+npm run typecheck
+npm run check:architecture
+npm run build
+git diff --check
+```
+
+The production build used isolated synthetic settings and reported the existing
+bundle-size advisory.
+
+`npm test -- --maxWorkers=2` passed all 1,994 tests across 78 files on the final
+isolated run. An earlier concurrent run hit an onboarding timeout and loaded
+the pre-correction storage code alongside the malformed-v2 regression.

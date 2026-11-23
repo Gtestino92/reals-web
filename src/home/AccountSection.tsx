@@ -2,34 +2,29 @@ import { DeletionConfirmation } from '../auth/DeletionConfirmation';
 import { SignOutButton } from '../auth/SignOutButton';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionController } from '../auth/session';
-import { ApiError, object } from '../auth/api';
 import { errorCode } from '../auth/errors';
+import { activityTypes, type ActivityType } from '../notifications/activityPolicy';
 import { useActivityNotificationContext } from '../notifications/useActivityNotifications';
 import './notification-settings.css';
 import './password-dialog.css';
 
-type Preferences = { activityEnabled: boolean; remindersEnabled: boolean; availabilityEnabled: boolean };
-const descriptions = {
-  activityEnabled: 'Nuevos chats y cambios importantes en tus interacciones.',
-  remindersEnabled: 'Avisos sobre revisiones pendientes y pr\u00f3ximas segundas charlas.',
-  availabilityEnabled: 'Avisame cuando pueda volver a buscar a alguien nuevo.',
+const activityLabels: Record<ActivityType, readonly [title: string, description: string]> = {
+  FIRST_CHAT: ['Primer chat disponible', 'Cuando ya podés empezar un primer chat.'],
+  VISUAL_REVIEW: ['Revisión visual disponible', 'Cuando ya podés ver el perfil de la otra persona.'],
+  SCHEDULING: ['Coordinación disponible', 'Cuando ya pueden proponer horarios para el segundo chat.'],
+  SECOND_CHAT_SCHEDULED: ['Horario del segundo chat confirmado', 'Cuando se confirma el día y la hora del segundo chat.'],
+  SECOND_CHAT_AVAILABLE: ['Entrada al segundo chat disponible', 'Cuando se abre la ventana para entrar al segundo chat.'],
 };
-const groups = [['activityEnabled', 'Actividad'], ['remindersEnabled', 'Recordatorios'], ['availabilityEnabled', 'Disponibilidad']] as const;
-function parse(value: unknown): Preferences {
-  if (!object(value) || typeof value.activityEnabled !== 'boolean' || typeof value.remindersEnabled !== 'boolean' || typeof value.availabilityEnabled !== 'boolean') throw new ApiError('invalid');
-  return { activityEnabled: value.activityEnabled, remindersEnabled: value.remindersEnabled, availabilityEnabled: value.availabilityEnabled };
-}
 export function AccountSection({ controller, disabled, setup = false, onBack, notificationsOpen = false, onNotificationsOpen, onNavigationBlockedChange }: { controller: SessionController; disabled: boolean; setup?: boolean; onBack?: () => void; notificationsOpen?: boolean; onNotificationsOpen?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
   const web = useActivityNotificationContext();
-  const [platform, setPlatform] = useState<'android' | 'web'>('android');
   const [deleteOpen, setDeleteOpen] = useState(false);
   const dismissDelete = useCallback(() => setDeleteOpen(false), []);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [expanded, setExpanded] = useState(false), [view, setView] = useState<'password' | null>(null);
-  const [preferences, setPreferences] = useState<Preferences | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
-  const [uncertain, setUncertain] = useState(false), [deleteUncertain, setDeleteUncertain] = useState(false);
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
+  const [deleteUncertain, setDeleteUncertain] = useState(false);
   const owner = useRef<{ abort: AbortController; locked: boolean } | null>(null);
-  const notificationId = useId(), notificationAction = useRef<'read' | 'write'>('read');
+  const notificationId = useId();
   useEffect(() => { const r = { abort: new AbortController(), locked: false }; owner.current = r; return () => { r.abort.abort(); if (owner.current === r) owner.current = null; }; }, [controller]);
   const run = async (task: (signal: AbortSignal) => Promise<void>) => {
     const r = owner.current;
@@ -44,7 +39,6 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
     }
     finally { if (owner.current === r && !r.abort.signal.aborted) { r.locked = false; setBusy(false); } }
   };
-  const read = () => void run(async signal => { notificationAction.current = 'read'; const value = parse(await controller.request('/me/notification-preferences', signal)); signal.throwIfAborted(); setPreferences(value); setUncertain(false); });
   useLayoutEffect(() => { onNavigationBlockedChange?.(busy || view === 'password' || signOutOpen || deleteOpen); }, [busy, view, signOutOpen, deleteOpen, onNavigationBlockedChange]);
   useEffect(() => {
     if (view !== 'password') return;
@@ -60,64 +54,36 @@ export function AccountSection({ controller, disabled, setup = false, onBack, no
     else if (previousNotifications.current) notificationsButton.current?.focus({ preventScroll: true });
     previousNotifications.current = notificationsOpen;
   }, [notificationsOpen]);
-  const savePreference = (key: keyof Preferences, checked: boolean) => {
-    if (!preferences || uncertain || deleteUncertain) return;
-    const requested = { ...preferences, [key]: checked };
-    void run(async signal => {
-      notificationAction.current = 'write';
-      try {
-        const value = parse(await controller.request('/me/notification-preferences', signal, 'PUT', requested));
-        signal.throwIfAborted();
-        setPreferences(value);
-      } catch (failure) {
-        if (signal.aborted) return;
-        const rejected = failure instanceof ApiError && failure.kind === 'backend' && failure.status >= 400 && failure.status < 500 && failure.status !== 408;
-        setUncertain(!rejected);
-        setError(rejected ? 'No se pudo guardar el cambio. Revisá las preferencias y volvé a intentar.' : 'No pudimos confirmar el cambio. Consultá el estado antes de volver a intentar.');
-      }
-    });
-  };
   const blocked = disabled || busy || deleteUncertain;
-  if (notificationsOpen) return <section className="home-account account-notifications" aria-label="Notificaciones" aria-busy={busy} data-saving={busy && notificationAction.current === 'write'}>
+  if (notificationsOpen) return <section className="home-account account-notifications" aria-label="Notificaciones">
     <header className="notification-heading">
       <div className="home-heading"><h2 ref={heading} tabIndex={-1}>Notificaciones</h2><button className="login-button login-outlined" disabled={busy} onClick={onBack}>Volver a Cuenta</button></div>
-      <p>Elegí qué avisos querés recibir.</p>
+      <p>Elegí qué novedades querés destacar mientras Reals Web esté abierto. Los ajustes se aplican a tu cuenta en este navegador.</p>
       <div className="brand-divider" aria-hidden="true"><span/></div>
     </header>
-    {web && <div className="notification-platform-selector" role="group" aria-label="Plataforma">
-      <button type="button" className="login-button login-outlined" aria-pressed={platform === 'android'} onClick={() => setPlatform('android')}>Android</button>
-      <button type="button" className="login-button login-outlined" aria-pressed={platform === 'web'} onClick={() => setPlatform('web')}>Web</button>
-    </div>}
-    {web && platform === 'web' ? <div className="notification-rows"><label className="notification-row">
-      <span className="notification-copy"><span className="notification-title" id={`${notificationId}-web-title`}>Novedades de actividad</span><span className="notification-description" id={`${notificationId}-web-description`}>Mostrá indicadores de actividad mientras Reals esté abierto. Este ajuste solo se aplica a tu cuenta en este navegador.</span></span>
-      <span className="notification-switch-target"><input type="checkbox" role="switch" className="notification-switch" aria-labelledby={`${notificationId}-web-title`} aria-describedby={`${notificationId}-web-description`} checked={web.enabled} disabled={disabled || deleteUncertain} onChange={e => web.setEnabled(e.target.checked)}/></span>
-    </label></div> : <>
-    <p className="notification-platform">Estos ajustes se aplican a las notificaciones push de Android.</p>
-    <div className="notification-rows">{!preferences && busy && groups.map(([key]) => <div className="notification-row home-placeholder" aria-hidden="true" key={key}><span/><span/></div>)}{preferences && groups.map(([key, label]) => <label className="notification-row" key={key}>
-      <span className="notification-copy"><span className="notification-title" id={`${notificationId}-${key}-title`}>{label}</span><span className="notification-description" id={`${notificationId}-${key}-description`}>{descriptions[key]}</span></span>
-      <span className="notification-switch-target"><input type="checkbox" role="switch" className="notification-switch" aria-labelledby={`${notificationId}-${key}-title`} aria-describedby={`${notificationId}-${key}-description`} checked={preferences[key]} disabled={blocked || uncertain} onChange={e => savePreference(key, e.target.checked)}/></span>
-    </label>)}</div>
-    <div className="notification-feedback">
-      <p role="status">{busy ? notificationAction.current === 'write' ? 'Guardando preferencias…' : preferences ? 'Actualizando preferencias…' : 'Cargando notificaciones…' : ''}</p>
-      {error && <p role="alert" className="notification-error">{notificationAction.current === 'write' ? error : 'No pudimos cargar las preferencias. Revisá tu conexión y usá «Consultar estado».'}</p>}
-    </div>
-    {(uncertain || (error && notificationAction.current === 'read')) && <button className="login-button login-outlined" disabled={blocked} onClick={read}>Consultar estado</button>}
-    </>}
+    {web && <div className="notification-rows">{activityTypes.map(type => {
+      const [title, description] = activityLabels[type], id = `${notificationId}-${type}`;
+      return <label className="notification-row" key={type}>
+        <span className="notification-copy"><span className="notification-title" id={`${id}-title`}>{title}</span><span className="notification-description" id={`${id}-description`}>{description}</span></span>
+        <span className="notification-switch-target"><input type="checkbox" role="switch" className="notification-switch" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} checked={web.categories[type]} disabled={blocked} onChange={e => web.setCategory(type, e.target.checked)}/></span>
+      </label>;
+    })}</div>}
+    {web?.persistenceFailed && <p role="status">No pudimos guardar los ajustes en este navegador. Se mantienen durante esta sesión.</p>}
   </section>;
   return <section className={setup ? 'home-card home-account' : 'home-account'} aria-label="Cuenta" aria-busy={busy}>
     {setup ? <header className="home-heading"><h3>Cuenta</h3><button type="button" className="login-button login-outlined" aria-label="Cuenta" aria-expanded={expanded} aria-controls="account-options" disabled={blocked} onClick={() => setExpanded(v => !v)}>{expanded ? 'Ocultar' : 'Abrir'}</button></header> : <header className="home-heading"><h2>Cuenta</h2><button className="login-button login-outlined" disabled={busy || view === 'password'} onClick={onBack}>Volver a Inicio</button></header>}
     {(!setup || expanded) && <div id="account-options" className={setup ? undefined : 'home-card'}>
-      {!setup && <button ref={notificationsButton} className="login-button login-outlined" disabled={blocked} onClick={() => { onNotificationsOpen?.(); read(); }}>Notificaciones</button>}
+      {!setup && <button ref={notificationsButton} className="login-button login-outlined" disabled={blocked} onClick={onNotificationsOpen}>Notificaciones</button>}
 
       {!setup && controller.hasPasswordProvider === true && <button className="login-button login-outlined" disabled={blocked} onClick={() => { setError(''); setView('password'); }}>Cambiar contraseña de Reals</button>}
       {!setup && import.meta.env.DEV && <section className="account-support" aria-labelledby={`${notificationId}-support`}><h3 id={`${notificationId}-support`}>Apoyar Reals</h3><p>Si te gusta Reals y querés ayudar a sostener el proyecto, podés hacer un aporte voluntario. No te da beneficios dentro de la app.</p><a className="login-button login-outlined account-support-link" href="https://cafecito.app/reals-app" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Apoyar en Cafecito</a></section>}
       <SignOutButton disabled={blocked} onOpenChange={setSignOutOpen} onConfirm={controller.signOut} />
       <p>Eliminar la cuenta programa una eliminación recuperable durante 30 días y cierra la sesión.</p>
-      <button className="login-button login-outlined" disabled={blocked || uncertain} onClick={() => { if (!owner.current?.locked) setDeleteOpen(true); }}>Eliminar cuenta</button>
+      <button className="login-button login-outlined" disabled={blocked} onClick={() => { if (!owner.current?.locked) setDeleteOpen(true); }}>Eliminar cuenta</button>
       {deleteOpen && <DeletionConfirmation onCancel={dismissDelete} onConfirm={() => { setDeleteOpen(false); void run(async signal => { setDeleteUncertain(true); await controller.request('/me', signal, 'DELETE'); signal.throwIfAborted(); controller.signOut(); }); }}/>}
       {deleteUncertain && !busy && <button className="login-button login-outlined" onClick={() => controller.retry()}>Consultar estado de la cuenta</button>}
 
-      {view === 'password' && <PasswordForm operationError={error} busy={blocked || uncertain} onCancel={() => setView(null)} onSubmit={(current, next) => void run(async signal => { await controller.changePassword(current, next); signal.throwIfAborted(); setView(null); setMessage('Contraseña actualizada.'); })}/>}
+      {view === 'password' && <PasswordForm operationError={error} busy={blocked} onCancel={() => setView(null)} onSubmit={(current, next) => void run(async signal => { await controller.changePassword(current, next); signal.throwIfAborted(); setView(null); setMessage('Contraseña actualizada.'); })}/>}
       {error && view !== 'password' && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     </div>}
   </section>;
