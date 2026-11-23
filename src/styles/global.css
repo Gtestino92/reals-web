@@ -2,13 +2,39 @@
   box-sizing: border-box;
 }
 
+html {
+  background: var(--color-background);
+}
+
 body {
   margin: 0;
-  background: var(--color-background);
+  isolation: isolate;
   color: var(--color-on-background);
   font-family: var(--font-body);
   font-size: var(--type-body-size);
   line-height: var(--type-body-line-height);
+}
+
+/* Keep the crop anchored to the viewport behind all content, including on long pages. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: url("../assets/reals-background-editorial-light.webp") center / cover no-repeat;
+}
+
+@media (prefers-color-scheme: dark) {
+  body::before {
+    background-image: url("../assets/reals-background-editorial-dark.webp");
+  }
+}
+
+@media (forced-colors: active) {
+  body::before {
+    content: none;
+  }
 }
 
 :is(.placeholder-line, .placeholder-photo, .placeholder-control, .home-placeholder span, .visual-photo-loading) {

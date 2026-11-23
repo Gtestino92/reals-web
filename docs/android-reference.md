@@ -13,6 +13,7 @@ All UI paths below are relative to [`reals-app/app/src/main/java/com/reals/app/u
 | `theme/RealsTypography.kt` | Default Material 3 typography; normal-weight system serif identity and titles |
 | `theme/RealsShapes.kt` | Extra-small 8, row/button 12, card 14, hero 16 dp radii |
 | `common/RealsEditorialComponents.kt` | Flat paper cards, 1 dp outlines, gold dividers, minimum 48 dp buttons |
+| `root/RealsApp.kt` | System-theme editorial background behind the application, including Login |
 | `auth/LoginScreen.kt` | Future form, Spanish copy, busy/error states and responsive keyboard behavior |
 
 Also inspected: [`AGENTS.md`](../../reals-app/AGENTS.md), all four files in [`.aiassistant/rules/`](../../reals-app/.aiassistant/rules/), [`README.md`](../../reals-app/README.md), and the Android docs index, architecture, local-development, testing and both frontend technical-debt documents. Relevant engineering guidance is adapted once in this repository's `AGENTS.md`.
@@ -37,7 +38,20 @@ Android requests `FontFamily.Serif` at normal weight for Identity (`displayMediu
 
 The inherited size/line-height values were verified against the [official Compose Material 3 typography table](https://developer.android.com/develop/ui/compose/designsystems/material3#typography).
 
-Radii map dp numerically to CSS px (8/12/14/16); dp and CSS px are analogous logical units, not physical-pixel equivalence. The login uses the 48 dp minimum control height, 24 dp screen padding, 54 dp seal, 20 dp Google icon, 14 dp form gaps, gold divider and 0.72/0.52 focused/unfocused field surface alpha. Browser layout is centered up to a 400 px form width and scrolls naturally on smaller/shorter screens. Original PNGs are copied byte-for-byte from `drawable-nodpi/ic_notification_large.png` and `ic_google_g.png`; no background illustration is added because Android login does not render one. Source image payload is about 777 kB combined; image optimization is deferred to preserve the supplied originals.
+Radii map dp numerically to CSS px (8/12/14/16). Each platform scales its own logical units. Login shares the 48-unit minimum button height, 54-unit seal, 20-unit Google icon, gold divider and 0.72/0.52 focused/unfocused field surface alpha. Android uses 24 dp screen padding and 14 dp form gaps. Web uses a centered form up to 400 px wide, 10 px form gaps and responsive padding and scrolling at narrow or short sizes. The in-app seal and Google mark PNGs come from `drawable-nodpi/ic_notification_large.png` and `ic_google_g.png`.
+
+### Editorial background and asset provenance
+
+At Android revision `97827fbb950c69bd58d4ab48f0c5aca280508b3b`, [`RealsApp.kt`](../../reals-app/app/src/main/java/com/reals/app/ui/root/RealsApp.kt) calls `realsEditorialBackground()` on the full-size root surface. It paints the system-theme drawable over `MaterialTheme.colorScheme.background` with centered `ContentScale.Crop`. This includes login, sign-up and password recovery. Opaque Android dialogs and editorial cards have their own surface colors.
+
+| Android source under `app/src/main/res/drawable-nodpi/` | Original bytes | Web asset | Web bytes |
+| --- | ---: | --- | ---: |
+| `reals_background_editorial_light.png` | 1,550,332 | [Light WebP](../src/assets/reals-background-editorial-light.webp) | 102,930 |
+| `reals_background_editorial_dark.png` | 1,713,622 | [Dark WebP](../src/assets/reals-background-editorial-dark.webp) | 123,746 |
+
+Both WebPs were encoded from those PNGs with Pillow 13.0.0 (`quality=95, method=6`) at the original 841×1870 dimensions, with no edit to the composition or color palette. The encoding is lossy. Source and decoded versions were compared at mobile crop, and Vite emits both as separate, content-hashed files. CSS selects the active theme image.
+
+[`global.css`](../src/styles/global.css) paints the image on a fixed, pointer-inert pseudo-element with centered `cover` and no repeat. The semantic HTML canvas provides the fallback and forced-colors mode suppresses the illustration. Safe-area padding and keyboard layout remain with the existing screens. Wide windows and landscape show a centered band of the portrait artwork due to the same cover rule. See the [visual parity audit](android-parity-matrix.md#editorial-visual-audit--2026-11-23) for source and browser evidence.
 
 ## Stage A behavior and differences
 

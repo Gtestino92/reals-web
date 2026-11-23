@@ -13,7 +13,23 @@ html:has(.home) { scrollbar-gutter: stable; }
 .home-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
 .home-heading button { width: auto; }
 .home-card { min-width: 0; border: 1px solid var(--color-outline-variant); border-radius: var(--radius-card); background: var(--color-surface); padding: 24px; }
-.home-search { border-color: var(--color-secondary); background: var(--color-primary-container); }
+.home-search {
+  border-color: color-mix(in srgb, var(--reals-soft-gold) 42%, transparent);
+  border-radius: var(--radius-hero);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.home-search p { color: color-mix(in srgb, var(--color-on-primary) 82%, transparent); }
+.home-search .login-primary:enabled,
+.home-reconciling .home-search-ready.login-primary:disabled {
+  background: var(--color-on-primary);
+  color: var(--color-primary);
+}
+.home-search .login-primary:disabled {
+  background: color-mix(in srgb, var(--color-on-primary) 12%, transparent);
+  color: color-mix(in srgb, var(--color-on-primary) 38%, transparent);
+}
+.home .home-search .login-primary:focus-visible { outline-color: var(--color-on-primary); }
 .home-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .home-placeholder { display: grid; gap: 24px; }
 .home-loading-status { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -29,7 +45,6 @@ html:has(.home) { scrollbar-gutter: stable; }
 .home button { min-height: var(--control-min-height); }
 .home button:focus-visible { outline: 3px solid var(--color-secondary); outline-offset: 3px; }
 .home-reconciling .login-button:disabled { opacity: 1; }
-.home-reconciling .home-search-ready.login-primary:disabled { background: var(--color-primary); color: var(--color-on-primary); }
 @media (min-width: 700px) { .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 400px) { .home-card { padding: 16px; } }
 .home-activity-entry { display: grid; gap: 8px; text-align: left; color: inherit; font: inherit; cursor: pointer; }
@@ -67,7 +82,8 @@ html:has(.home) { scrollbar-gutter: stable; }
 
 .home-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .home-admin-entry { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; width: auto; padding: 8px 12px; }
-.session-header { position: relative; }
+.login-panel:has(> .session-header) { --session-header-spacing: 16px; }
+.session-header { position: relative; padding-block-end: var(--session-header-spacing); }
 .session-admin-entry { position: absolute; right: 0; top: 0; }
 
 .management-placeholder .placeholder-field { margin-block: 24px; }

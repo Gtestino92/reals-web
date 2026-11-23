@@ -1,4 +1,4 @@
-.scheduling { width: 100%; min-width:0; max-width: 42rem; margin-inline: auto; margin-block-start:24px; display: grid; gap: 1rem; overflow-wrap: anywhere; }
+.scheduling { width: 100%; min-width:0; max-width: 42rem; margin-inline: auto; margin-block-start:calc(24px - var(--session-header-spacing, 0px)); display: grid; gap: 1rem; overflow-wrap: anywhere; }
 .scheduling > .visual-review { width:100%; min-width:0; margin-block-start:0; }
 .scheduling-meta { display:grid; gap:4px; }
 .scheduling .scheduling-meta p { margin:0; }
