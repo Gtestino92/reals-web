@@ -384,6 +384,9 @@ it('shows restored queue membership on the dedicated surface', async () => {
 it('waits for first permission grant and slow acquisition before sending exactly one admission', async () => {
   let granted: PositionCallback | undefined; geo.mockImplementation(ok => { granted = ok; });
   vi.useFakeTimers(); mount(); await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(screen.queryByText('Usamos tu ubicación actual para buscar personas cerca. Puede ser aproximada. El navegador te pedirá permiso al iniciar.')).toBeNull();
+  expect(screen.getByText('Una conversación es el comienzo de algo real.')).toBeVisible();
+  expect(search()).toBeEnabled();
   fireEvent.click(search());
   await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
   expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(writes()).toHaveLength(0);

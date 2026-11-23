@@ -2087,3 +2087,15 @@ Reviewed Android's [composer supporting rows](../../reals-app/app/src/main/java/
 | Physical keyboard and assistive technology | **PLATFORM-LIMITED**. Chromium touch emulation verifies DOM focus and blur events. Physical Android Chrome still needs a tap with the keyboard open and after Android Back hides it. TalkBack, iPhone Safari and VoiceOver remain unverified. |
 
 `textSend.test.tsx` reproduces the old blur in both chats and covers focused/blurred tap, draft and quota retention. Chromium fixture checks passed for First and Second Chat at 390×844 and 1440×900 in light and dark, including desktop Space activation.
+
+### Home search copy and affinity selection
+
+Reviewed Android's [Home search card and location permission entry](../../reals-app/app/src/main/java/com/reals/app/ui/matchmaking/MatchmakingHomeScreen.kt), [affinity screen](../../reals-app/app/src/main/java/com/reals/app/ui/profile/AffinityQuestionnaireScreen.kt), [presentation rules](../../reals-app/app/src/main/java/com/reals/app/ui/profile/AffinityQuestionnairePresentation.kt) and [operation handler](../../reals-app/app/src/main/java/com/reals/app/ui/root/AffinityQuestionnaireOperationHandler.kt). Android shows conditional location copy and separates draft selection, skip, save and explicit deletion. The two local affinity reset actions are a Web UX addition. No matching native screenshots were available for comparison.
+
+| Path | Web status and invariant |
+| --- | --- |
+| Home search | **COMPLETE** for the requested copy change in [Home](../src/home/Home.tsx). The introductory text and conditional blocked reasons remain. Browser location permission, validation, error and enqueue behavior follow their existing path. |
+| Clear new selection or discard an edit | **COMPLETE** for the requested Web interaction in [AffinityQuestionnaire](../src/profile/affinities/AffinityQuestionnaire.tsx). The explicit button resets the local selection to the valid confirmed answer, or restores the unanswered state and Omitir. Progress and History entries are unaffected. Keyboard focus returns to the question when the activated button disappears. |
+| Save, delete and navigation | Existing [questionnaire model](../src/profile/affinities/useAffinityQuestionnaire.ts) owns PATCH, DELETE and atomic answer installation. Continue, Category and Review keep their source-specific destinations. The active visit gates completion-driven navigation. Back and Omitir send no deletion. |
+| Resume, failure and identity | Healthy resume retains compatible drafts. Semantic version, option and profile guards govern draft visibility. The model still gates uncertain writes until reconciliation and rejects obsolete account responses. Tests cover delayed/background reads, known and uncertain failures, stale questions and account replacement. |
+| Visual and accessibility | **PLATFORM-LIMITED** for native equivalence. Web uses existing button styles and native radios. Chromium at 390×844 and 1440×900 in light and dark covered Home copy, simulated location denial and affinity clear/omit/save/discard/delete. Physical device permission prompts and screen-reader checks remain open. |
