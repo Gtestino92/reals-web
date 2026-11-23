@@ -16,6 +16,7 @@ export function AffinityQuestionnaire({ model, navigation }: { model: AffinityMo
   const [draft, setDraft] = useState<{ identity: string; questionId: string; semanticVersion: number; code: string } | null>(null);
   useLayoutEffect(() => { setDraft(null); }, [model.identity]);
   const heading = useRef<HTMLHeadingElement>(null);
+  const selectionResetTarget = useRef<HTMLInputElement>(null);
   const p = catalog ? presentation(catalog, answers) : null;
   const q = p?.questions.find(q => q.id === context?.questionId);
   const parent: HomeDestination = context?.source === 'category' ? 'affinity-categories' : context?.source === 'review' ? 'affinity-review' : 'affinities';
@@ -75,7 +76,14 @@ export function AffinityQuestionnaire({ model, navigation }: { model: AffinityMo
       })}</>}
       {destination === 'affinity-question' && q && <div className="home-card affinity-actions">
         {context?.source !== 'review' && <p>Pregunta {p.questions.filter(item => context?.source !== 'category' || item.categoryId === context.categoryId).findIndex(item => item.id === q.id) + 1} de {p.questions.filter(item => context?.source !== 'category' || item.categoryId === context.categoryId).length}</p>}
-        <fieldset disabled={blocked}><legend>{q.prompt}</legend>{q.options.map(o => <label className="affinity-option" key={o.code}><input type="radio" name={q.id} checked={selected === o.code} onChange={() => setDraft({ identity: model.identity, questionId: q.id, semanticVersion: q.semanticVersion, code: o.code })}/><span>{o.label}</span></label>)}</fieldset>
+        <fieldset disabled={blocked}><legend>{q.prompt}</legend>{q.options.map(o => <label className="affinity-option" key={o.code}><input type="radio" name={q.id} checked={selected === o.code}
+          ref={o.code === (saved ?? q.options[0]?.code) ? selectionResetTarget : undefined}
+          onChange={() => setDraft(o.code === saved ? null : { identity: model.identity, questionId: q.id, semanticVersion: q.semanticVersion, code: o.code })}/><span>{o.label}</span></label>)}</fieldset>
+        {selected !== saved && <button type="button" disabled={blocked} className="login-button login-outlined" onClick={event => {
+          setDraft(null);
+          // Keep keyboard focus in the question when this action disappears.
+          if (event.currentTarget.ownerDocument.activeElement === event.currentTarget) selectionResetTarget.current?.focus({ preventScroll: true });
+        }}>{saved ? 'Descartar cambio' : 'Quitar selección'}</button>}
         {saved && <button disabled={blocked} className="login-button login-outlined" onClick={() => void save(true)}>Quitar respuesta</button>}
         {!selected && context?.source !== 'review' && <button className="login-button login-outlined" disabled={busy} onClick={() => advance()}>Omitir</button>}
         <button className="login-button login-primary" disabled={blocked || !selected} onClick={() => context?.source === 'review' && selected === saved ? navigation.backTo(parent) : void save()}>{busy ? 'Guardando…' : context?.source === 'review' ? selected !== saved ? 'Guardar cambios' : 'Volver a mis respuestas' : 'Siguiente'}</button>

@@ -23,6 +23,91 @@ function setup() {
   return { controller, request, replace };
 }
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
+async function openQuestionnaire(controller: SessionController) {
+  function Probe() {
+    const model = useAffinityQuestionnaire(controller);
+    const navigation = useHomeNavigation(() => true);
+    return <><button onClick={() => navigation.open('affinities')}>Afinidades</button><AffinityQuestionnaire model={model} navigation={navigation}/></>;
+  }
+  render(<Probe/>);
+  fireEvent.click(screen.getByRole('button', { name: 'Afinidades' }));
+  await screen.findByRole('button', { name: 'Empezar' });
+}
+
+const clickAction = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
+const option = (name: string) => screen.getByRole('radio', { name });
+
+it('clears a category selection and omits it without writing or serializing the draft', async () => {
+  const { controller, request } = setup();
+  await openQuestionnaire(controller);
+  clickAction('Explorar por categoría');
+  fireEvent.click(screen.getAllByRole('button', { name: 'Empezar categoría' })[0]!);
+  const entry = history.state, readCount = request.mock.calls.length;
+  fireEvent.click(option('Nada'));
+  expect(screen.queryByRole('button', { name: 'Omitir' })).toBeNull();
+  const clear = screen.getByRole('button', { name: 'Quitar selección' });
+  act(() => clear.focus());
+  fireEvent.click(clear);
+  expect(option('Nada')).not.toBeChecked();
+  expect(option('Bastante')).not.toBeChecked();
+  expect(option('Bastante')).toHaveFocus();
+  expect(history.state).toEqual(entry);
+  expect(screen.getByRole('button', { name: 'Siguiente' })).toBeDisabled();
+  clickAction('Omitir');
+  expect(screen.getByText('Pregunta b')).toBeVisible();
+  expect(screen.getByRole('progressbar')).toHaveValue(0);
+  expect(request).toHaveBeenCalledTimes(readCount);
+  act(() => history.back());
+  await screen.findAllByRole('button', { name: 'Empezar categoría' });
+  act(() => history.forward());
+  await screen.findByText('Pregunta b');
+  expect(option('Nada')).not.toBeChecked();
+  clickAction('Volver');
+  fireEvent.click((await screen.findAllByRole('button', { name: 'Empezar categoría' }))[0]!);
+  expect(screen.getByText('Pregunta a')).toBeVisible();
+  expect(option('Nada')).not.toBeChecked();
+});
+
+it('saves only the replacement selection and advances after authoritative progress changes', async () => {
+  const { controller, request } = setup();
+  await openQuestionnaire(controller);
+  clickAction('Empezar');
+  fireEvent.click(option('Nada'));
+  const reads = request.mock.calls.length;
+  clickAction('Quitar selección');
+  fireEvent.click(option('Bastante'));
+  expect(request).toHaveBeenCalledTimes(reads);
+  const pending = deferred<unknown>();
+  request.mockReturnValueOnce(pending.promise);
+  clickAction('Siguiente');
+  expect(request).toHaveBeenLastCalledWith('/me/profile/affinity-answers', expect.any(AbortSignal), 'PATCH', { answers: [{ questionId: 'a', answerCode: 'B' }] });
+  expect(screen.getByRole('progressbar')).toHaveValue(0);
+  expect(screen.getByRole('button', { name: 'Quitar selección' })).toBeDisabled();
+  await act(async () => pending.resolve({ answers: [answer('a', 'B')] }));
+  await screen.findByText('Pregunta b');
+  expect(screen.getByRole('progressbar')).toHaveValue(1);
+  expect(option('Bastante')).not.toBeChecked();
+});
+
+it('disables saving a draft against a changed semantic version and clears drafts on account replacement', async () => {
+  const { controller, request, replace } = setup();
+  await openQuestionnaire(controller);
+  clickAction('Empezar');
+  fireEvent.click(option('Nada'));
+  const catalog = fixture();
+  catalog.questions[0]!.semanticVersion++;
+  request.mockResolvedValueOnce(catalog);
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  expect(option('Nada')).not.toBeChecked();
+  expect(screen.queryByRole('button', { name: 'Quitar selección' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Siguiente' })).toBeDisabled();
+  fireEvent.click(option('Bastante'));
+  await act(async () => replace());
+  await screen.findByText('Pregunta a');
+  expect(option('Bastante')).not.toBeChecked();
+  expect(screen.getByRole('button', { name: 'Omitir' })).toBeEnabled();
+  expect(request.mock.calls.filter(([, , method]) => method === 'PATCH' || method === 'DELETE')).toEqual([]);
+});
 it('installs full authoritative PATCH/DELETE snapshots and avoids unchanged writes', async () => {
   const { controller, request } = setup(); const { result } = renderHook(() => useAffinityQuestionnaire(controller)); await waitFor(() => expect(result.current.catalog).not.toBeNull());
   await act(async () => { await result.current.mutate('a', 'A'); await result.current.mutate('b', 'B'); }); expect(result.current.answers).toHaveLength(2);
@@ -65,8 +150,27 @@ it('navigates skip, revisit, local draft, save, grouped review, edit and remove 
   fireEvent.click(screen.getByText('Empezar')); fireEvent.click(screen.getByLabelText('Nada')); expect(screen.getByText('0 de 3 respondidas')).toBeVisible(); expect(history.state.question).not.toHaveProperty('answerCode');
   fireEvent.click(screen.getByText('Siguiente')); await screen.findByText('Pregunta b'); fireEvent.click(screen.getByText('Volver')); await screen.findByText('Revisar mis respuestas'); fireEvent.click(screen.getByText('Revisar mis respuestas')); fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta a' }));
   const count = request.mock.calls.length; fireEvent.click(screen.getByText('Volver a mis respuestas')); await screen.findByRole('button', { name: 'Editar: Pregunta a' }); expect(request).toHaveBeenCalledTimes(count);
-  fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta a' })); fireEvent.click(screen.getByLabelText('Bastante')); fireEvent.click(screen.getByText('Guardar cambios')); await screen.findByRole('button', { name: 'Editar: Pregunta a' });
-  fireEvent.click(screen.getByRole('button', { name: 'Editar: Pregunta a' })); fireEvent.click(screen.getByText('Quitar respuesta')); await screen.findByText('Todavía no hay respuestas para revisar.');
+  clickAction('Editar: Pregunta a');
+  fireEvent.click(option('Bastante'));
+  clickAction('Descartar cambio');
+  expect(option('Nada')).toBeChecked();
+  expect(screen.queryByRole('button', { name: 'Omitir' })).toBeNull();
+  expect(screen.getByRole('progressbar')).toHaveValue(1);
+  expect(request).toHaveBeenCalledTimes(count);
+  fireEvent.click(option('Bastante'));
+  clickAction('Volver');
+  await screen.findByRole('button', { name: 'Editar: Pregunta a' });
+  expect(request).toHaveBeenCalledTimes(count);
+  clickAction('Editar: Pregunta a');
+  expect(option('Nada')).toBeChecked();
+  fireEvent.click(option('Bastante'));
+  clickAction('Guardar cambios');
+  await screen.findByRole('button', { name: 'Editar: Pregunta a' });
+  clickAction('Editar: Pregunta a');
+  clickAction('Quitar respuesta');
+  await screen.findByText('Todavía no hay respuestas para revisar.');
+  expect(request).toHaveBeenLastCalledWith('/me/profile/affinity-answers/a', expect.any(AbortSignal), 'DELETE', undefined);
+  expect(screen.getByRole('progressbar')).toHaveValue(0);
 });
 it('keeps successful snapshots when a later refresh fails and handles DELETE uncertainty', async () => {
   const { controller, request } = setup(); const { result } = renderHook(() => useAffinityQuestionnaire(controller)); await waitFor(() => expect(result.current.catalog).not.toBeNull());

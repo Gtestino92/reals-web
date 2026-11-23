@@ -7,10 +7,15 @@ import { chatFixture, controllerFixture, messageFixture } from './fixtures';
 import { secondHarness } from './secondFixtures';
 import type { Message } from './contracts';
 
-function conversation(kind: 'first' | 'second') {
+function conversation(kind: 'first' | 'second', quotaExhausted = false) {
   const second = kind === 'second' ? secondHarness() : null;
   const controller = second?.controller ?? controllerFixture();
   const chat = chatFixture();
+  if (quotaExhausted) {
+    const policy = { enabled: false, unavailableReason: 'LIMIT_REACHED', remainingMessages: 0 };
+    Object.assign(chat.audioPolicy, policy);
+    if (second) Object.assign(second.status.audioPolicy ?? {}, policy);
+  }
   const messages: Message[] = second?.messages ?? [];
   const secondRequest = second?.request.getMockImplementation();
   let closed = false;
@@ -54,14 +59,44 @@ function conversation(kind: 'first' | 'second') {
 
 const field = () => screen.getByRole('textbox', { name: 'Mensaje' });
 const submit = () => screen.getByRole('button', { name: 'Enviar mensaje' });
-function tap() {
-  const button = submit();
+function tap(button = submit()) {
+  fireEvent.pointerDown(button, { pointerType: 'touch', button: 0 });
+  fireEvent.pointerUp(button, { pointerType: 'touch', button: 0 });
   // Browsers transfer focus on the primary mousedown unless it is cancelled.
   if (fireEvent.mouseDown(button, { button: 0 })) button.focus();
   fireEvent.click(button);
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+it.each([
+  ['first', true], ['first', false], ['second', true], ['second', false],
+] as const)('%s dismisses the quota notice with writing focus initially %s', async (kind, focused) => {
+  const chat = conversation(kind, true);
+  const input = await screen.findByRole('textbox', { name: 'Mensaje' });
+  const notice = screen.getByRole('button', { name: 'Ocultar aviso de audio' });
+  const microphone = screen.getByRole('button', { name: 'Grabar audio' });
+  expect(microphone).toBeDisabled();
+  await waitFor(() => expect(input).toBeEnabled());
+  act(() => input.focus());
+  fireEvent.change(input, { target: { value: 'Borrador sin enviar' } });
+  if (!focused) act(() => input.blur());
+  const blur = vi.fn();
+  input.addEventListener('blur', blur);
+  const focus = vi.spyOn(input, 'focus');
+
+  tap(notice);
+
+  expect(notice).not.toBeInTheDocument();
+  expect(field()).toBe(input);
+  expect(input).toHaveValue('Borrador sin enviar');
+  if (focused) expect(input).toHaveFocus();
+  else expect(input).not.toHaveFocus();
+  expect(blur).not.toHaveBeenCalled();
+  expect(focus).not.toHaveBeenCalled();
+  expect(microphone).toBeDisabled();
+  expect(chat.write).not.toHaveBeenCalled();
+});
 
 it.each(['first', 'second'] as const)('%s keeps one focused field through consecutive confirmed sends', async kind => {
   const chat = conversation(kind);

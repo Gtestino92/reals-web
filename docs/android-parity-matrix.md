@@ -2074,3 +2074,28 @@ and iPhone Safari remain **PLATFORM-LIMITED** checks for IME and real keyboard
 behavior.
 
 `npm test -- --maxWorkers=2` passed all 2,005 tests across 79 files.
+
+### Inline audio notice focus
+
+Reviewed Android's [composer supporting rows](../../reals-app/app/src/main/java/com/reals/app/ui/chat/ChatAudioComposer.kt), [audio state tests](../../reals-app/app/src/test/java/com/reals/app/ui/chat/ChatAudioComposerUiStateTest.kt) and [audio session](../../reals-app/app/src/main/java/com/reals/app/ui/chat/ChatAudioSession.kt). Android uses a dismissible inline row and tracks notice visibility separately from recording eligibility.
+
+| Path | Web status and invariant |
+| --- | --- |
+| Dismiss while writing | **COMPLETE** in Chromium for DOM focus. [AudioComposer](../src/chat/AudioComposer.tsx) uses the same primary `mousedown` guard as text send when the owning textarea is active. Native click dismisses only the supporting row. The textarea node, draft and disabled microphone survive. |
+| Dismiss after blur or via keyboard | **COMPLETE** in Chromium. Blur is respected and Space activates the native button. Permission and recording cancellation manage audio resources, and clearing a reply changes the pending message target. They retain their existing focus paths. |
+| Confirmed text, policy refresh and lifecycle | Existing confirmation and policy paths retain authority over quota and recording. Dismissal has no request or lifecycle transition. Read-only and navigation paths continue to own composer availability. |
+| Physical keyboard and assistive technology | **PLATFORM-LIMITED**. Chromium touch emulation verifies DOM focus and blur events. Physical Android Chrome still needs a tap with the keyboard open and after Android Back hides it. TalkBack, iPhone Safari and VoiceOver remain unverified. |
+
+`textSend.test.tsx` reproduces the old blur in both chats and covers focused/blurred tap, draft and quota retention. Chromium fixture checks passed for First and Second Chat at 390×844 and 1440×900 in light and dark, including desktop Space activation.
+
+### Home search copy and affinity selection
+
+Reviewed Android's [Home search card and location permission entry](../../reals-app/app/src/main/java/com/reals/app/ui/matchmaking/MatchmakingHomeScreen.kt), [affinity screen](../../reals-app/app/src/main/java/com/reals/app/ui/profile/AffinityQuestionnaireScreen.kt), [presentation rules](../../reals-app/app/src/main/java/com/reals/app/ui/profile/AffinityQuestionnairePresentation.kt) and [operation handler](../../reals-app/app/src/main/java/com/reals/app/ui/root/AffinityQuestionnaireOperationHandler.kt). Android shows conditional location copy and separates draft selection, skip, save and explicit deletion. The two local affinity reset actions are a Web UX addition. No matching native screenshots were available for comparison.
+
+| Path | Web status and invariant |
+| --- | --- |
+| Home search | **COMPLETE** for the requested copy change in [Home](../src/home/Home.tsx). The introductory text and conditional blocked reasons remain. Browser location permission, validation, error and enqueue behavior follow their existing path. |
+| Clear new selection or discard an edit | **COMPLETE** for the requested Web interaction in [AffinityQuestionnaire](../src/profile/affinities/AffinityQuestionnaire.tsx). The explicit button resets the local selection to the valid confirmed answer, or restores the unanswered state and Omitir. Progress and History entries are unaffected. Keyboard focus returns to the question when the activated button disappears. |
+| Save, delete and navigation | Existing [questionnaire model](../src/profile/affinities/useAffinityQuestionnaire.ts) owns PATCH, DELETE and atomic answer installation. Continue, Category and Review keep their source-specific destinations. The active visit gates completion-driven navigation. Back and Omitir send no deletion. |
+| Resume, failure and identity | Healthy resume retains compatible drafts. Semantic version, option and profile guards govern draft visibility. The model still gates uncertain writes until reconciliation and rejects obsolete account responses. Tests cover delayed/background reads, known and uncertain failures, stale questions and account replacement. |
+| Visual and accessibility | **PLATFORM-LIMITED** for native equivalence. Web uses existing button styles and native radios. Chromium at 390×844 and 1440×900 in light and dark covered Home copy, simulated location denial and affinity clear/omit/save/discard/delete. Physical device permission prompts and screen-reader checks remain open. |

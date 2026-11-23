@@ -245,7 +245,6 @@ function HomeOverview({ onRestoreSecond, homeReconciler, returnScroll, actedVisu
       <section className="home-card home-search" aria-labelledby="search-title"><h3 id="search-title">Buscar chat</h3>
         <p>Una conversación es el comienzo de algo real.</p>
           {!m?.canSearch && <p>{blockedLabels[m?.blockedReason?.code ?? ''] ?? 'La búsqueda no está disponible por ahora. Actualizá el estado o revisá tus interacciones.'}</p>}
-          <p>Usamos tu ubicación actual para buscar personas cerca. Puede ser aproximada. El navegador te pedirá permiso al iniciar.</p>
           <button className={`login-button login-primary ${m?.canSearch && home.profileStatus === 'ACTIVE' ? 'home-search-ready' : ''}`} disabled={busy || returnRead || blocked || !m?.canSearch || home.profileStatus !== 'ACTIVE'} onClick={search}>Buscar chat</button>
       </section>
       {presentation?.hasActivity && <button className="home-card home-activity-entry" onClick={onActivity} aria-label="Ver Actividad" aria-describedby={unread ? unreadDescription : undefined}><span className="home-entry-title">Actividad{unread > 0 && <span className="activity-unread" id={unreadDescription}>{unread} {unread === 1 ? 'novedad' : 'novedades'}</span>}</span><span>{presentation?.required ? `${presentation.required} requieren tu acción` : 'Tus conversaciones y próximos pasos'}</span><span aria-hidden="true">Ver actividad →</span></button>}
