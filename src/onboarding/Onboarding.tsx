@@ -207,7 +207,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     let profile: FullProfile | null;
     let queued = false;
     let pair: Awaited<ReturnType<typeof readLegal>>;
-    if (management === 'filters' && !verifyWrite) {
+    if (management && !verifyWrite) {
       const reads = new AbortController();
       const readSignal = AbortSignal.any([signal, reads.signal]);
       const activeQueue = Symbol();
@@ -228,7 +228,6 @@ export function Onboarding({ Home, active = true, controller, management, naviga
       signal.throwIfAborted();
       queued = !!management && await readQueue(signal);
       signal.throwIfAborted();
-      if (queued && !verifyWrite) return null;
       pair = await readLegal(signal);
     }
     let requirements;

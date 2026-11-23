@@ -1603,31 +1603,24 @@ it('allows leaving a cold read, retires its late response and starts fresh on re
   const entry = await screen.findByRole('button', { name: 'Tu perfil' });
   await waitFor(() => expect(entry).toBeEnabled());
   const base = fetcher.getMockImplementation()!;
-  const reads: { signal: AbortSignal; resolve: (value: Response) => void }[] = [];
-  let holdNext = true;
-  fetcher.mockImplementation((path, options) => {
-    if (holdNext && path === '/api/me/profile') {
-      holdNext = false;
-      return new Promise(resolve => { reads.push({ signal: options!.signal!, resolve }); });
-    }
-    return base(path, options);
-  });
+  const obsolete = holdManagementReads();
   fireEvent.click(entry);
   await screen.findByText('Cargando perfil…');
   expect(screen.queryByRole('form', { name: 'Datos del perfil' })).toBeNull();
-  await waitFor(() => expect(reads).toHaveLength(1));
+  await expectManagementReadsStarted(obsolete);
   const back = screen.getByRole('button', { name: 'Volver a Inicio' });
   expect(back).toBeEnabled();
   fireEvent.click(back);
   await screen.findByRole('heading', { name: 'Inicio' });
-  expect(reads[0]!.signal.aborted).toBe(true);
-  await act(async () => reads[0]!.resolve(json({ ...profile, city: 'Obsoleta' })));
+  for (const read of obsolete.values()) expect(read.signal.aborted).toBe(true);
   await waitFor(() => expect(entry).toBeEnabled());
-  holdNext = true;
+  fetcher.mockImplementation(base);
+  const current = holdManagementReads();
   fireEvent.click(entry);
-  await waitFor(() => expect(reads).toHaveLength(2));
-  await act(async () => reads[1]!.resolve(json(profile)));
+  await expectManagementReadsStarted(current);
+  await act(async () => finishManagementReads(current));
   expect(await screen.findByRole('form', { name: 'Datos del perfil' })).toBeVisible();
+  await act(async () => finishManagementReads(obsolete, { ...initialProfile, status: 'ACTIVE', city: 'Obsoleta' }));
   expect(screen.getByLabelText('Ciudad')).toHaveValue('Córdoba');
 });
 
@@ -1762,15 +1755,22 @@ it('reopens Tu perfil with one click while the retained Home reconciles on repea
   fetcher.mockImplementation((path, options) => path === '/api/me/home/status'
     ? new Promise(resolve => { reads.push({ signal: options!.signal!, resolve }); })
     : base(path, options));
+  const holdHome = fetcher.getMockImplementation()!;
   for (const index of [0, 1]) {
     fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
     const entry = await screen.findByRole('button', { name: 'Tu perfil' });
     await waitFor(() => expect(reads).toHaveLength(index + 1));
     expect(screen.getByRole('button', { name: 'Buscar chat' })).toBeDisabled();
+    const admission = holdManagementReads();
     fireEvent.click(entry);
+    await expectManagementReadsStarted(admission);
     expect(screen.getByRole('form', { name: 'Datos del perfil' })).toBe(form);
     expect(reads[index]!.signal.aborted).toBe(true);
-    await act(async () => reads[index]!.resolve(json({ unexpected: true })));
+    await act(async () => {
+      finishManagementReads(admission);
+      reads[index]!.resolve(json({ unexpected: true }));
+    });
+    fetcher.mockImplementation(holdHome);
     expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
   }
 });
@@ -1823,35 +1823,164 @@ it('enables confirmed photo controls while the details country catalog is pendin
   expect(city).toBeEnabled();
 });
 
-it.each([false, true])('starts all Preferences admission reads together and handles an active queue (%s)', async inQueue => {
-  profile = { ...initialProfile, status: 'ACTIVE' };
-  mount();
-  const entry = await screen.findByRole('button', { name: 'Preferencias' });
-  await waitFor(() => expect(entry).toBeEnabled());
+const managementReadPaths = ['/api/me/profile', '/api/matchmaking/queue', '/api/me/legal-status', '/api/legal/documents/current'];
+function holdManagementReads() {
   const original = fetcher.getMockImplementation()!;
-  const paths = ['/api/me/profile', '/api/matchmaking/queue', '/api/me/legal-status', '/api/legal/documents/current'];
   const held = new Map<string, { signal: AbortSignal; finish: (response: Response) => void }>();
   fetcher.mockImplementation((input, options) => {
     const path = String(input);
-    if (!paths.includes(path) || held.has(path)) return original(input, options);
-    return new Promise(finish => held.set(path, { signal: options!.signal!, finish }));
+    const signal = options?.signal;
+    if (!signal || (options?.method ?? 'GET') !== 'GET' || !managementReadPaths.includes(path) || held.has(path)) return original(input, options);
+    return new Promise(finish => held.set(path, { signal, finish }));
   });
+  return held;
+}
+
+function expectManagementReadsStarted(held: ReturnType<typeof holdManagementReads>) {
+  return waitFor(() => expect([...held.keys()]).toEqual(expect.arrayContaining(managementReadPaths)));
+}
+
+function finishManagementReads(held: ReturnType<typeof holdManagementReads>, responseProfile = profile) {
+  held.get('/api/me/profile')?.finish(json(responseProfile));
+  held.get('/api/matchmaking/queue')?.finish(json({ userId: responseProfile?.userId, inQueue: false }));
+  held.get('/api/me/legal-status')?.finish(json({ requirementsSatisfied: satisfied, documents: [document()] }));
+  held.get('/api/legal/documents/current')?.finish(json({ documents: [document()] }));
+}
+
+it.each([
+  ['Preferencias', 'Preferencias de búsqueda', 'ready'],
+  ['Preferencias', 'Preferencias de búsqueda', 'queued'],
+  ['Tu perfil', 'Datos del perfil', 'ready'],
+  ['Tu perfil', 'Datos del perfil', 'queued'],
+  ['Tu perfil', 'Datos del perfil', 'legal required'],
+])('starts all %s admission reads together for %s (%s)', async (name, formName, outcome) => {
+  profile = { ...initialProfile, status: 'ACTIVE' };
+  mount();
+  const entry = await screen.findByRole('button', { name });
+  await waitFor(() => expect(entry).toBeEnabled());
+  const held = holdManagementReads();
   fireEvent.click(entry);
-  await waitFor(() => expect(held.size).toBe(paths.length));
-  const form = () => screen.queryByRole('form', { name: 'Preferencias de búsqueda' });
+  await expectManagementReadsStarted(held);
+  const form = () => screen.queryByRole('form', { name: formName });
   expect(form()).toBeNull();
   expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
+  const inQueue = outcome === 'queued';
   await act(async () => held.get('/api/matchmaking/queue')!.finish(json({ userId: 'u', inQueue })));
   if (inQueue) {
     await screen.findByRole('heading', { name: 'Inicio' });
-    expect(held.get('/api/me/profile')!.signal.aborted).toBe(true);
+    for (const read of held.values()) expect(read.signal.aborted).toBe(true);
+    await act(async () => finishManagementReads(held));
+    expect(form()).toBeNull();
     return;
   }
+  satisfied = outcome !== 'legal required';
   await act(async () => {
     held.get('/api/me/profile')!.finish(json(profile));
     held.get('/api/me/legal-status')!.finish(json({ requirementsSatisfied: satisfied, documents: [document()] }));
   });
   expect(form()).toBeNull();
   await act(async () => held.get('/api/legal/documents/current')!.finish(json({ documents: [document()] })));
-  expect(form()).toBeVisible();
+  if (satisfied) expect(form()).toBeVisible();
+  else {
+    expect(screen.getByRole('heading', { name: 'Antes de continuar' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Confirmar lectura' })).toBeEnabled();
+    expect(form()).toBeNull();
+  }
+});
+
+it('keeps the Tu perfil draft during a failed resume and retries the admission batch', async () => {
+  await openManagement('Tu perfil');
+  const form = await screen.findByRole('form', { name: 'Datos del perfil' });
+  const city = within(form).getByLabelText('Ciudad');
+  fireEvent.change(city, { target: { value: 'Rosario' } });
+  city.focus();
+  const base = fetcher.getMockImplementation()!;
+  const refresh = holdManagementReads();
+  refreshView();
+  await expectManagementReadsStarted(refresh);
+  expect(screen.getByRole('form', { name: 'Datos del perfil' })).toBe(form);
+  expect(city).toHaveFocus();
+  expect(city).toHaveValue('Rosario');
+  expect(screen.queryByText('Cargando perfil…')).toBeNull();
+
+  await act(async () => refresh.get('/api/me/legal-status')!.finish(json({ code: 'UNAVAILABLE' }, 503)));
+  expect(screen.getByRole('alert')).toHaveTextContent('UNAVAILABLE');
+  expect(screen.getByRole('form', { name: 'Datos del perfil' })).toBe(form);
+  expect(city).toHaveValue('Rosario');
+  for (const read of refresh.values()) expect(read.signal.aborted).toBe(true);
+
+  fetcher.mockImplementation(base);
+  const retry = holdManagementReads();
+  fireEvent.click(screen.getByRole('button', { name: 'Consultar estado' }));
+  await expectManagementReadsStarted(retry);
+  await act(async () => finishManagementReads(retry));
+  expect(screen.getByRole('form', { name: 'Datos del perfil' })).toBe(form);
+  expect(city).toHaveValue('Rosario');
+  expect(within(form).getByRole('button', { name: 'Guardar cambios' })).toBeEnabled();
+  expect(screen.queryByRole('alert')).toBeNull();
+  await act(async () => finishManagementReads(refresh, { ...initialProfile, status: 'ACTIVE', displayName: 'Obsoleta' }));
+  expect(within(form).getByLabelText('Nombre visible')).toHaveValue('Ana');
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('retires the whole Tu perfil admission batch on account replacement', async () => {
+  profile = { ...initialProfile, status: 'ACTIVE' };
+  mount();
+  const entry = await screen.findByRole('button', { name: 'Tu perfil' });
+  await waitFor(() => expect(entry).toBeEnabled());
+  const base = fetcher.getMockImplementation()!;
+  const obsolete = holdManagementReads();
+  fireEvent.click(entry);
+  await expectManagementReadsStarted(obsolete);
+  act(() => observer(null));
+  await screen.findByRole('button', { name: 'Ingresar' });
+  for (const read of obsolete.values()) expect(read.signal.aborted).toBe(true);
+
+  const oldProfile = profile;
+  profile = { ...profile, id: 'other-profile', userId: 'other', city: 'Mendoza' };
+  fetcher.mockImplementation(async (path, options) => {
+    if (path === '/api/me') return json({ id: 'other', status: 'ACTIVE' });
+    if (path === '/api/matchmaking/queue') return json({ userId: 'other', inQueue: false });
+    return base(path, options);
+  });
+  act(() => observer({ ...user, uid: 'other-firebase-user' }));
+  const replacement = await screen.findByRole('button', { name: 'Tu perfil' });
+  await waitFor(() => expect(replacement).toBeEnabled());
+  fireEvent.click(replacement);
+  expect(await screen.findByLabelText('Ciudad')).toHaveValue('Mendoza');
+  await act(async () => finishManagementReads(obsolete, oldProfile));
+  expect(screen.getByLabelText('Ciudad')).toHaveValue('Mendoza');
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('supersedes a pending Tu perfil resume and verifies a save in order', async () => {
+  await openManagement('Tu perfil');
+  const form = await screen.findByRole('form', { name: 'Datos del perfil' });
+  const base = fetcher.getMockImplementation()!;
+  const refresh = holdManagementReads();
+  refreshView();
+  await expectManagementReadsStarted(refresh);
+
+  fetcher.mockImplementation(base);
+  const verification = holdManagementReads();
+  fireEvent.change(within(form).getByLabelText('Ciudad'), { target: { value: 'Rosario' } });
+  fireEvent.submit(form);
+  await waitFor(() => expect(verification.has('/api/me/profile')).toBe(true));
+  expect(writes('PATCH')).toHaveLength(1);
+  expect([...verification.keys()]).toEqual(['/api/me/profile']);
+  for (const read of refresh.values()) expect(read.signal.aborted).toBe(true);
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeDisabled();
+
+  await act(async () => verification.get('/api/me/profile')!.finish(json(profile)));
+  await waitFor(() => expect(verification.has('/api/matchmaking/queue')).toBe(true));
+  expect([...verification.keys()]).toEqual(['/api/me/profile', '/api/matchmaking/queue']);
+  await act(async () => verification.get('/api/matchmaking/queue')!.finish(json({ userId: 'u', inQueue: false })));
+  await expectManagementReadsStarted(verification);
+  expect(screen.queryByText('Cambios guardados.')).toBeNull();
+  await act(async () => finishManagementReads(verification));
+  expect(await screen.findByText('Cambios guardados.')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Volver a Inicio' })).toBeEnabled();
+  await act(async () => finishManagementReads(refresh, { ...initialProfile, status: 'ACTIVE', displayName: 'Obsoleta' }));
+  expect(screen.getByLabelText('Ciudad')).toHaveValue('Rosario');
+  expect(within(form).getByLabelText('Nombre visible')).toHaveValue('Ana');
 });
