@@ -1,8 +1,8 @@
 type EnvironmentVariables = Readonly<Record<string, unknown>>;
 
-export type RealsEnvironment =
+export type RealsEnvironment = { readonly legalDocumentOrigin: string | null } & (
   | { readonly name: 'local'; readonly apiOrigin: '' }
-  | { readonly name: 'dev' | 'prod'; readonly apiOrigin: string };
+  | { readonly name: 'dev' | 'prod'; readonly apiOrigin: string });
 
 const firebaseKeys = ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID', 'VITE_FIREBASE_APP_ID'] as const;
 const localOnlyFlags = ['VITE_FIREBASE_APP_CHECK_DEBUG', 'VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION'] as const;
@@ -12,8 +12,9 @@ export function isLocalVite(env: EnvironmentVariables): boolean {
     && (env.VITE_REALS_ENVIRONMENT === undefined || env.VITE_REALS_ENVIRONMENT === 'local');
 }
 
-function remoteOrigin(value: unknown): string {
-  const invalid = () => new Error('VITE_API_BASE_URL must be a public HTTPS backend origin, without credentials, a path, query or fragment.');
+function remoteOrigin(env: EnvironmentVariables, key: 'VITE_API_BASE_URL' | 'VITE_LEGAL_DOCUMENT_ORIGIN'): string {
+  const value = env[key];
+  const invalid = () => new Error(`${key} must be a public HTTPS origin, without credentials, a path, query or fragment.`);
   if (typeof value !== 'string' || !/^https:\/\/[a-z0-9.-]+(?::[0-9]+)?\/?$/i.test(value.trim())) throw invalid();
   let url: URL;
   try { url = new URL(value.trim()); } catch { throw invalid(); }
@@ -28,20 +29,27 @@ function remoteOrigin(value: unknown): string {
   return url.origin;
 }
 
+function legalDocumentOrigin(env: EnvironmentVariables, name: RealsEnvironment['name']): string | null {
+  if (env.VITE_LEGAL_DOCUMENT_ORIGIN === undefined || env.VITE_LEGAL_DOCUMENT_ORIGIN === '') {
+    return name === 'prod' ? null : 'https://reals-web.pages.dev';
+  }
+  return remoteOrigin(env, 'VITE_LEGAL_DOCUMENT_ORIGIN');
+}
+
 export function resolveEnvironment(env: EnvironmentVariables, building = false): RealsEnvironment {
   const name = env.VITE_REALS_ENVIRONMENT;
   if (!building && isLocalVite(env)) {
     if (env.VITE_API_BASE_URL !== undefined && env.VITE_API_BASE_URL !== '') {
       throw new Error('Leave VITE_API_BASE_URL unset or empty for local. Vite proxies /api to Spring Boot.');
     }
-    return { name: 'local', apiOrigin: '' };
+    return { name: 'local', apiOrigin: '', legalDocumentOrigin: legalDocumentOrigin(env, 'local') };
   }
   if (name !== 'dev' && name !== 'prod') {
     throw new Error('Set VITE_REALS_ENVIRONMENT to local, dev or prod. Builds require an explicit dev or prod selection.');
   }
   const enabledFlags = localOnlyFlags.filter(key => env[key] !== undefined && env[key] !== 'false');
   if (enabledFlags.length) throw new Error(`Unset or set to false for ${name}: ${enabledFlags.join(', ')}.`);
-  return { name, apiOrigin: remoteOrigin(env.VITE_API_BASE_URL) };
+  return { name, apiOrigin: remoteOrigin(env, 'VITE_API_BASE_URL'), legalDocumentOrigin: legalDocumentOrigin(env, name) };
 }
 
 function configured(value: unknown): value is string {
