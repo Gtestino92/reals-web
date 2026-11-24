@@ -31,7 +31,7 @@ export default defineConfig({
     },
   },
   test: {
-    env: { VITE_REALS_ENVIRONMENT: 'local', VITE_API_BASE_URL: '' },
+    env: { VITE_REALS_ENVIRONMENT: 'local', VITE_API_BASE_URL: '', VITE_LEGAL_DOCUMENT_ORIGIN: '' },
     // Exercise browser persistence in jsdom; Firebase's Node build uses memory.
     alias: { 'firebase/auth': fileURLToPath(new URL('./node_modules/@firebase/auth/dist/esm/index.js', import.meta.url)) },
     environment: 'jsdom',

@@ -64,6 +64,29 @@ it('shows interactive login immediately when Firebase confirms no existing sessi
   expect(fetcher).not.toHaveBeenCalled();
 });
 
+it('enters a production session with an empty legal catalog and no publication origin', async () => {
+  const api = 'https://api.reals.ar';
+  vi.stubEnv('VITE_REALS_ENVIRONMENT', 'prod');
+  vi.stubEnv('VITE_API_BASE_URL', api);
+  vi.stubEnv('VITE_LEGAL_DOCUMENT_ORIGIN', '');
+  vi.stubEnv('VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION', 'false');
+  vi.stubEnv('VITE_FIREBASE_APP_CHECK_DEBUG', 'false');
+  try {
+    ready();
+    const legal = withEmptyLegalCatalog(() => { throw Error('Unexpected request'); });
+    fetcher.mockImplementation((input, options) => {
+      const url = new URL(String(input));
+      expect(url.origin).toBe(api);
+      return legal(url.pathname, options);
+    });
+    mount();
+    act(() => observer(user));
+    expect(await screen.findByText('Sin perfil: falta completar el registro.')).toBeVisible();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 it('keeps the restored-session shell until bootstrap resolves and shows an actionable failure', async () => {
   let fail!: (reason: Error) => void;
   fetcher.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));

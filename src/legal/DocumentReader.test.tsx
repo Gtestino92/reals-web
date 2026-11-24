@@ -9,7 +9,37 @@ function publication(html: string, headers: HeadersInit = { 'content-type': 'tex
   Object.defineProperty(response, 'url', { value: destination });
   return response;
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+function production(origin: string) {
+  vi.stubEnv('VITE_REALS_ENVIRONMENT', 'prod');
+  vi.stubEnv('VITE_API_BASE_URL', 'https://api.reals.ar');
+  vi.stubEnv('VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION', 'false');
+  vi.stubEnv('VITE_FIREBASE_APP_CHECK_DEBUG', 'false');
+  vi.stubEnv('VITE_LEGAL_DOCUMENT_ORIGIN', origin);
+}
+
+it('refuses document requests when production has no trusted publication', async () => {
+  production('');
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  await expect(loadDocument(url, new AbortController().signal)).rejects.toThrow('Unexpected publication');
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('fetches the configured production document at its exact URL and rejects other destinations', async () => {
+  const origin = 'https://legal.reals.ar';
+  production(origin);
+  const documentUrl = origin + '/legal/privacy/v2/document.html';
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(publication('<p>Vigente</p>', undefined, documentUrl));
+  vi.stubGlobal('fetch', fetcher);
+  const signal = new AbortController().signal;
+  for (const target of [url, origin + '/privacy', origin + ':8443/legal/privacy']) {
+    await expect(loadDocument(target, signal)).rejects.toThrow('Unexpected publication');
+  }
+  await expect(loadDocument(documentUrl, signal)).resolves.toBeDefined();
+  expect(fetcher).toHaveBeenCalledExactlyOnceWith(documentUrl, expect.objectContaining({ credentials: 'omit', redirect: 'error' }));
+});
 
 it('requires successful presentation, allows retry and submits only on explicit action', async () => {
   const fetcher = vi.fn<typeof fetch>();

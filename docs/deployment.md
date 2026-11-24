@@ -24,6 +24,7 @@ The existing project's **production branch** is already set to `development`. It
 | --- | --- | --- |
 | `VITE_REALS_ENVIRONMENT` | `dev` | `prod` |
 | `VITE_API_BASE_URL` | `https://reals-backend-dev.up.railway.app` | Production backend's public HTTPS origin |
+| `VITE_LEGAL_DOCUMENT_ORIGIN` | Optional. Defaults to `https://reals-web.pages.dev` in dev and local. | Set to the production publisher's public HTTPS origin before enabling legal documents. |
 | `VITE_FIREBASE_API_KEY` | Development Web app `apiKey` | Production Web app `apiKey` |
 | `VITE_FIREBASE_AUTH_DOMAIN` | Development Web app `authDomain` | Production Web app `authDomain` |
 | `VITE_FIREBASE_PROJECT_ID` | Development Web app `projectId` | Production Web app `projectId` |
@@ -96,6 +97,8 @@ The backend owns the immutable HTML and the opt-in Spring catalog. Every publica
 
 For local HTTP rehearsal, serve a development build with `npm run preview` and pass its loopback origin to the same verifier. Browser UI checks use `npm run dev -- --port 5174` and `node tools/legal-browser.mjs` with a synthetic identity and transport.
 
-The reader fetches UTF-8 HTML only under `https://reals-web.pages.dev/legal/`. Cloudflare Pages serves the catalog's `/document.html` files at the corresponding extensionless `/document` paths. Requests go directly to that path with redirects disabled, omitted credentials and a 512 KiB decoded-body limit. The secondary link retains the exact catalog URL. A new publication origin requires an explicit Web change and a deployment review of CORS and CSP.
+The reader fetches UTF-8 HTML under `/legal/` on the origin selected at build time. Set `VITE_LEGAL_DOCUMENT_ORIGIN` to a single public HTTPS origin using the same syntax as `VITE_API_BASE_URL`. A malformed setting fails build validation. Leaving it unset or empty in production permits builds and sessions with an empty catalog. If a document is opened, the reader displays its load error before making a request.
+
+On `*.pages.dev`, the reader requests the extensionless `/document` route for catalog files ending in `/document.html`. Other hosts must serve the exact catalog URL directly. Requests omit credentials, reject redirects and enforce a 512 KiB decoded-body limit. The secondary browser link retains the catalog URL. When switching publishers, review CORS and CSP and rebuild the Web bundle with the new origin.
 
 The public catalog omits the canonical SHA-256. The reader can check the destination, response and supported formatting. It cannot compare the downloaded bytes to the backend's canonical digest. Use the publication verifier for that comparison during release.

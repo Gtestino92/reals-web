@@ -16,14 +16,15 @@ const deployment = {
 
 describe('Reals environment selection', () => {
   it('accepts explicit local and keeps the existing unset local Vite workflow', () => {
-    expect(resolveEnvironment(local)).toEqual({ name: 'local', apiOrigin: '' });
-    expect(resolveEnvironment({ ...local, VITE_REALS_ENVIRONMENT: 'local', VITE_API_BASE_URL: '' })).toEqual({ name: 'local', apiOrigin: '' });
+    const expected = { name: 'local', apiOrigin: '', legalDocumentOrigin: 'https://reals-web.pages.dev' };
+    expect(resolveEnvironment(local)).toEqual(expected);
+    expect(resolveEnvironment({ ...local, VITE_REALS_ENVIRONMENT: 'local', VITE_API_BASE_URL: '' })).toEqual(expected);
   });
 
   it.each(['dev', 'prod'])('selects %s independently of Vite mode and flags', name => {
     for (const vite of [local, deployment, { DEV: false, PROD: true, MODE: 'development' }]) {
       expect(resolveEnvironment({ ...vite, VITE_REALS_ENVIRONMENT: name, VITE_API_BASE_URL: ' HTTPS://REALS-WEB.PAGES.DEV.:443/ ' }))
-        .toEqual({ name, apiOrigin: 'https://reals-web.pages.dev' });
+        .toEqual({ name, apiOrigin: 'https://reals-web.pages.dev', legalDocumentOrigin: name === 'prod' ? null : 'https://reals-web.pages.dev' });
     }
   });
 
@@ -56,6 +57,12 @@ describe('Reals environment selection', () => {
     'https://placeholder.domain.org', 'https://your-backend.domain.org',
   ])('rejects unsafe or missing remote origin %j', origin => {
     expect(() => resolveEnvironment({ ...deployment, VITE_API_BASE_URL: origin })).toThrow('VITE_API_BASE_URL');
+    if (origin) expect(() => validateBuildEnvironment({ ...deployment, VITE_LEGAL_DOCUMENT_ORIGIN: origin })).toThrow('VITE_LEGAL_DOCUMENT_ORIGIN');
+  });
+
+  it.each([local, deployment, { ...deployment, VITE_REALS_ENVIRONMENT: 'prod' }])('uses an explicit legal origin independently of the API', env => {
+    expect(resolveEnvironment({ ...env, VITE_LEGAL_DOCUMENT_ORIGIN: 'https://LEGAL.reals.ar:8443/' }).legalDocumentOrigin)
+      .toBe('https://legal.reals.ar:8443');
   });
 });
 
