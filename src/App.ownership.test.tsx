@@ -17,6 +17,7 @@ import { ApiClient } from './auth/api';
 import type { AuthService, Identity } from './auth/firebase';
 import { emptyHome } from './home/fixtures';
 import { loadPreferences, storageKey } from './notifications/activityStorage';
+import { withEmptyLegalCatalog } from './test/emptyLegalCatalog';
 const owners: TabOwnershipManager[] = [];
 const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
 function mount() {
@@ -98,7 +99,7 @@ it('retires pending activity reads on ownership transfer and isolates the next a
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   let account = 'owner-a', version = 0, hold = false;
   let complete: ((value: Response) => void) | undefined;
-  const request = vi.fn<typeof fetch>().mockImplementation(async path => {
+  const request = vi.fn(withEmptyLegalCatalog(async path => {
     const serverTime = new Date().toISOString();
     const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
     switch (path) {
@@ -113,7 +114,7 @@ it('retires pending activity reads on ownership transfer and isolates the next a
       case '/api/me/profile/affinity-answers': return json({ answers: [] });
       default: throw new Error('Unexpected endpoint');
     }
-  });
+  }));
   const identity = (): Identity => ({ uid: account, emailVerified: true, getIdToken: vi.fn().mockResolvedValue('test'), reload: vi.fn() });
   const auth: AuthService = { observe: vi.fn(next => { next(identity()); return vi.fn(); }), signIn: vi.fn(),
     signUp: vi.fn(), google: vi.fn(), verify: vi.fn(), signOut: vi.fn() };
