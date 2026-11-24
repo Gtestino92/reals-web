@@ -20,7 +20,7 @@ await withIdentityChrome(async ({ call, evaluate }) => {
     await call('Page.navigate',{url:'http://127.0.0.1:5174/tools/ux-audit-fixture.html'});
     await wait("!!document.getElementById('login-email')&&!document.getElementById('login-email').disabled");
     for(const [selector,value] of [['#login-email','synthetic@example.invalid'],['#login-password','synthetic-only']]) { await evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);await call('Input.insertText',{text:value}); }
-    await click('Ingresar');await click('Confirmar lectura');
+    await click('Ingresar');await click('Leer documento');await click('Confirmar lectura');
     await wait("!!document.querySelector('.profile-form')&&!document.querySelector('.profile-submit').disabled");
     await evaluate('scrollTo(0,0)');await measure('Crear perfil');
     await evaluate("document.querySelector('.profile-submit').scrollIntoView({block:'center'})");

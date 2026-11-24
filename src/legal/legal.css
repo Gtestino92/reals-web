@@ -6,16 +6,9 @@
 }
 .legal-requirements { margin-block: 20px; }
 .legal-requirements :is(h2, h3, p) { margin: 0; }
-.legal-requirements article a {
-  color: var(--color-primary);
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  justify-self: start;
-}
-
-.legal-completed { color: var(--color-primary); }
-.legal-pending { color: var(--color-error); }
+.legal-completed { font-weight: 600; }
+.legal-completed::before { content: "✓ "; }
+.legal-pending { color: var(--color-on-surface-variant); }
 
 .legal-overlay {
   inset: 0;
@@ -29,3 +22,28 @@
   background: var(--color-background);
   color: var(--color-on-background);
 }
+
+.legal-account-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.legal-account-actions > button { background: transparent; border-color: transparent; width: auto; }
+.legal-reader {
+  box-sizing: border-box;
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-card);
+  padding: 0;
+  width: min(44rem, calc(100% - 1rem));
+  max-height: calc(100dvh - 1rem);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.legal-reader[open] { display: flex; flex-direction: column; }
+.legal-reader::backdrop { background: rgb(0 0 0 / 55%); }
+.legal-reader header, .legal-reader footer { padding: 12px 16px; }
+.legal-reader h2 { font-family: var(--font-display); margin: 0; }
+.legal-reader small { color: var(--color-on-surface-variant); }
+.legal-reader-body { padding: 0 16px; overflow: auto; overscroll-behavior: contain; line-height: 1.55; }
+.legal-reader footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--color-outline); }
+.legal-reader footer a { margin-inline-end: auto; color: var(--color-primary); padding-block: 10px; }
+.legal-reader footer button { width: auto; }
+.legal-reader-status { margin: 4px 16px; }

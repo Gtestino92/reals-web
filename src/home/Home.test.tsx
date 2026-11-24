@@ -813,11 +813,39 @@ it('returns to the same first chat draft and safety controls after deferring a r
   await waitFor(() => expect(draft).toBeEnabled());
   fireEvent.change(draft, { target: { value: 'Borrador de prueba' } });
   fireEvent.click(screen.getByRole('button', { name: 'Aprobar chat' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Ahora no' }));
+  const defer = await screen.findByRole('button', { name: 'Ahora no' });
+  await waitFor(() => expect(defer).toBeEnabled());
+  fireEvent.click(defer);
   expect(await screen.findByRole('textbox', { name: 'Mensaje' })).toBe(draft);
   expect(draft).toHaveValue('Borrador de prueba');
   fireEvent.click(screen.getByRole('button', { name: 'Opciones del chat' }));
   await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Salir unilateralmente' })).toBeEnabled());
   expect(screen.getByRole('menuitem', { name: 'Reportar por seguridad' })).toBeEnabled();
   expect(fetcher.mock.calls.filter(([, options]) => options?.method === 'POST').map(([path]) => path)).toEqual(['/api/matches/m/chat-decision']);
+});
+
+it('reconciles a rejected queue admission and gates the next explicit search from the refreshed legal snapshot', async () => {
+  let pending = false;
+  const doc = { type: 'PRIVACY_NOTICE', version: 'v1', requiredAction: 'ACKNOWLEDGED', url: 'https://reals-web.pages.dev/legal/privacy/v1/document.html' };
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (path, options) => {
+    if (path === '/api/me/legal-status') return json({ requirementsSatisfied: !pending, documents: [{ ...doc, satisfied: !pending }] });
+    if (path === '/api/legal/documents/current') return json({ documents: [doc] });
+    if (path === '/api/matchmaking/queue' && options?.method === 'POST') {
+      pending = true;
+      return json({ code: 'LEGAL_ACTION_REQUIRED' }, 409);
+    }
+    return base(path, options);
+  });
+  mount(fetcher);
+  await ready();
+  fireEvent.click(search());
+  const defer = await screen.findByRole('button', { name: 'Ahora no' });
+  await waitFor(() => expect(defer).toBeEnabled());
+  fireEvent.click(defer);
+  await waitFor(() => expect(search()).toBeEnabled());
+  fireEvent.click(search());
+  expect(await screen.findByRole('button', { name: 'Leer documento' })).toBeVisible();
+  expect(geo).toHaveBeenCalledTimes(1);
+  expect(writes()).toHaveLength(1);
 });

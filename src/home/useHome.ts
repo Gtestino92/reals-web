@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { PendingLegalSearch } from '../legal/searchGate';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ApiError, object, parseProfile } from '../auth/api';
 import type { SessionController } from '../auth/session';
 import { parseHome, parseQueue, parseStatus } from './contracts';
@@ -19,6 +20,7 @@ interface HomeObserver {
 export function useHome(controller: SessionController, active = true, observer?: HomeObserver | null) {
   const notificationObserver = useRef(observer);
   notificationObserver.current = observer;
+  const openPendingLegal = useContext(PendingLegalSearch);
   const [state, setState] = useState<State>({ model: null, busy: true, blocked: true, returning: false, error: '', searchPhase: 'idle', locationFailure: null });
   const foreground = useRef(active); foreground.current = active;
   const owner = useRef<Owner | null>(null), latest = useRef<Model | null>(null);
@@ -142,6 +144,7 @@ export function useHome(controller: SessionController, active = true, observer?:
     }
     if (!r || r.mutation || state.busy || state.returning || state.blocked || !model) return;
     if (cancel ? !model.home.matchmaking.inQueue : model.home.profileStatus !== 'ACTIVE' || !model.home.matchmaking.canSearch || model.home.matchmaking.inQueue) return;
+    if (!cancel && openPendingLegal()) return;
     r.mutation = true; r.cancelRequested = cancel; r.read?.abort(); r.read = null;
     const serial = ++r.serial, signal = r.lifetime.signal;
     setState(s => ({ ...s, busy: true, error: '', locationFailure: null, searchPhase: cancel ? 'canceling' : 'locating' }));
@@ -161,7 +164,8 @@ export function useHome(controller: SessionController, active = true, observer?:
         }
       } catch (error) {
         if (!valid(r, serial)) return;
-        if (attempted || !r.cancelRequested) {
+        const legallyRejected = error instanceof ApiError && error.status === 409 && error.code === 'LEGAL_ACTION_REQUIRED';
+        if (!legallyRejected && (attempted || !r.cancelRequested)) {
           const locationError = error instanceof LocationError ? error : new LocationError('unavailable');
           failure = attempted ? 'No pudimos confirmar la admisión a la búsqueda. Actualizá el estado antes de intentar otra vez.' : locationError.message;
           locationFailure = attempted ? null : locationError.kind;
