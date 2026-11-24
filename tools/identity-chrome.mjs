@@ -4,11 +4,11 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-export async function withIdentityChrome(run, { visible = false, scale = 1 } = {}) {
+export async function withIdentityChrome(run, { visible = false, scale = 1, appUrl } = {}) {
   const directory = await mkdtemp(join(tmpdir(),'reals-identity-'));
   const chrome = spawn(process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe',[
     ...(!visible ? ['--headless=new'] : []),'--no-first-run','--no-default-browser-check',
-    `--force-device-scale-factor=${scale}`,'--remote-debugging-port=0',`--user-data-dir=${directory}`,'about:blank',
+    `--force-device-scale-factor=${scale}`,'--remote-debugging-port=0',`--user-data-dir=${directory}`,appUrl ? '--app=' + appUrl : 'about:blank',
   ],{windowsHide:true,stdio:'ignore'});
   let socket;
   try {

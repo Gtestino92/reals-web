@@ -18,8 +18,13 @@ let user: Identity, auth: AuthService;
 let observer: (user: Identity | null) => void;
 let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 const json = (body: unknown,status = 200) => new Response(JSON.stringify(body),{ status });
-const document = () => ({ type:'PRIVACY_NOTICE',version,requiredAction:'ACKNOWLEDGED',satisfied,url:'https://example.com/privacy' });
+const document = () => ({ type:'PRIVACY_NOTICE',version,requiredAction:'ACKNOWLEDGED',satisfied,url:'https://reals-web.pages.dev/legal/privacy/v1/document.html' });
 beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const response = new Response('<main><p>Contenido publicado.</p></main>', { headers: { 'content-type': 'text/html' } });
+    Object.defineProperty(response, 'url', { value: url });
+    return response;
+  }));
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   profile = null; list = []; satisfied = true; version = 'v1';
   user = { uid:'f',emailVerified:true,getIdToken:vi.fn().mockResolvedValue('token'),reload:vi.fn().mockResolvedValue(undefined) };
@@ -100,7 +105,16 @@ function reorderWithKeyboard(source: number,target: number) {
   fireEvent.keyDown(handle,{ key:'Enter' });
 }
 const writes = (method: string) => fetcher.mock.calls.filter(x => x[1]?.method === method);
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+async function readerAction(label = 'Confirmar lectura', index = 0) {
+  const buttons = await screen.findAllByRole('button', { name: 'Leer documento' });
+  const button = buttons[index];
+  if (!button) throw Error('Missing document card');
+  fireEvent.click(button);
+  const action = await screen.findByRole('button', { name: label });
+  await waitFor(() => expect(action).toBeEnabled());
+  return action;
+}
 async function openManagement(name: string) {
   profile = { ...initialProfile, status:'ACTIVE', preferredMinAge:27, preferredMaxAge:43, maxDistanceKm:62 };
   mount();
@@ -570,8 +584,8 @@ it('creates once under StrictMode and duplicate submit, restores DRAFT and activ
   expect(screen.getByRole('heading',{ name:'Inicio' })).toBeInTheDocument();
 });
 it.each(['DRAFT','INACTIVE','ACTIVE'])('restores %s after reload', async status => { profile = { ...initialProfile,status }; mount(); await screen.findByRole('heading',{ name:status === 'ACTIVE' ? 'Inicio' : 'Completá tu perfil' }); expect(writes('POST')).toHaveLength(0); });
-it('records exactly the required legal action and version', async () => { satisfied = false; mount(); await screen.findByRole('heading',{ name:'Antes de continuar' }); fireEvent.click(screen.getByRole('button',{ name:'Confirmar lectura' })); await screen.findByRole('heading',{ name:'Crear perfil' }); expect(JSON.parse(String(writes('POST')[0]?.[1]?.body))).toEqual({ documentType:'PRIVACY_NOTICE',documentVersion:'v1',action:'ACKNOWLEDGED' }); });
-it('recovers a stale legal version without silently accepting the new version', async () => { satisfied = false; mount(); await screen.findByRole('heading',{ name:'Antes de continuar' }); version = 'v2'; fireEvent.click(screen.getByRole('button',{ name:'Confirmar lectura' })); await screen.findByText(/Versión v2/); expect(satisfied).toBe(false); expect(screen.getByRole('button',{ name:'Confirmar lectura' })).toBeEnabled(); });
+it('records exactly the required legal action and version', async () => { satisfied = false; mount(); await screen.findByRole('heading',{ name:'Antes de continuar' }); fireEvent.click(await readerAction()); await screen.findByRole('heading',{ name:'Crear perfil' }); expect(JSON.parse(String(writes('POST')[0]?.[1]?.body))).toEqual({ documentType:'PRIVACY_NOTICE',documentVersion:'v1',action:'ACKNOWLEDGED' }); });
+it('recovers a stale legal version without silently accepting the new version', async () => { satisfied = false; mount(); await screen.findByRole('heading',{ name:'Antes de continuar' }); version = 'v2'; fireEvent.click(await readerAction()); await screen.findByText(/Versión v2/); expect(satisfied).toBe(false); expect(screen.queryByRole('button',{ name:'Confirmar lectura' })).toBeNull(); });
 it('uses a single country dropdown and validates without a mutation', async () => { mount(); const form = await createForm(); expect(within(form).queryByLabelText('Buscar país')).not.toBeInTheDocument(); expect(within(form).getByLabelText('País')).toHaveValue('AR'); expect(within(form).getByRole('option',{ name:'España' })).toBeInTheDocument(); fireEvent.change(within(form).getByLabelText('Nombre visible'),{ target:{ value:'x' } }); fireEvent.submit(form); expect(await screen.findByRole('alert')).toHaveTextContent('Nombre visible'); expect(writes('POST')).toHaveLength(0); });
 it('updates details and filters using separate contracts', async () => { profile = { ...initialProfile }; mount(); await screen.findByRole('heading',{ name:'Completá tu perfil' });
   fireEvent.click(screen.getByRole('button',{ name:'Editar datos y preferencias' })); const details = screen.getByRole('form',{ name:'Datos del perfil' }); fireEvent.change(within(details).getByLabelText('Ciudad'),{ target:{ value:'Rosario' } }); fireEvent.submit(details); await waitFor(() => expect(profile?.city).toBe('Rosario')); await waitFor(() => expect(window.document.querySelector('.onboarding')).toHaveAttribute('aria-busy', 'false')); expect(JSON.parse(String(writes('PATCH')[0]?.[1]?.body))).not.toHaveProperty('intention');
@@ -1883,7 +1897,7 @@ it.each([
   if (satisfied) expect(form()).toBeVisible();
   else {
     expect(screen.getByRole('heading', { name: 'Antes de continuar' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Confirmar lectura' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Leer documento' })).toBeEnabled();
     expect(form()).toBeNull();
   }
 });
@@ -2028,16 +2042,16 @@ it.each(['session entry', 'Cuenta after deferral'])('refreshes after each legal 
     await screen.findByRole('heading', { name: 'Documentos vigentes' });
     expect(writes('POST')).toHaveLength(0);
   }
-  fireEvent.click(await screen.findByRole('button', { name: 'Aceptar' }));
-  await screen.findByText(/Versión v1 · Aceptado/);
+  fireEvent.click(await readerAction('Aceptar'));
+  await screen.findByText(/· Aceptado/);
   expect(screen.queryByRole('button', { name: 'Aceptar' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Confirmar lectura' }));
+  fireEvent.click(await readerAction('Confirmar lectura', 1));
   if (source === 'session entry') {
     fireEvent.click(await screen.findByRole('button', { name: 'Cuenta' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Documentos vigentes' }));
   }
-  await screen.findByText(/Versión v1 · Lectura confirmada/);
-  expect(screen.getAllByRole('link', { name: /Ver documento/ })).toHaveLength(2);
+  await screen.findByText(/· Lectura confirmada/);
+  expect(screen.getAllByRole('button', { name: 'Leer documento' })).toHaveLength(2);
   expect(screen.queryByRole('button', { name: 'Confirmar lectura' })).toBeNull();
   act(() => history.back());
   await screen.findByRole('heading', { name: 'Cuenta' });
@@ -2061,7 +2075,7 @@ it.each(['prompt', 'Cuenta'])('restores the same draft after reactive legal reje
     fireEvent.click(await screen.findByRole('button', { name: 'Cuenta' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Documentos vigentes' }));
   }
-  fireEvent.click(await screen.findByRole('button', { name: 'Confirmar lectura' }));
+  fireEvent.click(await readerAction());
   if (source === 'Cuenta') {
     await screen.findByText(/Lectura confirmada/);
     fireEvent.click(screen.getByRole('button', { name: 'Volver a Cuenta' }));
@@ -2071,25 +2085,29 @@ it.each(['prompt', 'Cuenta'])('restores the same draft after reactive legal reje
   expect(writes('POST').map(([path]) => path)).toEqual(['/api/me/profile', '/api/me/legal-document-actions']);
 });
 
-it('retains a legal card on failed visibility refresh and discards a delayed refresh superseded by submission', async () => {
+it('retains a legal card on failed visibility refresh and gates submission during delayed revalidation', async () => {
   satisfied = false;
   mount();
-  const button = await screen.findByRole('button', { name: 'Confirmar lectura' });
+  const button = await readerAction();
   const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((path, options) => path === '/api/me/legal-status' ? Promise.resolve(json({}, 503)) : base(path, options));
   act(() => window.document.dispatchEvent(new Event('visibilitychange')));
   await screen.findByRole('alert'); expect(button).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Confirmar lectura' })).toBe(button);
+  fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+  await waitFor(() => expect(button).not.toBeInTheDocument());
   fetcher.mockImplementation(base);
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
-  const current = await screen.findByRole('button', { name: 'Confirmar lectura' });
+  const current = await readerAction();
   let finish!: (response: Response) => void;
   fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   act(() => window.document.dispatchEvent(new Event('visibilitychange')));
   await waitFor(() => expect(finish).toBeDefined());
+  expect(current).toBeDisabled();
+  await act(async () => finish(json({ requirementsSatisfied: false, documents: [document()] })));
+  await waitFor(() => expect(current).toBeEnabled());
   fireEvent.click(current);
   await screen.findByRole('heading', { name: 'Crear perfil' });
-  await act(async () => finish(json({ requirementsSatisfied: false, documents: [] })));
   expect(screen.queryByRole('button', { name: 'Confirmar lectura' })).toBeNull();
   expect(writes('POST')).toHaveLength(1);
 });
@@ -2105,7 +2123,7 @@ it('aborts a submitted legal action on account switch and ignores its late compl
     return base(path, options);
   });
   mount();
-  fireEvent.click(await screen.findByRole('button', { name: 'Confirmar lectura' }));
+  fireEvent.click(await readerAction());
   await waitFor(() => expect(finish).toBeDefined());
   const signal = writes('POST')[0]?.[1]?.signal;
   expect(screen.getByRole('button', { name: 'Ahora no' })).toBeDisabled();
@@ -2114,7 +2132,7 @@ it('aborts a submitted legal action on account switch and ignores its late compl
   await screen.findByText(/Versión second-version/);
   expect(signal?.aborted).toBe(true);
   await act(async () => finish(json({})));
-  expect(screen.getByRole('button', { name: 'Confirmar lectura' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Leer documento' })).toBeEnabled();
   expect(writes('POST')).toHaveLength(1);
 });
 
@@ -2129,7 +2147,8 @@ it('keeps unknown actions readable without offering a mutation', async () => {
   });
   mount();
   await screen.findByText('Actualizá la app para completar esta acción.');
-  expect(screen.getByRole('link', { name: /Ver documento/ })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Leer documento' }));
+  expect(await screen.findByText('Contenido publicado.')).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Confirmar lectura' })).toBeNull();
   expect(writes('POST')).toHaveLength(0);
 });
@@ -2143,5 +2162,61 @@ it('completes confirmed account deletion from pending legal requirements without
   fireEvent.click(screen.getByRole('button', { name: 'Programar eliminación' }));
   await screen.findByRole('button', { name: 'Ingresar' });
   expect(writes('DELETE').map(([path]) => path)).toEqual(['/api/me']);
+  expect(writes('POST')).toHaveLength(0);
+});
+
+it('opens known pending documents directly from Buscar chat after deferral', async () => {
+  profile = { ...initialProfile, status: 'ACTIVE' };
+  satisfied = false;
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Ahora no' }));
+  const search = await screen.findByRole('button', { name: 'Buscar chat' });
+  await waitFor(() => expect(search).toBeEnabled());
+  let finish!: (response: Response) => void;
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => url === '/api/me/legal-status'
+    ? new Promise(resolve => { finish = resolve; }) : base(url, options));
+  fireEvent.click(search);
+  expect(screen.getByRole('heading', { name: 'Aviso de privacidad' })).toBeVisible();
+  expect(search.isConnected).toBe(true);
+  expect(writes('POST')).toHaveLength(0);
+  await waitFor(() => expect(finish).toBeDefined());
+  await act(async () => finish(json({ requirementsSatisfied: false, documents: [document()] })));
+  fetcher.mockImplementation(base);
+  fireEvent.click(await readerAction());
+  await waitFor(() => expect(search).toBeVisible());
+  expect(writes('POST').map(([path]) => path)).toEqual(['/api/me/legal-document-actions']);
+});
+
+it.each(['version', 'account'])('discards late public document content after %s replacement', async replacement => {
+  satisfied = false;
+  let signal: AbortSignal | null | undefined;
+  let finish!: (value: Response) => void;
+  const publicFetch = vi.fn<typeof fetch>().mockImplementationOnce((_, init) => {
+    signal = init?.signal;
+    return new Promise(resolve => { finish = resolve; });
+  }).mockImplementation(() => new Promise(() => {}));
+  vi.stubGlobal('fetch', publicFetch);
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Leer documento' }));
+  expect(screen.getByRole('button', { name: 'Confirmar lectura' })).toBeDisabled();
+  version = 'v2';
+  if (replacement === 'account') {
+    const base = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation((path, options) => path === '/api/me'
+      ? Promise.resolve(json({ id: 'second-account', status: 'ACTIVE' })) : base(path, options));
+    act(() => observer({ ...user, uid: 'second-identity' }));
+    await screen.findByText('Versión v2');
+    fireEvent.click(await screen.findByRole('button', { name: 'Leer documento' }));
+  } else {
+    act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+  }
+  await waitFor(() => expect(screen.getAllByText('Versión v2').length).toBeGreaterThan(0));
+  expect(signal?.aborted).toBe(true);
+  const response = new Response('<p>Contenido anterior</p>', { headers: { 'content-type': 'text/html' } });
+  Object.defineProperty(response, 'url', { value: document().url });
+  await act(async () => finish(response));
+  expect(screen.queryByText('Contenido anterior')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Confirmar lectura' })).toBeDisabled();
   expect(writes('POST')).toHaveLength(0);
 });

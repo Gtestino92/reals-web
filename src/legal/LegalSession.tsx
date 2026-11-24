@@ -5,8 +5,10 @@ import { AccountSection } from '../home/AccountSection';
 import { fingerprint, readRequirements } from './requirements';
 import type { LegalDocument } from '../onboarding/contracts';
 import { SessionLoading } from '../SessionLoading';
-import './legal.css';
+import { DocumentReader } from './DocumentReader';
+import { PendingLegalSearch } from './searchGate';
 import seal from '../assets/reals-seal.png';
+import './legal.css';
 
 const completedStates: Record<string, string> = { ACCEPTED: 'Aceptado', ACKNOWLEDGED: 'Lectura confirmada' };
 const titles: Record<string, string> = {
@@ -17,6 +19,9 @@ function actionLabel(action: string) {
   if (action === 'ACKNOWLEDGED') return 'Confirmar lectura';
   return null;
 }
+const documentKey = (doc: LegalDocument) => JSON.stringify([doc.type, doc.version, doc.url, doc.requiredAction]);
+const documentTitle = (doc: LegalDocument) => (Object.hasOwn(titles, doc.type) ? titles[doc.type] : undefined) ?? doc.type.replaceAll('_', ' ').toLocaleLowerCase('es');
+
 export function LegalSession({ controller, children }: { controller: SessionController; children: ReactNode }) {
   const [entered, setEntered] = useState(false);
   const [visible, setVisible] = useState(true);
@@ -35,8 +40,24 @@ export function LegalSession({ controller, children }: { controller: SessionCont
   const overlay = useRef<HTMLDialogElement>(null);
   const focusOnOpen = useRef(true);
   const heading = useRef<HTMLHeadingElement>(null);
+  const [reading, setReading] = useState<string | null>(null);
+  const selected = documents.find(doc => doc.type === reading);
+  const submitOnClose = useRef<string | null>(null);
+  const closingReader = useRef(false);
+  const openReader = (doc: LegalDocument) => {
+    history.pushState({ ...history.state, legalReader: historyOwner }, '');
+    setReading(doc.type);
+  };
+  const closeReader = (submit?: LegalDocument) => {
+    if (closingReader.current) return;
+    closingReader.current = true;
+    submitOnClose.current = submit ? documentKey(submit) : null;
+    history.back();
+  };
   const resume = useCallback(() => {
-    if (history.state?.legalOwner === historyOwner) history.back();
+    if (history.state?.legalReader === historyOwner) history.go(history.state?.legalOwner === historyOwner ? -2 : -1);
+    else if (history.state?.legalOwner === historyOwner) history.back();
+    setReading(null); closingReader.current = false; submitOnClose.current = null;
     quietRead.current?.abort(); showing.current = false;
     setAccountBusy(false); setEntered(true); setVisible(false);
   }, [historyOwner]);
@@ -47,7 +68,7 @@ export function LegalSession({ controller, children }: { controller: SessionCont
     operation.current = request;
     const signal = request.signal;
     setVisible(true); setFromAccount(openedFromAccount); setBusy(true); setSubmitting(doc?.type ?? ''); setError('');
-    if (!doc) setDocuments([]);
+
     try {
       let notice = '';
       if (doc) {
@@ -68,7 +89,7 @@ export function LegalSession({ controller, children }: { controller: SessionCont
       if (!openedFromAccount && result.satisfied) resume();
     } catch {
       if (!signal.aborted) {
-        setDocuments([]);
+        setStale(true);
         setError('No pudimos verificar los documentos vigentes. La respuesta del servidor no es válida o no hay conexión.');
       }
     } finally {
@@ -76,6 +97,20 @@ export function LegalSession({ controller, children }: { controller: SessionCont
       if (operation.current === request) { operation.current = null; setBusy(false); setSubmitting(''); }
     }
   }, [controller, resume]);
+  useLayoutEffect(() => {
+    if (!reading) return;
+    const back = (event: PopStateEvent) => {
+      if (history.state?.legalReader === historyOwner) return;
+      event.stopImmediatePropagation();
+      const submit = submitOnClose.current;
+      submitOnClose.current = null; closingReader.current = false;
+      setReading(null);
+      if (selected && documentKey(selected) === submit && !stale && !busy && !accountBusy) void load(fromAccount, selected);
+    };
+    window.addEventListener('popstate', back, true);
+    if (!selected && !closingReader.current) closeReader();
+    return () => window.removeEventListener('popstate', back, true);
+  }, [reading, selected, historyOwner, load, fromAccount, stale, busy, accountBusy]);
   useLayoutEffect(() => {
     const capture = () => {
       if (returnTo.current) return;
@@ -132,7 +167,7 @@ export function LegalSession({ controller, children }: { controller: SessionCont
     const refresh = async () => {
       if (document.hidden || operation.current || quietRead.current) return;
       const request = new AbortController();
-      quietRead.current = request;
+      quietRead.current = request; setStale(true);
       try {
         const result = await readRequirements(controller, request.signal);
         request.signal.throwIfAborted();
@@ -163,23 +198,29 @@ export function LegalSession({ controller, children }: { controller: SessionCont
         {!fromAccount && <p>Revisá los documentos vigentes. Algunas acciones de participación requieren que completes la acción indicada.</p>}
         {fromAccount && !documents.length && !error && <p>No hay documentos vigentes.</p>}
         {documents.map(doc => {
-          const title = Object.hasOwn(titles, doc.type) ? titles[doc.type] : doc.type.replaceAll('_', ' ').toLocaleLowerCase('es');
+          const title = documentTitle(doc);
           const label = actionLabel(doc.requiredAction);
           const state = doc.satisfied ? (Object.hasOwn(completedStates, doc.requiredAction) ? completedStates[doc.requiredAction] : 'Completado') : 'Pendiente';
           return <article className="home-card" key={doc.type}><h3>{title}</h3>
-            <p className={doc.satisfied ? 'legal-completed' : 'legal-pending'}>Versión {doc.version} · {state}</p>
-            <a href={doc.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" aria-label={`Ver documento: ${title} (se abre en otra pestaña)`}>Ver documento</a>
+            <p className={doc.satisfied ? 'legal-completed' : 'legal-pending'}><small>Versión {doc.version}</small> · {state}</p>
+            <button className="login-button login-primary" disabled={accountBusy || !!submitting} onClick={() => openReader(doc)}>Leer documento</button>
             {!doc.satisfied && !label && <p>Actualizá la app para completar esta acción.</p>}
-            {!doc.satisfied && label && <button className="login-button login-primary" disabled={busy || accountBusy || stale} onClick={() => void load(fromAccount, doc)}>{submitting === doc.type ? 'Guardando…' : label}</button>}
           </article>;
         })}
         {error && <><p role="alert">{error}</p><button className="login-button login-outlined" disabled={busy || accountBusy} onClick={() => void load(fromAccount)}>Reintentar</button></>}
         <button className="login-button login-outlined" disabled={busy || accountBusy} onClick={defer}>{fromAccount ? 'Volver a Cuenta' : 'Ahora no'}</button>
       </div>}
-      {!fromAccount && <AccountSection legalOnly deletionDisabled={busy} controller={controller} disabled={!!submitting} onNavigationBlockedChange={setAccountBusy}/>}
+      {!fromAccount && (!entered || !busy || documents.length > 0) && <AccountSection legalOnly hideDeletion={busy && !documents.length} deletionDisabled={busy} controller={controller} disabled={!!submitting} onNavigationBlockedChange={setAccountBusy}/>}
+      {selected && <DocumentReader key={documentKey(selected)} doc={selected} title={documentTitle(selected)}
+        status={busy || stale ? error ? 'Cerrá el documento y reintentá la verificación.' : 'Verificando la versión vigente…' : undefined}
+        action={actionLabel(selected.requiredAction)} disabled={busy || stale || accountBusy} onClose={() => closeReader()} onSubmit={() => closeReader(selected)}/>}
     </section></main>;
   return <>
-    {entered && <div hidden={visible} inert={visible}>{children}</div>}
+    {entered && <div hidden={visible} inert={visible}><PendingLegalSearch.Provider value={() => {
+      if (!documents.some(doc => !doc.satisfied)) return false;
+      controller.legalEvents.dispatchEvent(new Event('required'));
+      return true;
+    }}>{children}</PendingLegalSearch.Provider></div>}
     {entered && visible ? <dialog className="legal-overlay" ref={overlay} aria-label="Documentos legales" onCancel={event => { event.preventDefault(); defer(); }}>{content}</dialog> : content}
   </>;
 }

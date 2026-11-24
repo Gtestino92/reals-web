@@ -15,7 +15,7 @@ const activityLabels: Record<ActivityType, readonly [title: string, description:
   SECOND_CHAT_SCHEDULED: ['Horario del segundo chat confirmado', 'Cuando se confirma el día y la hora del segundo chat.'],
   SECOND_CHAT_AVAILABLE: ['Entrada al segundo chat disponible', 'Cuando se abre la ventana para entrar al segundo chat.'],
 };
-export function AccountSection({ controller, disabled, legalOnly = false, deletionDisabled = false, setup = false, onBack, notificationsOpen = false, onNotificationsOpen, onNavigationBlockedChange }: { controller: SessionController; disabled: boolean; legalOnly?: boolean; deletionDisabled?: boolean; setup?: boolean; onBack?: () => void; notificationsOpen?: boolean; onNotificationsOpen?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
+export function AccountSection({ controller, disabled, legalOnly = false, deletionDisabled = false, hideDeletion = false, setup = false, onBack, notificationsOpen = false, onNotificationsOpen, onNavigationBlockedChange }: { controller: SessionController; disabled: boolean; legalOnly?: boolean; deletionDisabled?: boolean; hideDeletion?: boolean; setup?: boolean; onBack?: () => void; notificationsOpen?: boolean; onNotificationsOpen?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
   const web = useActivityNotificationContext();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const dismissDelete = useCallback(() => setDeleteOpen(false), []);
@@ -72,15 +72,15 @@ export function AccountSection({ controller, disabled, legalOnly = false, deleti
   </section>;
   return <section className={setup ? 'home-card home-account' : 'home-account'} aria-label="Cuenta" aria-busy={busy}>
     {legalOnly ? null : setup ? <header className="home-heading"><h3>Cuenta</h3><button type="button" className="login-button login-outlined" aria-label="Cuenta" aria-expanded={expanded} aria-controls="account-options" disabled={blocked} onClick={() => setExpanded(v => !v)}>{expanded ? 'Ocultar' : 'Abrir'}</button></header> : <header className="home-heading"><h2>Cuenta</h2><button className="login-button login-outlined" disabled={busy || view === 'password'} onClick={onBack}>Volver a Inicio</button></header>}
-    {(!setup || expanded) && <div id={legalOnly ? undefined : "account-options"} className={setup ? undefined : 'home-card'}>
+    {(!setup || expanded) && <div id={legalOnly ? undefined : "account-options"} className={legalOnly ? 'legal-account-actions' : setup ? undefined : 'home-card'}>
       {!legalOnly && <button className="login-button login-outlined" disabled={blocked} onClick={() => controller.legalEvents.dispatchEvent(new Event('inspect'))}>Documentos vigentes</button>}
       {!legalOnly && !setup && <button ref={notificationsButton} className="login-button login-outlined" disabled={blocked} onClick={onNotificationsOpen}>Notificaciones</button>}
 
       {!legalOnly && !setup && controller.hasPasswordProvider === true && <button className="login-button login-outlined" disabled={blocked} onClick={() => { setError(''); setView('password'); }}>Cambiar contraseña de Reals</button>}
       {!legalOnly && !setup && import.meta.env.DEV && <section className="account-support" aria-labelledby={`${notificationId}-support`}><h3 id={`${notificationId}-support`}>Apoyar Reals</h3><p>Si te gusta Reals y querés ayudar a sostener el proyecto, podés hacer un aporte voluntario. No te da beneficios dentro de la app.</p><a className="login-button login-outlined account-support-link" href="https://cafecito.app/reals-app" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Apoyar en Cafecito</a></section>}
       <SignOutButton disabled={blocked} onOpenChange={setSignOutOpen} onConfirm={controller.signOut} />
-      <p>Eliminar la cuenta programa una eliminación recuperable durante 30 días y cierra la sesión.</p>
-      <button className="login-button login-outlined" disabled={blocked || deletionDisabled} onClick={() => { if (!owner.current?.locked) setDeleteOpen(true); }}>Eliminar cuenta</button>
+      {!legalOnly && <p>Eliminar la cuenta programa una eliminación recuperable durante 30 días y cierra la sesión.</p>}
+      {!hideDeletion && <button className="login-button login-outlined" disabled={blocked || deletionDisabled} onClick={() => { if (!owner.current?.locked) setDeleteOpen(true); }}>Eliminar cuenta</button>}
       {deleteOpen && <DeletionConfirmation onCancel={dismissDelete} onConfirm={() => { setDeleteOpen(false); void run(async signal => { setDeleteUncertain(true); await controller.request('/me', signal, 'DELETE'); signal.throwIfAborted(); controller.signOut(); }); }}/>}
       {deleteUncertain && !busy && <button className="login-button login-outlined" onClick={() => controller.retry()}>Consultar estado de la cuenta</button>}
 
