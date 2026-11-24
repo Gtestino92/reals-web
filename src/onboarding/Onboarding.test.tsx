@@ -2002,7 +2002,7 @@ it.each(['DRAFT', 'INACTIVE', 'ACTIVE'])('defers pending requirements on %s with
   await screen.findByRole('button', { name: 'Ingresar' });
 });
 
-it('refreshes after each legal action and offers completed documents read-only in Cuenta', async () => {
+it.each(['session entry', 'Cuenta after deferral'])('refreshes after each legal action from %s and keeps completed documents readable in Cuenta', async source => {
   profile = { ...initialProfile, status: 'ACTIVE' };
   const terms = { ...document(), type: 'TERMS_OF_USE', requiredAction: 'ACCEPTED', satisfied: false };
   const privacy = { ...document(), satisfied: false };
@@ -2021,12 +2021,21 @@ it('refreshes after each legal action and offers completed documents read-only i
     return base(path, options);
   });
   mount();
+  if (source === 'Cuenta after deferral') {
+    fireEvent.click(await screen.findByRole('button', { name: 'Ahora no' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cuenta' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Documentos vigentes' }));
+    await screen.findByRole('heading', { name: 'Documentos vigentes' });
+    expect(writes('POST')).toHaveLength(0);
+  }
   fireEvent.click(await screen.findByRole('button', { name: 'Aceptar' }));
   await screen.findByText(/Versión v1 · Aceptado/);
   expect(screen.queryByRole('button', { name: 'Aceptar' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar lectura' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Cuenta' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Documentos vigentes' }));
+  if (source === 'session entry') {
+    fireEvent.click(await screen.findByRole('button', { name: 'Cuenta' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Documentos vigentes' }));
+  }
   await screen.findByText(/Versión v1 · Lectura confirmada/);
   expect(screen.getAllByRole('link', { name: /Ver documento/ })).toHaveLength(2);
   expect(screen.queryByRole('button', { name: 'Confirmar lectura' })).toBeNull();
@@ -2035,7 +2044,7 @@ it('refreshes after each legal action and offers completed documents read-only i
   expect(writes('POST')).toHaveLength(2);
 });
 
-it('restores the same draft after reactive legal rejection without replaying creation', async () => {
+it.each(['prompt', 'Cuenta'])('restores the same draft after reactive legal rejection and completion from %s without replaying creation', async source => {
   const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation(async (path, options) => {
     if (path === '/api/me/profile' && options?.method === 'POST') {
@@ -2047,7 +2056,16 @@ it('restores the same draft after reactive legal rejection without replaying cre
   mount();
   const form = await createForm();
   fireEvent.submit(form);
+  if (source === 'Cuenta') {
+    fireEvent.click(await screen.findByRole('button', { name: 'Ahora no' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cuenta' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Documentos vigentes' }));
+  }
   fireEvent.click(await screen.findByRole('button', { name: 'Confirmar lectura' }));
+  if (source === 'Cuenta') {
+    await screen.findByText(/Lectura confirmada/);
+    fireEvent.click(screen.getByRole('button', { name: 'Volver a Cuenta' }));
+  }
   expect(await screen.findByRole('form', { name: 'Crear perfil' })).toBe(form);
   expect(within(form).getByLabelText('Ciudad')).toHaveValue('Córdoba');
   expect(writes('POST').map(([path]) => path)).toEqual(['/api/me/profile', '/api/me/legal-document-actions']);

@@ -34,9 +34,13 @@ await withIdentityChrome(async ({ call, evaluate }) => {
     assert.equal(await evaluate('auditFixture.writes.length'), 0);
     await click('Cuenta'); await click('Documentos vigentes');
     await wait("document.querySelector('dialog.legal-overlay:modal .legal-requirements a')");
+    assert.equal(await evaluate('auditFixture.writes.length'), 0);
+    await click('Confirmar lectura');
+    await wait("document.querySelector('.legal-overlay .legal-completed')?.textContent.includes('Lectura confirmada')");
     assert.equal(await evaluate("document.querySelector('.legal-requirements').innerText.includes('Confirmar lectura')"), false);
+    assert.deepEqual(await evaluate('auditFixture.writes'), [{ path: '/me/legal-document-actions', method: 'POST' }]);
     await evaluate('history.back()');
     await wait("!document.querySelector('dialog.legal-overlay')");
-    console.log(width, scheme, 'defer, deletion cancellation and read-only Back passed');
+    console.log(width, scheme, 'defer, voluntary completion, deletion cancellation and Back passed');
   }
 });

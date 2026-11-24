@@ -20,7 +20,7 @@ function actionLabel(action: string) {
 export function LegalSession({ controller, children }: { controller: SessionController; children: ReactNode }) {
   const [entered, setEntered] = useState(false);
   const [visible, setVisible] = useState(true);
-  const [reader, setReader] = useState(false);
+  const [fromAccount, setFromAccount] = useState(false);
   const [documents, setDocuments] = useState<LegalDocument[]>([]);
   const [busy, setBusy] = useState(true), [submitting, setSubmitting] = useState('');
   const [error, setError] = useState('');
@@ -40,13 +40,13 @@ export function LegalSession({ controller, children }: { controller: SessionCont
     quietRead.current?.abort(); showing.current = false;
     setAccountBusy(false); setEntered(true); setVisible(false);
   }, [historyOwner]);
-  const load = useCallback(async (readOnly: boolean, doc?: LegalDocument) => {
+  const load = useCallback(async (openedFromAccount: boolean, doc?: LegalDocument) => {
     if (operation.current || (doc && (doc.satisfied || !actionLabel(doc.requiredAction)))) return;
     quietRead.current?.abort(); showing.current = true; setStale(false);
     const request = new AbortController();
     operation.current = request;
     const signal = request.signal;
-    setVisible(true); setReader(readOnly); setBusy(true); setSubmitting(doc?.type ?? ''); setError('');
+    setVisible(true); setFromAccount(openedFromAccount); setBusy(true); setSubmitting(doc?.type ?? ''); setError('');
     if (!doc) setDocuments([]);
     try {
       let notice = '';
@@ -65,7 +65,7 @@ export function LegalSession({ controller, children }: { controller: SessionCont
       const result = await readRequirements(controller, signal);
       signal.throwIfAborted();
       setDocuments(result.documents); setError(notice);
-      if (!readOnly && result.satisfied) resume();
+      if (!openedFromAccount && result.satisfied) resume();
     } catch {
       if (!signal.aborted) {
         setDocuments([]);
@@ -118,12 +118,12 @@ export function LegalSession({ controller, children }: { controller: SessionCont
         return;
       }
       event.stopImmediatePropagation();
-      if (!reader) deferred.current = fingerprint(documents);
+      if (documents.some(doc => !doc.satisfied)) deferred.current = fingerprint(documents);
       resume();
     };
     window.addEventListener('popstate', back, true);
     return () => window.removeEventListener('popstate', back, true);
-  }, [visible, entered, busy, accountBusy, reader, documents, historyOwner, resume]);
+  }, [visible, entered, busy, accountBusy, documents, historyOwner, resume]);
 
   // Only a visible legal screen owns this revalidation. Ordinary tab return in a
   // chat does not open a gate. An explicit write supersedes the background read.
@@ -137,14 +137,14 @@ export function LegalSession({ controller, children }: { controller: SessionCont
         const result = await readRequirements(controller, request.signal);
         request.signal.throwIfAborted();
         setDocuments(result.documents); setStale(false); setError('');
-        if (!reader && result.satisfied) resume();
+        if (!fromAccount && result.satisfied) resume();
       } catch {
         if (!request.signal.aborted) { setStale(true); setError('No pudimos actualizar los documentos. Reintentá antes de continuar.'); }
       } finally { request.abort(); if (quietRead.current === request) quietRead.current = null; }
     };
     document.addEventListener('visibilitychange', refresh);
     return () => { document.removeEventListener('visibilitychange', refresh); quietRead.current?.abort(); quietRead.current = null; };
-  }, [controller, visible, busy, accountBusy, reader, documents.length, resume]);
+  }, [controller, visible, busy, accountBusy, fromAccount, documents.length, resume]);
 
   useLayoutEffect(() => {
     const dialog = overlay.current;
@@ -153,15 +153,15 @@ export function LegalSession({ controller, children }: { controller: SessionCont
   }, [visible, entered]);
   const defer = () => {
     if (busy || accountBusy) return;
-    if (!reader) deferred.current = fingerprint(documents);
+    if (documents.some(doc => !doc.satisfied)) deferred.current = fingerprint(documents);
     resume();
   };
   const content = visible && <main className="login-page"><section className="login-panel" aria-label="Documentos legales">
       <header className="login-header"><div className="login-brand"><img src={seal} className="login-seal" alt="" width="54" height="54"/><h1>Reals</h1></div></header>
       {busy && !documents.length ? <SessionLoading/> : <div className="legal-requirements">
-        <h2 ref={heading} tabIndex={-1}>{reader ? 'Documentos vigentes' : 'Antes de continuar'}</h2>
-        {!reader && <p>Revisá los documentos vigentes. Algunas acciones de participación requieren que completes la acción indicada.</p>}
-        {reader && !documents.length && !error && <p>No hay documentos vigentes.</p>}
+        <h2 ref={heading} tabIndex={-1}>{fromAccount ? 'Documentos vigentes' : 'Antes de continuar'}</h2>
+        {!fromAccount && <p>Revisá los documentos vigentes. Algunas acciones de participación requieren que completes la acción indicada.</p>}
+        {fromAccount && !documents.length && !error && <p>No hay documentos vigentes.</p>}
         {documents.map(doc => {
           const title = Object.hasOwn(titles, doc.type) ? titles[doc.type] : doc.type.replaceAll('_', ' ').toLocaleLowerCase('es');
           const label = actionLabel(doc.requiredAction);
@@ -169,14 +169,14 @@ export function LegalSession({ controller, children }: { controller: SessionCont
           return <article className="home-card" key={doc.type}><h3>{title}</h3>
             <p className={doc.satisfied ? 'legal-completed' : 'legal-pending'}>Versión {doc.version} · {state}</p>
             <a href={doc.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" aria-label={`Ver documento: ${title} (se abre en otra pestaña)`}>Ver documento</a>
-            {!reader && !doc.satisfied && !label && <p>Actualizá la app para completar esta acción.</p>}
-            {!reader && !doc.satisfied && label && <button className="login-button login-primary" disabled={busy || accountBusy || stale} onClick={() => void load(false, doc)}>{submitting === doc.type ? 'Guardando…' : label}</button>}
+            {!doc.satisfied && !label && <p>Actualizá la app para completar esta acción.</p>}
+            {!doc.satisfied && label && <button className="login-button login-primary" disabled={busy || accountBusy || stale} onClick={() => void load(fromAccount, doc)}>{submitting === doc.type ? 'Guardando…' : label}</button>}
           </article>;
         })}
-        {error && <><p role="alert">{error}</p><button className="login-button login-outlined" disabled={busy || accountBusy} onClick={() => void load(reader)}>Reintentar</button></>}
-        <button className="login-button login-outlined" disabled={busy || accountBusy} onClick={defer}>{reader ? 'Volver a Cuenta' : 'Ahora no'}</button>
+        {error && <><p role="alert">{error}</p><button className="login-button login-outlined" disabled={busy || accountBusy} onClick={() => void load(fromAccount)}>Reintentar</button></>}
+        <button className="login-button login-outlined" disabled={busy || accountBusy} onClick={defer}>{fromAccount ? 'Volver a Cuenta' : 'Ahora no'}</button>
       </div>}
-      {!reader && <AccountSection legalOnly deletionDisabled={busy} controller={controller} disabled={!!submitting} onNavigationBlockedChange={setAccountBusy}/>}
+      {!fromAccount && <AccountSection legalOnly deletionDisabled={busy} controller={controller} disabled={!!submitting} onNavigationBlockedChange={setAccountBusy}/>}
     </section></main>;
   return <>
     {entered && <div hidden={visible} inert={visible}>{children}</div>}
