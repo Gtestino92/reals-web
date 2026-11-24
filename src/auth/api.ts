@@ -3,6 +3,12 @@ import { resolveEnvironment } from '../config/environment';
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { maxRetryAfterSeconds, terminalCodes } from './errors';
 import type { Identity } from './firebase';
+export type CounterpartAudioAccess = 'UNKNOWN' | 'ALLOWED' | 'RESTRICTED';
+export type HistoryAccessListener = (access: CounterpartAudioAccess) => void;
+export function historyAudioAccess(headers: Headers): CounterpartAudioAccess {
+  const value = headers.get('X-Reals-Counterpart-Audio-Access');
+  return value === 'ALLOWED' || value === 'RESTRICTED' ? value : 'UNKNOWN';
+}
 export class ApiError extends Error {
   constructor(public readonly kind: 'network' | 'invalid' | 'authorization' | 'backend', public readonly status = 0, public readonly code = '', public readonly detail: { error?: string; message?: string; expiresAt?: string } = {}, public readonly retryAfterSeconds?: number) {
     super(kind);
@@ -31,10 +37,11 @@ export class ApiClient {
   ) {}
   withOwnership(ownership?: TabOwnershipManager) { return new ApiClient(this.fetcher, ownership, this.appCheckToken, this.environment); }
   withAppCheck(provider?: AppCheckTokenProvider) { return new ApiClient(this.fetcher, this.ownership, provider, this.environment); }
-  async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true, adminGrant?: string): Promise<unknown> {
+  async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true, adminGrant?: string, onHistoryAccess?: HistoryAccessListener): Promise<unknown> {
     this.ownership?.assert();
     if (this.ownership) signal = AbortSignal.any([signal, this.ownership.signal]);
     const route = path.split('?', 1)[0];
+    const history = method === 'GET' && /^\/chats\/[^/]+\/messages$/.test(route ?? '');
     const administrative = route === '/admin' || route === '/admin-auth' || path.startsWith('/admin/') || path.startsWith('/admin-auth/');
     for (let attempt = 0; attempt < 2; attempt++) {
       signal.throwIfAborted();
@@ -54,7 +61,7 @@ export class ApiClient {
       const multipart = body instanceof FormData;
       if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
       let response: Response;
-      try { response = await this.fetcher(`${this.environment.apiOrigin}/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...(method === 'GET' && /^\/matches\/[^/]+(?:\/visual-profile|\/personal-messages\/partner)?$/.test(path) ? { cache: 'no-store' as const } : {}), ...(administrative ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
+      try { response = await this.fetcher(`${this.environment.apiOrigin}/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...(history || method === 'GET' && /^\/matches\/[^/]+(?:\/visual-profile|\/personal-messages\/partner)?$/.test(path) ? { cache: 'no-store' as const } : {}), ...(administrative ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
       catch { signal.throwIfAborted(); throw new ApiError('network'); }
       signal.throwIfAborted();
       if (!response.ok) {
@@ -70,6 +77,7 @@ export class ApiClient {
           ...(typeof raw.expiresAt === 'string' ? { expiresAt: raw.expiresAt } : {}),
         }, retryAfter);
       }
+      if (history) onHistoryAccess?.(historyAudioAccess(response.headers));
       if (expectedStatus !== undefined && response.status !== expectedStatus) throw new ApiError('invalid', response.status);
       if ((method === 'DELETE' && path === '/me' && response.status === 200) || response.status === 202 || response.status === 204) return undefined;
       try { const result: unknown = await response.json(); signal.throwIfAborted(); return result; } catch { signal.throwIfAborted(); throw new ApiError('invalid', response.status); }

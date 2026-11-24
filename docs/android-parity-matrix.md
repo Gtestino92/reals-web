@@ -1,5 +1,15 @@
 # Android-first migration and First Chat parity
 
+## First and Second Chat counterpart audio access (2026-11-24)
+
+| Area | Android reference at `97827fbb` | Web behavior and evidence |
+| --- | --- | --- |
+| Participant history, mutations and resume | `ui/root/ChatMessageCollection.kt` merges by ID, preserves reaction metadata and derives cursors from sender order. `ChatMessageActionHandler.kt` reconciles message actions. | **PARTIAL across platforms**. Web deliberately consumes the backend access header ahead of Android. Both Web chat sessions keep sender boundaries while retiring restricted counterpart audio. `postBlockMedia.security.test.ts` exercises bounded, incremental, failed and superseded reads. |
+| Playback and reply drafts | `ui/chat/ChatAudioPlaybackController.kt` owns player release, refresh cancellation and retry. | **COMPLETE for local Web retirement**. `FirstChat.test.tsx` covers an active reply target and retained draft. `MessageAudio.test.tsx` covers loading, paused, playing and delayed renewal. The synthetic Second Chat Chromium case exercises source removal at 390 and 1280 CSS pixels. |
+| Platform validation | Native playback and Compose lifecycle require Android runtime evidence. | **PLATFORM-LIMITED**. Desktop Chrome emulation exercises browser media ownership. Physical devices and hosted services remain unverified. |
+
+Deployment order and residual signed-URL exposure are recorded in [security technical debt](security-technical-debt.md#participant-chat-playback-after-a-block).
+
 ## Editorial visual audit — 2026-11-23
 
 Android source revision `97827fbb` and Web base `d2230fd`. Android filenames below are relative to [the Android UI source](../../reals-app/app/src/main/java/com/reals/app/ui/). [Asset provenance and theme mapping](android-reference.md#editorial-background-and-asset-provenance) record the PNG sources, encoding and root composition. Statuses here describe visual parity. Existing behavioral entries remain the references for Back, gestures, lifecycle, requests and recovery.

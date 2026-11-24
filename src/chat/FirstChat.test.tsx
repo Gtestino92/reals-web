@@ -14,7 +14,8 @@ beforeEach(()=>{
   controller=controllerFixture();chat=chatFixture();messages=[messageFixture()];home=vi.fn();
   Object.defineProperty(HTMLDialogElement.prototype,'showModal',{configurable:true,value:function(this:HTMLDialogElement){this.open=true;}});
   Object.defineProperty(HTMLDialogElement.prototype,'close',{configurable:true,value:function(this:HTMLDialogElement){this.open=false;}});
-  vi.spyOn(controller,'request').mockImplementation(async(path,_signal,method='GET',body)=>{
+  vi.spyOn(controller,'request').mockImplementation(async(path,_signal,method='GET',body,access)=>{
+    access?.('ALLOWED');
     if(path==='/matches/m')return {id:'m',userAId:'me',userBId:'them',state:'CHAT_ACTIVE'};
     if(path==='/matches/m/chat')return chat;
     if(path.endsWith('/exit-requests'))return [];
@@ -362,4 +363,34 @@ it('quotes the current guided question on a mouse double-click and sends only on
   fireEvent.change(screen.getByRole('textbox', { name: 'Mensaje' }), { target: { value: 'Mi respuesta' } });
   fireEvent.click(screen.getByRole('button', { name: 'Enviar mensaje' }));
   await waitFor(() => expect(controller.request).toHaveBeenCalledWith('/chats/c/messages', expect.any(AbortSignal), 'POST', expect.objectContaining({ replyTo: { type: 'GUIDANCE_QUESTION', targetId: 'question-1' } })));
+});
+
+it('withdraws the playing reply target on resume and keeps the draft and own player mounted', async () => {
+  const media = { url:'https://media.example.test/audio', contentType:'audio/mp4', durationMillis:1000, sizeBytes:10 };
+  messages.splice(0, messages.length,
+    {...messageFixture('1'), messageType:'AUDIO', content:null, audio:media},
+    {...messageFixture('2','me'), messageType:'AUDIO', content:null, audio:media});
+  const play = vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue();
+  mount(); await ready();
+  const [partner, own] = screen.getAllByRole('button',{name:'Reproducir audio'});
+  fireEvent.click(partner!);
+  const element = document.querySelector('audio')!;
+  fireEvent.playing(element);
+  fireEvent.click(screen.getByRole('button',{name:/^Responder mensaje de/}));
+  const input = screen.getByRole('textbox',{name:'Mensaje'});
+  fireEvent.change(input,{target:{value:'Synthetic draft'}});
+  const base = vi.mocked(controller.request).getMockImplementation()!;
+  vi.mocked(controller.request).mockImplementation(async (...args) => {
+    if (!args[4]) return base(...args);
+    args[4]('RESTRICTED');
+    return [];
+  });
+  fireEvent(window,new Event('online'));
+  await waitFor(() => expect(element.isConnected).toBe(false));
+  expect(element.getAttribute('src')).toBeNull();
+  expect(vi.mocked(HTMLMediaElement.prototype.pause).mock.contexts).toContain(element);
+  expect(screen.queryByRole('button',{name:'Quitar respuesta'})).toBeNull();
+  expect(input).toHaveValue('Synthetic draft');
+  expect(screen.getByRole('button',{name:'Reproducir audio'})).toBe(own);
+  expect(play).toHaveBeenCalledOnce();
 });

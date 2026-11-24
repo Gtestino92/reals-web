@@ -27,7 +27,8 @@ export const secondSafetyResponse = (status = secondFixture()) => ({
 export const secondStatusResponse = (status = secondFixture()) => ({...status,audioPolicy:status.audioPolicy ? {...status.audioPolicy,enabledAt:null} : null});
 export function secondHarness() {
   const controller = controllerFixture(), status = secondFixture(), messages: Message[] = [];
-  const request = vi.spyOn(controller,'request').mockImplementation(async (path,_signal,method,body) => {
+  const request = vi.spyOn(controller,'request').mockImplementation(async (path,_signal,method,body,access) => {
+    access?.('ALLOWED');
     if (path === '/matches/m') return {id:'m',userAId:'me',userBId:'them',state:'VISUAL_APPROVED',connectionId:'connection',visualExpiresAt:null,createdAt:status.scheduledAt,updatedAt:status.serverTime};
     if (method === 'POST' && path.endsWith('/join')) {
       Object.assign(status,{canJoin:false,myAttendanceStatus:'LATE',myJoinedAt:status.serverTime,chatId:'c',chatStatus:'ACTIVE'});

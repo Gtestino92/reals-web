@@ -6,7 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import type { SessionController } from '../auth/session';
 import { SecondChatSession, type SecondChatEntryIntent } from './SecondChatSession';
 import { secondPresentation } from './secondContracts';
-import { plainText, reactable, type Message } from './contracts';
+import { plainText, type Message } from './contracts';
 import { AudioComposer } from './AudioComposer';
 import { MessageAudio } from './MessageAudio';
 import { ReplySwipe } from './ReplySwipe';
@@ -80,6 +80,9 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation,
     if (presentation === 'terminal-unavailable' && !state.busy && !returned.current) { returned.current = true; onHome('Este segundo chat ya no est\u00e1 disponible.'); }
   },[presentation,state.busy,onHome]);
   useEffect(() => { session.checkAbsoluteExpiry(); },[session,now,state.busy]);
+  useEffect(() => {
+    if (state.audioAccess === 'RESTRICTED' && !state.outgoing && reply?.type === 'MESSAGE' && reply.messageType === 'AUDIO' && reply.senderId !== session.me) setReply(null);
+  }, [state.audioAccess, state.outgoing, reply, session]);
   useEffect(() => { if (state.confirmed) { setDraft(d => d === state.confirmed?.content ? '' : d); setReply(r => r?.targetId === state.confirmed?.replyTo?.targetId ? null : r); } },[state.confirmationVersion]);
   useEffect(() => { if (!s) return; const c = coach.current; if (!c.shown && c.previous === false && p.completion) { c.shown = true; setCoachmark(true); } c.previous = p.completion; },[s,p.completion]);
   useLayoutEffect(() => { const list = timeline.current; if (list && atBottom.current) list.scrollTop = list.scrollHeight; else if (list) setUnseen(true); },[state.messages.length]);
@@ -97,7 +100,7 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation,
     if (key !== boundaryKey.current) { boundaryKey.current = key; if (key) void session.refresh(); }
   },[s,now,session]);
   const request = p.pending ?? p.claim, seconds = (time: string) => Math.max(0,Math.ceil((Date.parse(time)-now)/1000));
-  const me = session.me, eligible = reactable(state.messages,me);
+  const me = session.me, eligible = session.eligible;
   const safety = p.active && !p.expired && !state.busy;
   const openSafety = async (kind: 'safety' | 'block') => { setAudioEpoch(v => v+1); setAudioDirty(false); if (await session.prepareSafety()) setDialog(kind); };
   return <section ref={root} className="first-chat second-chat" aria-label="Segundo chat">
@@ -125,7 +128,7 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation,
     {readable && <div className="chat-history"><ol className="chat-timeline" aria-label="Mensajes" ref={timeline} onScroll={() => { const l = timeline.current; if (l && (observedHeight.current === 0 || observedHeight.current === l.clientHeight)) { atBottom.current = l.scrollHeight-l.scrollTop-l.clientHeight < 100; if (atBottom.current) setUnseen(false); } }}>
       {state.messages.map((m, index, messages) => <li key={m.id} className={`chat-message-row ${m.senderId === me ? 'outgoing' : 'incoming'}${messages[index - 1]?.senderId === m.senderId ? ' chat-message-continuation' : ''}`}><ReplySwipe enabled={ordinary && m.senderId !== me} label={partner ? `Responder mensaje de ${partner}` : 'Responder mensaje'} onReply={() => { setReply({ type:'MESSAGE',targetId:m.id,previewText:m.messageType === 'AUDIO' ? 'Mensaje de audio' : m.content,senderId:m.senderId,messageType:m.messageType }); input.current?.focus({ preventScroll: true }); }}><article className={`chat-message ${m.senderId === me ? 'outgoing' : 'incoming'}`}>
       {m.replyTo && <blockquote className="chat-quote"><ReplyQuote {...replyPreview(m.replyTo,me,state.partnerId,state.partnerName)}/></blockquote>}
-      {m.messageType === 'AUDIO' && m.audio ? <MessageAudio source={m.audio.url} durationMillis={m.audio.durationMillis} refresh={async () => { await session.refresh(true); return session.rules.readable && !session.getSnapshot().blocked && !session.getSnapshot().busy ? session.getSnapshot().messages.find(v => v.id === m.id)?.audio?.url ?? null : null; }}/> : <p>{m.content ?? 'Mensaje no compatible.'}</p>}<time dateTime={m.sentAt}>{new Date(m.sentAt).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</time></article></ReplySwipe>
+      {m.messageType === 'AUDIO' && m.audio ? <MessageAudio source={m.audio.url} durationMillis={m.audio.durationMillis} refresh={() => session.renewAudio(m.id)}/> : <p>{m.content ?? 'Mensaje no compatible.'}</p>}<time dateTime={m.sentAt}>{new Date(m.sentAt).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</time></article></ReplySwipe>
       {m.senderId === me ? m.reactionType && <span role="img" aria-label={(partner || 'La otra persona') + ' reaccionó con corazón'}>♥</span> : <ReactionLane confirmed={m.reactionType === 'HEART'} eligible={eligible.has(m.id)} disabled={!ordinary} react={() => session.react(m.id)}/>}</li>)}
       {state.outgoing && p.active && !p.expired && <li className="chat-message outgoing"><p>{state.outgoing.content ?? 'Audio pendiente'}</p><p role="status">{state.outgoing.phase === 'pending' ? 'Enviando…' : state.outgoing.phase === 'uncertain' ? 'Sin confirmar' : 'Falló el envío'}</p>{state.outgoing.phase !== 'pending' && <button disabled={state.busy || !p.writable || state.retryBlocked} onClick={() => void session.retry()}>Reconciliar y reintentar el mismo envío</button>}{state.outgoing.phase === 'failed' && <button disabled={state.busy} onClick={() => { session.discardFailed(); setAudioEpoch(v => v+1); setAudioDirty(false); }}>Descartar envío fallido</button>}</li>}
     </ol>{unseen && <button className="chat-new-messages" onClick={() => { const l = timeline.current; if (l) l.scrollTop=l.scrollHeight; atBottom.current=true; setUnseen(false); }}>Ver mensajes nuevos</button>}</div>}

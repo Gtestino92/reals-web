@@ -144,7 +144,7 @@ try {
           window.fixturePartner = 'María';
           window.textSends = [];
           const identity = { phase: 'ready', account: { id: 'a' } };
-          const controller = { snapshot: identity, getSnapshot: () => identity, subscribe: () => () => {}, request: async (path, signal, method = 'GET', body) => {
+          const controller = { snapshot: identity, getSnapshot: () => identity, subscribe: () => () => {}, request: async (path, signal, method = 'GET', body, access) => {
             const textSend = method === 'POST' && path === '/chats/c/messages';
             if (textSend) {
               textSends.push(body);
@@ -156,6 +156,7 @@ try {
                 signal, method, ...(body ? { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } } : {}),
               });
               if (!response.ok) throw Error('Unexpected fixture response');
+              access?.(response.headers.get('X-Reals-Counterpart-Audio-Access'));
               return response.json();
             }
             if (textSend) {
@@ -177,7 +178,7 @@ try {
               }, audioPolicy: { enabled: true, unavailableReason: null, maxDurationMillis: 60000, maxFileSizeBytes: 1000000, remainingMessages: 1 },
             };
             if (path.endsWith('exit-requests')) return [];
-            if (path.includes('/messages?')) return structuredClone(messages);
+            if (path.includes('/messages?')) { access?.('ALLOWED'); return structuredClone(messages); }
             throw Error('Unexpected fixture endpoint');
           }};
           const root = createRoot(document.querySelector('#root'));

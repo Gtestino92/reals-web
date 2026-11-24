@@ -89,6 +89,21 @@ incomplete. Completed source controls do not establish deployed protection.
 - Deployment dependency: Storage/CDN headers, backend URL TTLs and telemetry configuration.
 - Acceptance criteria: Expired access fails as intended; URLs absent from logs/analytics/durable caches; sign-out/account-switch behavior reviewed; valid media works unchanged.
 
+### Participant chat playback after a block
+
+Deploy the participant history endpoint and its CORS exposed-header configuration before this Web build. Every successful bounded or incremental GET, including an empty page, must carry `X-Reals-Counterpart-Audio-Access` and `Cache-Control: no-store`. An older backend or an intermediary hiding the header makes counterpart audio unavailable. Check both history shapes from the deployed Web origin.
+
+| Observation for the current chat owner | Timeline and player behavior |
+| --- | --- |
+| `ALLOWED` | Merge fresh media within the existing lifecycle window. Bounded or empty history can omit a previously authorized row. |
+| Absent, unrecognized or combined header | Remove counterpart audio and release its player. A fresh authorized read can restore only media it supplies. Recovery on an incremental page schedules a bounded read. |
+| `RESTRICTED` or owned `409 USER_PAIR_BLOCKED` | Retire counterpart audio for the owned session, including during page draining and parallel exit reads. Later headers and mutation responses cannot reverse the restriction. |
+| Transport failure | Keep the existing error and recovery behavior. A failure carries no new access decision. |
+
+The timeline retains sender order for HEART eligibility and cursor progression. An inaccessible audio row has no playable source. Removing its player invalidates play and renewal callbacks. The remaining keyed players, text, quotes, reactions and draft stay under the existing chat lifecycle rules.
+
+Local regression evidence includes both chat sessions, real response headers, authenticated request cancellation, StrictMode player cleanup and synthetic MP4 playback in desktop Chromium at 390 and 1280 CSS pixels. An issued signed URL remains a bearer capability outside the application until expiry. Hosted CORS, HTTP caches, R2 policies and real-device playback require independent validation.
+
 ## 8. Dependency vulnerability scanning
 
 - Priority: P1.
