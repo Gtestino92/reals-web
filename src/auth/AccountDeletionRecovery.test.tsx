@@ -1,3 +1,4 @@
+import { withEmptyLegalCatalog } from '../test/emptyLegalCatalog';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -18,7 +19,7 @@ beforeEach(() => {
 });
 async function mount(value: unknown = deleted) {
   fetcher.mockResolvedValueOnce(json(value));
-  render(<StrictMode><OperationalApp firebase={{ service: auth, localVerification: false }} api={new ApiClient(fetcher)}/></StrictMode>);
+  render(<StrictMode><OperationalApp firebase={{ service: auth, localVerification: false }} api={new ApiClient(withEmptyLegalCatalog(fetcher))}/></StrictMode>);
   act(() => observer(user));
   await screen.findByRole('heading', { name: 'Cuenta pendiente de eliminación' });
 }
@@ -84,7 +85,7 @@ it.each([['signout','reactivate'],['replace','reactivate'],['signout','finalize'
 });
 it('restricts arbitrary requests and rejects pending results after tab lease revocation', async () => {
   const ownership = new TabOwnershipManager(); vi.spyOn(ownership,'getSnapshot').mockReturnValue('active'); vi.spyOn(ownership,'assert').mockImplementation(() => {});
-  const controller = new SessionController(auth, new ApiClient(fetcher).withOwnership(ownership), false, ownership);
+  const controller = new SessionController(auth, new ApiClient(withEmptyLegalCatalog(fetcher)).withOwnership(ownership), false, ownership);
   const unsubscribe = controller.subscribe(() => {}); fetcher.mockResolvedValueOnce(json(deleted)); observer(user);
   await waitFor(() => expect(controller.snapshot.phase).toBe('deletionRecovery'));
   await expect(controller.request('/me/profile', new AbortController().signal)).rejects.toMatchObject({ name:'AbortError' });

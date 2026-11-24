@@ -31,7 +31,7 @@ beforeEach(() => {
     if (path === '/api/reference/countries') return json([{ code:'AR',displayName:'Argentina' },{ code:'ES',displayName:'España' }]);
     if (path === '/api/me/legal-status') return json({ requirementsSatisfied:satisfied,documents:[document()] });
     if (path === '/api/legal/documents/current') return json({ documents:[document()] });
-    if (path === '/api/me/legal-document-actions') { const body = JSON.parse(String(options?.body)); if (body.documentVersion !== version) return json({ code:'LEGAL_DOCUMENT_VERSION_MISMATCH' },409); satisfied = true; return json({}); }
+    if (path === '/api/me/legal-document-actions') { const body = JSON.parse(String(options?.body)); if (body.documentVersion !== version) return json({ code:'LEGAL_DOCUMENT_VERSION_NOT_CURRENT' },409); satisfied = true; return json({}); }
     if (path === '/api/me/profile' && method !== 'GET') { const body = JSON.parse(String(options?.body)); profile = { ...(profile ?? initialProfile),...body }; return json(profile,method === 'POST' ? 201 : 200); }
     if (path === '/api/me/profile') return profile ? json(profile) : json({ code:'PROFILE_NOT_FOUND' },404);
     if (path === '/api/me/profile/photos' && method === 'GET') return json(list);
@@ -813,7 +813,7 @@ it('does not refresh a stale identity token or publish a late check result', asy
   expect(screen.queryByText('Email verificado.')).toBeNull();
   expect(screen.queryByRole('alert')).toBeNull();
 });
-it('rejects stale domain results after sign-out', async () => { let finish: ((value: Response) => void) | undefined; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options)); mount(); await waitFor(() => expect(finish).toBeDefined()); confirmSignOut(); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => { finish?.(json({ requirementsSatisfied:true,documents:[] })); }); expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument(); });
+it('rejects stale domain results after sign-out', async () => { let finish: ((value: Response) => void) | undefined; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options)); mount(); await waitFor(() => expect(finish).toBeDefined()); confirmSignOut(); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => { finish?.(json({ requirementsSatisfied:true,documents:[document()] })); }); expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument(); });
 it('shows a definitive backend rejection once by the creation submit and allows correction', async () => {
   const base = fetcher.getMockImplementation()!;
   let finish!: (response: Response) => void;
@@ -1242,7 +1242,7 @@ it.each([
     await waitFor(() => expect(finishBootstrap).toBeDefined()); expectPreparing();
     expect(screen.getByRole('status')).toBe(statusElement);
     await act(async () => finishBootstrap?.(json({ id:'u',status:'ACTIVE' })));
-    if (status !== 'ACTIVE') { await waitFor(() => expect(finishOnboarding).toBeDefined()); expectPreparing(); }
+    await waitFor(() => expect(finishOnboarding).toBeDefined()); expectPreparing();
     if (status !== 'ACTIVE') expect(screen.getByRole('button',{ name:'Cerrar sesión' })).toBeEnabled();
     await act(async () => finishOnboarding?.(json({ requirementsSatisfied:satisfied,documents:[document()] })));
     await screen.findByRole('heading',{ name:heading });
@@ -1268,7 +1268,7 @@ it.each(['signIn','signUp','google'] as const)('navigates from %s without exposi
     fireEvent.click(screen.getByRole('button',{ name:operation === 'signUp' ? 'Crear cuenta' : 'Ingresar' }));
   }
   await waitFor(() => expect(finish).toBeDefined()); expectPreparing();
-  await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[] })));
+  await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[document()] })));
   await screen.findByRole('heading',{ name:'Crear perfil' });
   expect(screen.getByRole('main').textContent).not.toMatch(technicalStatus);
 });
@@ -1281,7 +1281,7 @@ it('replaces initial onboarding loading with a recoverable error and restores lo
   expect(screen.getByRole('button',{ name:'Cerrar sesión' })).toBeEnabled();
   offline = false; refreshView();
   await waitFor(() => expect(finish).toBeDefined()); expectPreparing();
-  await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[] })));
+  await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[document()] })));
   await screen.findByRole('heading',{ name:'Crear perfil' });
 });
 it('keeps loading sign-out accessible and rejects a late initial onboarding response', async () => {
@@ -1291,7 +1291,7 @@ it('keeps loading sign-out accessible and rejects a late initial onboarding resp
   mount(); await waitFor(() => expect(finish).toBeDefined()); expectPreparing();
   confirmSignOut();
   await screen.findByRole('button',{ name:'Ingresar' });
-  await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[] })));
+  await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[document()] })));
   expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument();
   expect(screen.queryByText('Preparando Reals…')).not.toBeInTheDocument();
 });
@@ -1983,4 +1983,165 @@ it('supersedes a pending Tu perfil resume and verifies a save in order', async (
   await act(async () => finishManagementReads(refresh, { ...initialProfile, status: 'ACTIVE', displayName: 'Obsoleta' }));
   expect(screen.getByLabelText('Ciudad')).toHaveValue('Rosario');
   expect(within(form).getByLabelText('Nombre visible')).toHaveValue('Ana');
+});
+
+it.each(['DRAFT', 'INACTIVE', 'ACTIVE'])('defers pending requirements on %s without recording or persisting consent', async status => {
+  profile = { ...initialProfile, status };
+  satisfied = false;
+  const view = mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Ahora no' }));
+  await screen.findByRole('heading', { name: status === 'ACTIVE' ? 'Inicio' : 'Completá tu perfil' });
+  expect(writes('POST')).toHaveLength(0);
+  view.unmount(); mount();
+  await screen.findByRole('heading', { name: 'Antes de continuar' });
+  fireEvent.click(screen.getByRole('button', { name: 'Eliminar cuenta' }));
+  expect(screen.getByRole('button', { name: 'Programar eliminación' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+  confirmSignOut();
+  expect(writes('DELETE')).toHaveLength(0);
+  await screen.findByRole('button', { name: 'Ingresar' });
+});
+
+it.each(['session entry', 'Cuenta after deferral'])('refreshes after each legal action from %s and keeps completed documents readable in Cuenta', async source => {
+  profile = { ...initialProfile, status: 'ACTIVE' };
+  const terms = { ...document(), type: 'TERMS_OF_USE', requiredAction: 'ACCEPTED', satisfied: false };
+  const privacy = { ...document(), satisfied: false };
+  const docs = [terms, privacy];
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (path, options) => {
+    if (path === '/api/me/legal-status') return json({ requirementsSatisfied: docs.every(d => d.satisfied), documents: docs });
+    if (path === '/api/legal/documents/current') return json({ documents: docs });
+    if (path === '/api/me/legal-document-actions') {
+      const body = JSON.parse(String(options?.body));
+      const doc = docs.find(d => d.type === body.documentType)!;
+      expect(body).toEqual({ documentType: doc.type, documentVersion: doc.version, action: doc.requiredAction });
+      doc.satisfied = true;
+      return json({});
+    }
+    return base(path, options);
+  });
+  mount();
+  if (source === 'Cuenta after deferral') {
+    fireEvent.click(await screen.findByRole('button', { name: 'Ahora no' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cuenta' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Documentos vigentes' }));
+    await screen.findByRole('heading', { name: 'Documentos vigentes' });
+    expect(writes('POST')).toHaveLength(0);
+  }
+  fireEvent.click(await screen.findByRole('button', { name: 'Aceptar' }));
+  await screen.findByText(/Versión v1 · Aceptado/);
+  expect(screen.queryByRole('button', { name: 'Aceptar' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar lectura' }));
+  if (source === 'session entry') {
+    fireEvent.click(await screen.findByRole('button', { name: 'Cuenta' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Documentos vigentes' }));
+  }
+  await screen.findByText(/Versión v1 · Lectura confirmada/);
+  expect(screen.getAllByRole('link', { name: /Ver documento/ })).toHaveLength(2);
+  expect(screen.queryByRole('button', { name: 'Confirmar lectura' })).toBeNull();
+  act(() => history.back());
+  await screen.findByRole('heading', { name: 'Cuenta' });
+  expect(writes('POST')).toHaveLength(2);
+});
+
+it.each(['prompt', 'Cuenta'])('restores the same draft after reactive legal rejection and completion from %s without replaying creation', async source => {
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (path, options) => {
+    if (path === '/api/me/profile' && options?.method === 'POST') {
+      satisfied = false;
+      return json({ code: 'LEGAL_ACTION_REQUIRED' }, 409);
+    }
+    return base(path, options);
+  });
+  mount();
+  const form = await createForm();
+  fireEvent.submit(form);
+  if (source === 'Cuenta') {
+    fireEvent.click(await screen.findByRole('button', { name: 'Ahora no' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cuenta' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Documentos vigentes' }));
+  }
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirmar lectura' }));
+  if (source === 'Cuenta') {
+    await screen.findByText(/Lectura confirmada/);
+    fireEvent.click(screen.getByRole('button', { name: 'Volver a Cuenta' }));
+  }
+  expect(await screen.findByRole('form', { name: 'Crear perfil' })).toBe(form);
+  expect(within(form).getByLabelText('Ciudad')).toHaveValue('Córdoba');
+  expect(writes('POST').map(([path]) => path)).toEqual(['/api/me/profile', '/api/me/legal-document-actions']);
+});
+
+it('retains a legal card on failed visibility refresh and discards a delayed refresh superseded by submission', async () => {
+  satisfied = false;
+  mount();
+  const button = await screen.findByRole('button', { name: 'Confirmar lectura' });
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => path === '/api/me/legal-status' ? Promise.resolve(json({}, 503)) : base(path, options));
+  act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+  await screen.findByRole('alert'); expect(button).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Confirmar lectura' })).toBe(button);
+  fetcher.mockImplementation(base);
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  const current = await screen.findByRole('button', { name: 'Confirmar lectura' });
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  act(() => window.document.dispatchEvent(new Event('visibilitychange')));
+  await waitFor(() => expect(finish).toBeDefined());
+  fireEvent.click(current);
+  await screen.findByRole('heading', { name: 'Crear perfil' });
+  await act(async () => finish(json({ requirementsSatisfied: false, documents: [] })));
+  expect(screen.queryByRole('button', { name: 'Confirmar lectura' })).toBeNull();
+  expect(writes('POST')).toHaveLength(1);
+});
+
+it('aborts a submitted legal action on account switch and ignores its late completion', async () => {
+  satisfied = false;
+  let finish!: (response: Response) => void;
+  let replacement = false;
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => {
+    if (path === '/api/me/legal-document-actions') return new Promise(resolve => { finish = resolve; });
+    if (replacement && path === '/api/me') return Promise.resolve(json({ id: 'second-user', status: 'ACTIVE' }));
+    return base(path, options);
+  });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirmar lectura' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  const signal = writes('POST')[0]?.[1]?.signal;
+  expect(screen.getByRole('button', { name: 'Ahora no' })).toBeDisabled();
+  replacement = true; version = 'second-version';
+  act(() => observer({ ...user, uid: 'second-identity' }));
+  await screen.findByText(/Versión second-version/);
+  expect(signal?.aborted).toBe(true);
+  await act(async () => finish(json({})));
+  expect(screen.getByRole('button', { name: 'Confirmar lectura' })).toBeEnabled();
+  expect(writes('POST')).toHaveLength(1);
+});
+
+it('keeps unknown actions readable without offering a mutation', async () => {
+  satisfied = false;
+  const doc = { ...document(), requiredAction: 'FUTURE_ACTION' };
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((path, options) => {
+    if (path === '/api/me/legal-status') return Promise.resolve(json({ requirementsSatisfied: false, documents: [doc] }));
+    if (path === '/api/legal/documents/current') return Promise.resolve(json({ documents: [doc] }));
+    return base(path, options);
+  });
+  mount();
+  await screen.findByText('Actualizá la app para completar esta acción.');
+  expect(screen.getByRole('link', { name: /Ver documento/ })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Confirmar lectura' })).toBeNull();
+  expect(writes('POST')).toHaveLength(0);
+});
+
+it('completes confirmed account deletion from pending legal requirements without recording an action', async () => {
+  satisfied = false;
+  profile = { ...initialProfile, status: 'ACTIVE' };
+  mount();
+  await screen.findByRole('heading', { name: 'Antes de continuar' });
+  fireEvent.click(screen.getByRole('button', { name: 'Eliminar cuenta' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Programar eliminación' }));
+  await screen.findByRole('button', { name: 'Ingresar' });
+  expect(writes('DELETE').map(([path]) => path)).toEqual(['/api/me']);
+  expect(writes('POST')).toHaveLength(0);
 });

@@ -1,3 +1,4 @@
+import { LegalSession } from './legal/LegalSession';
 import { useHomeNavigation } from './home/useHomeNavigation';
 import { AccountSuspension } from './auth/AccountSuspension';
 import { AccountDeletionRecovery } from './auth/AccountDeletionRecovery';
@@ -40,7 +41,7 @@ function SessionApp({ controller }: { controller: SessionController }) {
     // An explicit login always starts in ordinary Reals, even after a direct /admin URL.
     if (state.phase === 'login' || state.phase === 'authenticating') window.history.replaceState(null, '', '/');
   }, [state.phase]);
-  if (state.phase === 'ready') return <ReadySession key={`${state.account?.id}/${state.profile?.id}`} controller={controller} />;
+  if (state.phase === 'ready') return <LegalSession key={state.account?.id} controller={controller}><ReadySession key={`${state.account?.id}/${state.profile?.id}`} controller={controller} /></LegalSession>;
   // Manual authentication keeps its operation through backend bootstrap.
   // Restoration has no operation and must not expose an intermediate login form.
   if (state.phase === 'checking' || (state.phase === 'loading' && state.operation === null)) return <AuthenticationLoading />;

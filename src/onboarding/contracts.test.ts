@@ -21,6 +21,14 @@ describe('onboarding contracts', () => {
   it.each([{ documents:[] },{ documents:[{ type:'PRIVACY_NOTICE',version:'v2',requiredAction:'ACKNOWLEDGED',url:'https://example.com/privacy' }] }])('rejects unsatisfied legal status with no documents regardless of catalog %j', ({ documents }) => {
     expect(() => legal({ requirementsSatisfied:false,documents:[] },{ documents })).toThrow(ApiError);
   });
+  it('rejects extra entries, duplicate current types and contradictory completion flags', () => {
+    const doc = { type: 'TERMS_OF_USE', version: 'v1', requiredAction: 'ACCEPTED', url: 'https://example.com/terms', satisfied: true };
+    const status = { requirementsSatisfied: true, documents: [doc] };
+    expect(() => legal(status, { documents: [doc, doc] })).toThrow(ApiError);
+    expect(() => legal({ ...status, documents: [doc, doc] }, { documents: [doc, doc] })).toThrow(ApiError);
+    expect(() => legal({ ...status, requirementsSatisfied: false }, { documents: [doc] })).toThrow(ApiError);
+    expect(() => legal({ ...status, documents: [{ ...doc, satisfied: false }] }, { documents: [doc] })).toThrow(ApiError);
+  });
   it('validates photos, placements and safe URLs', () => { expect(photos([photo])).toEqual([photo]); for (const raw of [[photo,photo],[{ ...photo,position:0 }],[{ ...photo,url:'javascript:alert(1)' }],[{ ...photo,moderationStatus:'???' }]]) expect(() => photos(raw)).toThrow(); });
   it('recognizes DRAFT interaction routing without deriving transitions', () => { const home = { pendingActions:[],nextSteps:[],passiveNotices:[],activeInteractionsSummary:{ hasPendingSchedulingConnection:false,activeInitialCount:0,activeConnectionCount:0,actionableConnectionCount:0 } }; expect(hasInteractions(home)).toBe(false); expect(hasInteractions({ ...home,nextSteps:[{}] })).toBe(true); expect(() => hasInteractions({})).toThrow(); });
   it('multipart preserves bearer, signal and native boundary', async () => {

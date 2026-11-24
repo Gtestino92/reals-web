@@ -1,3 +1,4 @@
+import { withEmptyLegalCatalog } from '../test/emptyLegalCatalog';
 import { homeSecondFixture } from './secondHome.fixtures';
 import { secondFixture, secondChatResponse } from '../chat/secondFixtures';
 import { visualProfile } from '../visual/fixtures';
@@ -17,7 +18,7 @@ let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 let geo: ReturnType<typeof vi.fn<Geolocation['getCurrentPosition']>>;
 const json = (v: unknown, code = 200) => new Response(JSON.stringify(v), { status: code });
 const position = (overrides = {}) => ({ coords: { latitude: 12, longitude: -21, accuracy: 25, altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}) }, timestamp: Date.now(), toJSON: () => ({}), ...overrides });
-function mount() { return render(<App firebase={{ service: auth, localVerification: false }} api={new ApiClient(fetcher)} />); }
+function mount(transport = withEmptyLegalCatalog(fetcher)) { return render(<App firebase={{ service: auth, localVerification: false }} api={new ApiClient(transport)} />); }
 const confirmed = async () => { await waitFor(() => { expect(document.querySelector('.search-screen')).toHaveAttribute('aria-busy', 'false'); expect(screen.getByRole('button', { name: 'Cancelar búsqueda' })).toBeEnabled(); expect(screen.queryByRole('alert')).toBeNull(); }); };
 const search = () => screen.getByRole('button', { name: 'Buscar chat' });
 const ready = async () => { await waitFor(() => { expect(document.querySelector('.home')).toHaveAttribute('aria-busy', 'false'); expect(screen.queryByText('Hola, Lucía') ?? screen.queryByRole('heading', { name: 'Buscando chat' })).toBeTruthy(); }); };
@@ -793,4 +794,30 @@ it('opens loaded affinities silently and keeps content on delayed failure', asyn
   await act(async () => finish(new Response('{}', { status: 503 })));
   await screen.findByRole('alert'); expect(content).toBeVisible();
   expect(screen.getByRole('button', { name: 'Reintentar consulta' })).toBeEnabled();
+});
+
+it('returns to the same first chat draft and safety controls after deferring a rejected approval', async () => {
+  installFirstChatBackend();
+  home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }];
+  let pending = false;
+  const doc = { type: 'TERMS_OF_USE', version: 'v1', requiredAction: 'ACCEPTED', url: 'https://example.com/terms' };
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (path, options) => {
+    if (path === '/api/me/legal-status') return json({ requirementsSatisfied: !pending, documents: [{ ...doc, satisfied: !pending }] });
+    if (path === '/api/legal/documents/current') return json({ documents: [doc] });
+    if (path === '/api/matches/m/chat-decision') { pending = true; return json({ code: 'LEGAL_ACTION_REQUIRED' }, 409); }
+    return base(path, options);
+  });
+  mount(fetcher);
+  const draft = await screen.findByRole('textbox', { name: 'Mensaje' });
+  await waitFor(() => expect(draft).toBeEnabled());
+  fireEvent.change(draft, { target: { value: 'Borrador de prueba' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Aprobar chat' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Ahora no' }));
+  expect(await screen.findByRole('textbox', { name: 'Mensaje' })).toBe(draft);
+  expect(draft).toHaveValue('Borrador de prueba');
+  fireEvent.click(screen.getByRole('button', { name: 'Opciones del chat' }));
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Salir unilateralmente' })).toBeEnabled());
+  expect(screen.getByRole('menuitem', { name: 'Reportar por seguridad' })).toBeEnabled();
+  expect(fetcher.mock.calls.filter(([, options]) => options?.method === 'POST').map(([path]) => path)).toEqual(['/api/matches/m/chat-decision']);
 });

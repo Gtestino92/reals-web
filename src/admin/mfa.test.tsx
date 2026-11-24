@@ -1,3 +1,4 @@
+import { withEmptyLegalCatalog } from '../test/emptyLegalCatalog';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { OperationalApp } from '../App';
@@ -28,7 +29,7 @@ function setup(provider = 'google.com') {
     return new Response('{"code":"NOT_FOUND"}', { status: 404 });
   });
   const auth: AuthService = { observe: next => { observer = next; queueMicrotask(() => next(user)); return () => {}; }, googleContext: async () => ({ provider, authTime: Date.now() }), reauthenticateGoogle: vi.fn().mockResolvedValue(undefined), signOut: vi.fn(async () => { events.push('firebase-signout'); observer(null); }), google: async () => user, signIn: async () => user, signUp: async () => user, verify: async () => {} };
-  const view = render(<OperationalApp firebase={{ service: auth, localVerification: false }} api={new ApiClient(fetcher).withAppCheck(async () => 'synthetic-app-check')} />);
+  const view = render(<OperationalApp firebase={{ service: auth, localVerification: false }} api={new ApiClient(withEmptyLegalCatalog(fetcher)).withAppCheck(async () => 'synthetic-app-check')} />);
   return { fetcher, events, auth, view };
 }
 async function submit() { fireEvent.change(await screen.findByLabelText('Código de seis dígitos'), { target: { value: '012345' } }); }
