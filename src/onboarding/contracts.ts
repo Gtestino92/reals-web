@@ -14,7 +14,7 @@ export interface Fields {
 export interface FullProfile extends Profile, Fields { authenticityVerificationStatus: string }
 export interface Country { code: string; displayName: string }
 export interface Photo { id: string; url: string; position: number; validationStatus: string; moderationStatus: string; isPersonPhoto: boolean; isFullBody: boolean }
-export interface LegalDocument { type: string; version: string; requiredAction: 'ACCEPTED' | 'ACKNOWLEDGED'; satisfied: boolean; url: string }
+export interface LegalDocument { type: string; version: string; requiredAction: string; satisfied: boolean; url: string }
 export const defaults: Fields = { displayName: '', birthDate: '', gender: 'MALE', lookingForGenders: ['FEMALE'], intention: 'DATE', city: '', countryCode: '', bio: '', preferredMinAge: 18, preferredMaxAge: 45, maxDistanceKm: 50 };
 export function invalid(): never { throw new ApiError('invalid'); }
 export function safeUrl(value: unknown): string {
@@ -44,16 +44,16 @@ export function photos(raw: unknown): Photo[] {
 }
 export function legal(status: unknown, catalog: unknown): { satisfied: boolean; documents: LegalDocument[] } {
   if (!object(status) || typeof status.requirementsSatisfied !== 'boolean' || !Array.isArray(status.documents) || !object(catalog) || !Array.isArray(catalog.documents)) return invalid();
-  if (status.requirementsSatisfied) return { satisfied: true, documents: [] };
-  if (status.documents.length === 0) return invalid();
+  if (status.documents.length !== catalog.documents.length) return invalid();
   const entries = catalog.documents;
   const documents = status.documents.map((item): LegalDocument => {
-    if (!object(item) || typeof item.type !== 'string' || typeof item.version !== 'string' || (item.requiredAction !== 'ACCEPTED' && item.requiredAction !== 'ACKNOWLEDGED') || typeof item.satisfied !== 'boolean') return invalid();
+    if (!object(item) || typeof item.type !== 'string' || !item.type.trim() || typeof item.version !== 'string' || !item.version.trim() || typeof item.requiredAction !== 'string' || !item.requiredAction.trim() || typeof item.satisfied !== 'boolean') return invalid();
     const entry = entries.find((x: unknown) => object(x) && x.type === item.type && x.version === item.version && x.requiredAction === item.requiredAction);
     if (!object(entry)) return invalid();
     return { type: item.type, version: item.version, requiredAction: item.requiredAction, satisfied: item.satisfied, url: safeUrl(entry.url) };
   });
-  return { satisfied: false, documents };
+  if (new Set(documents.map(doc => doc.type)).size !== documents.length || documents.every(doc => doc.satisfied) !== status.requirementsSatisfied) return invalid();
+  return { satisfied: status.requirementsSatisfied, documents };
 }
 export function normalize(fields: Fields): Fields { return { ...fields, displayName: fields.displayName.trim(), city: fields.city.trim(), bio: fields.bio.trim(), countryCode: fields.countryCode.trim().toUpperCase() }; }
 export function profileIssues(f: Fields, catalog: Country[], mode: 'create' | 'details' | 'filters', now = new Date()) {

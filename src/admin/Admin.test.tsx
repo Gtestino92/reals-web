@@ -1,3 +1,4 @@
+import { withEmptyLegalCatalog } from '../test/emptyLegalCatalog';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App, OperationalApp } from '../App';
@@ -13,7 +14,7 @@ const owners: TabOwnershipManager[] = [];
 async function mount(ownership?: TabOwnershipManager, authenticated = true) {
   const service: AuthService = { googleContext: async () => ({ provider: 'google.com', authTime: Date.now() }), observe: next => { observer=next; queueMicrotask(()=>next(authenticated ? user : null)); return () => {}; }, signOut: async () => { observer(null); }, signIn: async () => user, signUp: async () => user, google: async () => user, verify: async () => {} };
   const Component = ownership ? App : OperationalApp;
-  const view = render(<Component firebase={{service,localVerification:false}} api={new ApiClient(fetcher)} {...(ownership ? {ownership} : {})} />);
+  const view = render(<Component firebase={{service,localVerification:false}} api={new ApiClient(withEmptyLegalCatalog(fetcher))} {...(ownership ? {ownership} : {})} />);
   if (authenticated && allowed) {
     const input = await screen.findByLabelText('Código de seis dígitos');
     fireEvent.change(input, { target: { value: '012345' } });

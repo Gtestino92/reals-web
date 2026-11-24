@@ -83,7 +83,7 @@ export function useProfileQuestions(controller: SessionController, active: boole
     } catch (error) {
       if (valid(r, serial)) {
         r.uncertain = !(error instanceof ApiError && error.kind !== 'invalid' && error.status >= 400 && error.status < 500);
-        const message = error instanceof ApiError && error.code === 'LEGAL_ACTION_REQUIRED' ? 'Revisá los documentos legales vigentes en tu perfil antes de continuar.'
+        const message = error instanceof ApiError && error.code === 'LEGAL_ACTION_REQUIRED' ? 'El servidor rechazó el cambio porque había documentos pendientes. Volvé a intentarlo cuando completes los requisitos.'
           : r.uncertain ? 'No pudimos confirmar el cambio. Conservamos tu borrador. Reintentá la consulta antes de guardar otra vez.'
           : 'El servidor rechazó el cambio. Actualizá las preguntas y revisá tu respuesta o selección.';
         install({ ...latest.current, busy: false, uncertain: r.uncertain, error: message });

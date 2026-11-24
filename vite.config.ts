@@ -1,3 +1,4 @@
+import { devLegalFixtures } from './tools/dev-legal-fixtures.ts';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
@@ -14,6 +15,7 @@ export default defineConfig({
         validateBuildEnvironment(env, process.env);
       },
     },
+    devLegalFixtures(),
     react(),
     androidTunnelPlugin(),
   ],

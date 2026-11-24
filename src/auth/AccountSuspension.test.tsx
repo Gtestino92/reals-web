@@ -1,3 +1,4 @@
+import { withEmptyLegalCatalog } from '../test/emptyLegalCatalog';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -23,14 +24,14 @@ const appeal = (status = 'AVAILABLE', banActive = status !== 'APPROVED') => json
 const click = (name: string) => fireEvent.click(screen.getByRole('button',{name}));
 async function mount(status = 'AVAILABLE') {
   fetcher.mockResolvedValueOnce(banned()).mockResolvedValueOnce(appeal(status));
-  render(<StrictMode><OperationalApp firebase={{service:auth,localVerification:false}} api={new ApiClient(fetcher)}/></StrictMode>);
+  render(<StrictMode><OperationalApp firebase={{service:auth,localVerification:false}} api={new ApiClient(withEmptyLegalCatalog(fetcher))}/></StrictMode>);
   act(()=>observer(user));
   await waitFor(()=>expect(screen.getByRole('button',{name:'Consultar estado'})).toBeEnabled());
 }
 function draft(value='Solicito revisión') { fireEvent.change(screen.getByRole('textbox'),{target:{value}}); }
 it.each([undefined,'bad','2026-02-31T00:00:00Z','2020-01-01T00:00:00Z','2030-01-01T00:00:00Z'])('temporary suspension handles %s without clock transitions',async expiresAt=>{
   fetcher.mockResolvedValueOnce(banned('ACCOUNT_TEMPORARILY_BANNED',expiresAt));
-  render(<OperationalApp firebase={{service:auth,localVerification:false}} api={new ApiClient(fetcher)}/>);act(()=>observer(user));
+  render(<OperationalApp firebase={{service:auth,localVerification:false}} api={new ApiClient(withEmptyLegalCatalog(fetcher))}/>);act(()=>observer(user));
   expect(await screen.findByRole('heading',{name:'Cuenta suspendida temporalmente'})).toHaveFocus();
   expect(screen.queryByText(/Vencimiento informado/)!==null).toBe(!!expiresAt && !['bad','2026-02-31T00:00:00Z'].includes(expiresAt));
   expect(fetcher).toHaveBeenCalledOnce();
@@ -74,7 +75,7 @@ it('validates UTF-16 boundaries, plain text and trimmed blank statements',async(
   draft('a'.repeat(1001));expect(screen.getByRole('textbox')).toHaveValue('a'.repeat(1000));
 });
 it.each([{status:'FUTURE',banActive:true},{status:'AVAILABLE',banActive:false},{status:'APPROVED',banActive:true},{status:'PENDING',banActive:false},{status:'REJECTED',banActive:false},{status:'AVAILABLE'},null])('fails closed for %j and refreshes explicitly',async raw=>{
-  fetcher.mockResolvedValueOnce(banned()).mockResolvedValueOnce(json(raw));render(<OperationalApp firebase={{service:auth,localVerification:false}} api={new ApiClient(fetcher)}/>);act(()=>observer(user));
+  fetcher.mockResolvedValueOnce(banned()).mockResolvedValueOnce(json(raw));render(<OperationalApp firebase={{service:auth,localVerification:false}} api={new ApiClient(withEmptyLegalCatalog(fetcher))}/>);act(()=>observer(user));
   await screen.findByRole('alert');expect(screen.queryByRole('textbox')).toBeNull();expect(fetcher).toHaveBeenCalledTimes(2);
   fetcher.mockResolvedValueOnce(appeal('PENDING'));click('Consultar estado');await screen.findByRole('heading',{name:'Revisión solicitada'});
 });
@@ -84,7 +85,7 @@ it.each(['success','transient','temporary','permanent','deleted'])('approved app
   else if(mode==='transient')fetcher.mockRejectedValueOnce(new TypeError());
   else if(mode==='deleted')fetcher.mockResolvedValueOnce(json(deleted));
   else {fetcher.mockResolvedValueOnce(banned(mode==='temporary'?'ACCOUNT_TEMPORARILY_BANNED':'ACCOUNT_PERMANENTLY_BANNED'));if(mode==='permanent')fetcher.mockResolvedValueOnce(appeal('REJECTED'));}
-  render(<OperationalApp firebase={{service:auth,localVerification:false}} api={new ApiClient(fetcher)}/>);act(()=>observer(user));
+  render(<OperationalApp firebase={{service:auth,localVerification:false}} api={new ApiClient(withEmptyLegalCatalog(fetcher))}/>);act(()=>observer(user));
   if(mode==='success')await screen.findByText('Perfil confirmado: DRAFT');
   else if(mode==='transient'){
     await screen.findByRole('heading',{name:'Revisión aprobada'});expect(screen.queryByText(/Perfil confirmado/)).toBeNull();

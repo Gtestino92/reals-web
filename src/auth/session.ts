@@ -132,6 +132,7 @@ export class SessionController {
   private install(patch: Partial<SessionSnapshot>) { this.snapshot = { ...this.snapshot, ...patch }; this.listeners.forEach(listener => listener()); }
   getSnapshot = () => this.snapshot;
   // Domain requests share the existing identity, cancellation and restriction handling.
+  readonly legalEvents = new EventTarget();
   request = async (path: string, signal: AbortSignal, method = 'GET', body?: unknown) => {
     this.ownership?.assert();
     const generation = this.generation;
@@ -147,6 +148,9 @@ export class SessionController {
       if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
       return result;
     } catch (error) {
+      if (!signal.aborted && this.current(generation) && !administrative && error instanceof ApiError && error.status === 409 && error.code === 'LEGAL_ACTION_REQUIRED') {
+        this.legalEvents.dispatchEvent(new Event('required'));
+      }
       if (this.current(generation) && grant === this.admin.token() && administrative && error instanceof ApiError && (error.status === 401 || (error.status === 403 && !['ADMIN_MFA_REQUIRED', 'ADMIN_GRANT_EXPIRED', 'ADMIN_GRANT_REVOKED'].includes(error.code)))) {
         this.eligibilityContext = undefined; this.eligibilitySettled = true; this.install({ adminEligible: false });
       }

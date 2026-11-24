@@ -1,3 +1,4 @@
+import { withEmptyLegalCatalog } from './test/emptyLegalCatalog';
 import { confirmSignOut } from './test/signOut';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -17,7 +18,7 @@ const json = (body: unknown, status = 200) => new Response(status === 202 || sta
 const ready = () => fetcher.mockResolvedValueOnce(json({ id: 'u', status: 'ACTIVE' })).mockResolvedValueOnce(json({ code: 'PROFILE_NOT_FOUND' }, 404));
 const limited = (retry: string | null, code = 'ACCOUNT_PROVISIONING_LIMIT_EXCEEDED') => new Response(JSON.stringify({ code, error: 'Too Many Requests', message: 'private diagnostic, never display' }), { status: 429, headers: retry === null ? {} : { 'Retry-After': retry } });
 function mount(strict = false, local = false) {
-  const app = <App firebase={{ service: auth, localVerification: local }} api={new ApiClient(fetcher)} />;
+  const app = <App firebase={{ service: auth, localVerification: local }} api={new ApiClient(withEmptyLegalCatalog(fetcher))} />;
   render(strict ? <StrictMode>{app}</StrictMode> : app);
 }
 function login() { act(() => observer(null)); }
@@ -148,7 +149,7 @@ it('local registration skips standard email and completes helper refresh', async
   ready(); fetcher.mockResolvedValueOnce(json(null, 204));
   vi.mocked(user.reload).mockImplementation(async () => { Object.defineProperty(user, 'emailVerified', { value: true, configurable: true }); });
   mount(false, true); login(); credentials(); fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' })); fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
-  await screen.findByText('Sin perfil: falta completar el registro.'); expect(auth.verify).not.toHaveBeenCalled(); expect(user.getIdToken).toHaveBeenLastCalledWith(true);
+  await screen.findByText('Sin perfil: falta completar el registro.'); expect(auth.verify).not.toHaveBeenCalled(); expect(user.getIdToken).toHaveBeenCalledWith(true);
 });
 it('opens Google directly on click and completes bootstrap', async () => {
   ready(); mount(); login(); fireEvent.click(screen.getByRole('button', { name: 'Continuar con Google' }));
@@ -249,7 +250,7 @@ it('Retry dispatches another backend request using receiver-sensitive default fe
   ready();
   const nativeFetch = vi.fn(function (this: unknown, ...args: Parameters<typeof fetch>) {
     if (this !== globalThis) throw new TypeError('Illegal invocation');
-    return fetcher(...args);
+    return withEmptyLegalCatalog(fetcher)(...args);
   });
   vi.stubGlobal('fetch', nativeFetch);
   try {
@@ -337,7 +338,7 @@ it('blocks repeated Google attempts while popup is pending', async () => {
 it('unmount aborts in-flight HTTP and late completion cannot start another request', async () => {
   let resolve: (value: Response) => void = () => {};
   fetcher.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  const mounted = render(<App firebase={{ service: auth, localVerification: false }} api={new ApiClient(fetcher)} />);
+  const mounted = render(<App firebase={{ service: auth, localVerification: false }} api={new ApiClient(withEmptyLegalCatalog(fetcher))} />);
   act(() => observer(user)); await waitFor(() => expect(fetcher).toHaveBeenCalledOnce()); mounted.unmount();
   expect(fetcher.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
   await act(async () => resolve(json({ id: 'u', status: 'ACTIVE' }))); expect(fetcher).toHaveBeenCalledOnce();

@@ -33,7 +33,9 @@ jobs:
       - name: Build dev and prod
         run: |
           VITE_REALS_ENVIRONMENT=dev npm run build
+          (cd dist/legal && sha256sum -c ../../dev-legal/SHA256SUMS)
           VITE_REALS_ENVIRONMENT=prod npm run build
+          test ! -e dist/legal
         env:
           # Existing Web hostname used only as an origin fixture. CI does not serve or deploy dist.
           VITE_API_BASE_URL: https://reals-web.pages.dev

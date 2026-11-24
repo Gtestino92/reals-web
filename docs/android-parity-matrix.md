@@ -2122,3 +2122,37 @@ Reviewed Android's [Home search card and location permission entry](../../reals-
 | Save, delete and navigation | Existing [questionnaire model](../src/profile/affinities/useAffinityQuestionnaire.ts) owns PATCH, DELETE and atomic answer installation. Continue, Category and Review keep their source-specific destinations. The active visit gates completion-driven navigation. Back and Omitir send no deletion. |
 | Resume, failure and identity | Healthy resume retains compatible drafts. Semantic version, option and profile guards govern draft visibility. The model still gates uncertain writes until reconciliation and rejects obsolete account responses. Tests cover delayed/background reads, known and uncertain failures, stale questions and account replacement. |
 | Visual and accessibility | **PLATFORM-LIMITED** for native equivalence. Web uses existing button styles and native radios. Chromium at 390×844 and 1440×900 in light and dark covered Home copy, simulated location denial and affinity clear/omit/save/discard/delete. Physical device permission prompts and screen-reader checks remain open. |
+
+## Session legal requirements
+
+Android reference revision `97827fbb`. The screen presents a scrollable list, links, explicit actions, retry, defer, sign-out and confirmed deletion. The coordinator joins status to the current catalog. Root routing distinguishes session entry, reactivation and interruption of an existing workflow. The routing regressions include deferred first chat and questionnaire recovery. [Screen](../../reals-app/app/src/main/java/com/reals/app/ui/legal/LegalRequirementsScreen.kt) · [Coordinator](../../reals-app/app/src/main/java/com/reals/app/ui/root/LegalCoordinator.kt) · [Root routing regressions](../../reals-app/app/src/test/java/com/reals/app/ui/root/RealsRootViewModelLegalRoutingTest.kt)
+
+| Area | Previous Web | Current implementation and validation |
+| --- | --- | --- |
+| Entry, empty catalog, partial completion | PARTIAL, limited to setup and profile management | COMPLETE for covered cases. An account-owned LegalSession precedes ReadySession for all profile states. Setup and ACTIVE home resume after satisfaction or explicit deferral. Returning to an editor still checks its admission reads. |
+| Protected operations and ongoing chat | MISSING at root | SessionController propagates owned HTTP 409 LEGAL_ACTION_REQUIRED to LegalSession. Existing screens stay mounted under the modal. An ordinary return to a chat does not open a legal screen. The server continues to gate participation. No rejected write is queued for replay. |
+| Document presentation and actions | PARTIAL, raw action enum and limited navigation | Spanish names, version, pending/completed indications, explicit Aceptar or Confirmar lectura, unknown-action guidance, safe external links and read-only inspection in Cuenta. The existing account controls own sign-out and deletion confirmation. |
+| Retry, stale versions and identity | PARTIAL | Join exact type/version/action pairs, reject duplicates and contradictory satisfaction, retry a malformed join once, and reread after each POST. The session and local abort signals fence late results. Deferral applies to the current session and catalog snapshot only. |
+| Resume, Back, focus and drafts | PARTIAL | The legal reader and reactive prompt preserve the caller, focus target and scroll. Back dismisses the retained prompt. Visible legal cards revalidate silently after tab return. A failed background read keeps the links visible and blocks submission until refresh. Focused RTL cases cover deferral, submitted-action account switch, overlapping reads, version conflict and retention of drafts. |
+| Visual and platform parity | PLATFORM-LIMITED | Existing Reals card, typography and theme tokens with browser-native links, dialogs, scrolling and keyboard support. Headless Chrome exercises a 390px dark mobile viewport and 1280px light desktop viewport. Physical device, screen reader, pixel comparison and hosted end-to-end checks remain open. |
+
+The [release rehearsal](deployment.md#development-legal-validation) uses fictional documents. The backend determines satisfaction, protects participation and owns action idempotency. Browser state only controls what is presented. On submit, the exclusive request owns the reload. On defer there is no write. On replacement or sign-out, the account owner and all pending legal requests retire together.
+
+### Validation on the feature branches
+
+Web ran 514 focused tests in the session, account, admin, Home, onboarding and contracts files, plus 17 profile-question hook tests. The first-chat regression rejected one approval, restored the same message draft on deferral and kept unilateral exit and safety reporting enabled. The frontend architecture check found zero runtime cycles. Typecheck and both builds passed with the existing Vite chunk-size advisory.
+
+```sh
+npm run test:focused -- src/App.test.tsx src/admin/Admin.test.tsx src/admin/mfa.test.tsx src/admin/modes.test.tsx src/auth/AccountSuspension.test.tsx src/auth/AccountDeletionRecovery.test.tsx src/home/Home.test.tsx src/onboarding/Onboarding.test.tsx src/onboarding/contracts.test.ts --maxWorkers=2
+npm run test:focused -- src/profile/questions/useProfileQuestions.test.tsx
+npm run check:architecture
+npm run typecheck
+VITE_REALS_ENVIRONMENT=dev npm run build -- --outDir dist-dev-legal
+VITE_REALS_ENVIRONMENT=prod npm run build
+node tools/verify-dev-legal.mjs --canonical ../reals-backend-legal/legal-documents
+node tools/verify-dev-legal.mjs --origin http://127.0.0.1:5186
+node tools/legal-browser.mjs
+node tools/ux-runtime-browser.mjs
+```
+
+Builds used the synthetic CI configuration. The digest check used a local preview of the dev output. A pre-publication GET on each of the three Pages URLs returned the SPA root bytes. Hosted hash verification is a release step. The backend ran 27 passing tests with JDK 21 and `mvnw.cmd -B "-Dtest=DevLegalCatalogTest,LegalDocumentIntegrityVerifierTest,LegalDocumentControllerIntegrationTest,LegalComplianceServiceIntegrationTest,LegalComplianceEmptyCatalogIntegrationTest,LegalComplianceGateControllerIntegrationTest,LegalDocumentConcurrencyIntegrationTest" test`.
