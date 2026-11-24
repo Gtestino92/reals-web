@@ -11,11 +11,15 @@ async function checkReader({ call, evaluate }, standalone = false) {
     }
     throw Error('Timed out waiting for ' + expression);
   };
-  const layouts = standalone ? [[390, 'dark']] : [[390, 'dark'], [390, 'light'], [1280, 'dark'], [1280, 'light']];
-  for (const [width, scheme] of layouts) {
+  const layouts = standalone ? [[390, 'dark', 'privacy']] : [
+    [390, 'dark', 'terms'], [390, 'light', 'privacy'], [390, 'light', 'community-guidelines'],
+    [1280, 'dark', 'privacy'], [1280, 'light', 'terms'], [1280, 'dark', 'community-guidelines'],
+  ];
+  for (const [width, scheme, category] of layouts) {
+    const action = category === 'privacy' ? 'Confirmar lectura' : 'Aceptar';
     await call('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 600 });
     await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
-    await call('Page.navigate', { url: fixture });
+    await call('Page.navigate', { url: fixture + `&document=${category}` });
     await wait("document.querySelector('#login-email:not(:disabled)')");
     if (standalone) assert.equal(await evaluate("matchMedia('(display-mode: standalone)').matches"), true);
     for (const [selector, value] of [['#login-email', 'synthetic@example.invalid'], ['#login-password', 'synthetic-only']]) {
@@ -30,8 +34,38 @@ async function checkReader({ call, evaluate }, standalone = false) {
     await click('Ingresar');
     await wait("document.activeElement.textContent === 'Antes de continuar'");
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+    // Hold one public read so the actual loading layout can be measured.
+    await evaluate(`(() => {
+      const fetch = window.fetch;
+      const held = new Promise(resolve => {
+        window.releaseDocument = () => { window.fetch = fetch; resolve(); };
+      });
+      window.fetch = async (url, init) => {
+        if (String(url).startsWith('https://reals-web.pages.dev/legal/')) {
+          await held;
+          init.signal.throwIfAborted();
+        }
+        return fetch(url, init);
+      };
+    })()`);
     await click('Leer documento');
+    await wait("window.releaseDocument && document.querySelector('.legal-reader-body [role=status]')");
+    const geometry = `['.legal-reader', '.legal-reader footer'].map(selector => {
+      const { top, bottom, width } = document.querySelector(selector).getBoundingClientRect();
+      return [top, bottom, width];
+    })`;
+    const loading = await evaluate(geometry);
+    assert.equal(await evaluate("document.querySelector('.legal-reader .login-primary').disabled"), true);
+    await evaluate('releaseDocument()');
     await wait("document.querySelector('.legal-reader-body').innerText.includes('Sin validez legal')");
+    assert.deepEqual(await evaluate(geometry), loading, 'Reader and actions must stay in place when the document arrives');
+    assert.equal(await evaluate(`(() => {
+      const body = document.querySelector('.legal-reader-body');
+      const action = document.querySelector('.legal-reader .login-primary');
+      return body.scrollTop === 0 && body.scrollHeight > body.clientHeight && body.scrollWidth <= body.clientWidth &&
+        ['h2', 'h3', 'ol li', 'ul li', 'strong'].every(tag => body.querySelector(tag)) &&
+        !action.disabled && action.getBoundingClientRect().bottom <= innerHeight;
+    })()`), true);
     assert.equal(await evaluate("document.querySelector('.legal-reader a').rel.includes('noopener')"), true);
     const previousScroll = await evaluate('scrollY');
     await call('Emulation.setDeviceMetricsOverride', { width, height: 256, deviceScaleFactor: 1, mobile: width < 600 });
@@ -66,18 +100,18 @@ async function checkReader({ call, evaluate }, standalone = false) {
     await wait("document.querySelector('dialog.legal-overlay:modal .legal-requirements article')");
     assert.equal(await evaluate('auditFixture.writes.length'), 0);
     await click('Leer documento');
-    await click('Confirmar lectura');
-    await wait("document.querySelector('.legal-overlay .legal-completed')?.textContent.includes('Lectura confirmada')");
-    assert.equal(await evaluate("document.querySelector('.legal-requirements').innerText.includes('Confirmar lectura')"), false);
+    await click(action);
+    await wait("document.querySelector('.legal-overlay .legal-completed')");
+    assert.equal(await evaluate("document.querySelector('.legal-completed').textContent.includes('Pendiente')"), false);
     assert.deepEqual(await evaluate('auditFixture.writes'), [{ path: '/me/legal-document-actions', method: 'POST' }]);
     await click('Leer documento');
     await wait("document.querySelector('.legal-reader-body').innerText.includes('Sin validez legal')");
-    assert.equal(await evaluate("document.querySelector('.legal-reader footer').innerText.includes('Confirmar lectura')"), false);
+    assert.equal(await evaluate("!!document.querySelector('.legal-reader footer .login-primary')"), false);
     await click('Cerrar');
     await wait("!document.querySelector('.legal-reader')");
     await evaluate('history.back()');
     await wait("!document.querySelector('dialog.legal-overlay')");
-    console.log(width, scheme, standalone ? 'standalone' : 'browser', 'defer, voluntary completion, deletion cancellation and Back passed');
+    console.log(category, width, scheme, standalone ? 'standalone' : 'browser', 'defer, voluntary completion, deletion cancellation and Back passed');
   }
 }
 await withIdentityChrome(checkReader);

@@ -12,20 +12,28 @@ let current = null, profile = null, satisfied = false, hold = false, photos = []
 const writes = [], releases = [];
 const identity = { uid: 'synthetic', emailVerified: true, getIdToken: async () => 'synthetic-only', reload: async () => {} };
 const initial = { ...defaults, displayName: 'Prueba', birthDate: '1995-01-01', city: 'Córdoba', countryCode: 'AR', id: 'p', userId: 'u', status: 'DRAFT', authenticityVerificationStatus: 'STALE' };
-if (location.search === '?active') profile = { ...initial, status: 'ACTIVE' };
-const publication = 'https://reals-web.pages.dev/legal/privacy/dev-fixture-2026-11-23-v1/document.html';
+const params = new URLSearchParams(location.search);
+if (params.has('active')) profile = { ...initial, status: 'ACTIVE' };
+const version = 'dev-fixture-2026-11-24-v2';
+const category = params.get('document') ?? 'privacy';
+const publications = {
+  terms: { type: 'TERMS_OF_USE', requiredAction: 'ACCEPTED' },
+  privacy: { type: 'PRIVACY_NOTICE', requiredAction: 'ACKNOWLEDGED' },
+  'community-guidelines': { type: 'COMMUNITY_GUIDELINES', requiredAction: 'ACCEPTED' },
+};
+if (!Object.hasOwn(publications, category)) throw Error('Unknown synthetic document');
+const publication = `https://reals-web.pages.dev/legal/${category}/${version}/document.html`;
+const canonical = publication.slice(0, -5);
 const nativeFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
-  const canonical = publication.slice(0, -5);
   if (String(input) !== canonical) return nativeFetch(input, init);
-  // Serve synthetic canonical bytes through the public reader boundary.
-  const fixture = new Response((await import('../dev-legal/privacy/dev-fixture-2026-11-23-v1/document.html?raw')).default, {
-    headers: { 'content-type': 'text/html; charset=UTF-8' },
-  });
+  // The tooling route serves the raw fixture as a Vite module. Use its text export.
+  const source = (await import(`../dev-legal/${category}/dev-fixture-2026-11-24-v2/document.html?raw`)).default;
+  const fixture = new Response(source, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
   Object.defineProperty(fixture, 'url', { value: canonical });
   return fixture;
 };
-const doc = () => ({ type: 'PRIVACY_NOTICE', version: 'v1', requiredAction: 'ACKNOWLEDGED', satisfied, url: publication });
+const doc = () => ({ ...publications[category], version, satisfied, url: publication });
 const auth = { observe: next => { observer = next; next(current); return () => { observer = null; }; }, signIn: async () => { current = identity; observer?.(current); return current; }, signUp: async () => { current = identity; observer?.(current); return current; }, google: async () => { current = identity; observer?.(current); return current; }, verify: async () => {}, signOut: async () => { current = null; observer?.(null); } };
 const fetcher = async (input, options) => {
   const path = String(input).replace('/api', ''), method = options?.method ?? 'GET';
