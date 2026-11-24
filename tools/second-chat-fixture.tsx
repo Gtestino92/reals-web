@@ -4,7 +4,7 @@ import type { TabOwnershipManager } from '../src/tabs/TabOwnershipManager';
 import { createRoot } from 'react-dom/client';
 import { Home } from '../src/home/Home';
 import { SessionController } from '../src/auth/session';
-import { ApiClient, ApiError } from '../src/auth/api';
+import { ApiClient, ApiError, historyAudioAccess } from '../src/auth/api';
 import '../src/styles/tokens.css';
 import '../src/styles/global.css';
 const params = new URLSearchParams(location.search), me = params.get('user') ?? 'a', backend = params.get('backend') ?? '';
@@ -15,11 +15,12 @@ const controller = new SessionController({ observe: () => () => {}, signIn: asyn
 controller.snapshot = { ...controller.snapshot, phase: 'ready', account: { id: me, status: 'ACTIVE' }, profile: { id: 'profile', userId: me, status: 'ACTIVE' } };
 const listeners = new Set<() => void>();
 controller.subscribe = fn => { listeners.add(fn); return () => { listeners.delete(fn); }; };
-controller.request = async (path, signal, method = 'GET', body) => {
+controller.request = async (path, signal, method = 'GET', body, access) => {
   const owner=ownership;owner?.assert();if(owner)signal=AbortSignal.any([signal,owner.signal]);
   const form = body instanceof FormData;
   const response = await fetch(`${backend}/${controller.snapshot.account?.id ?? me}${path}`, { signal, method, ...(form ? {} : { headers: { 'Content-Type': 'application/json' } }), ...(body ? { body: form ? body : JSON.stringify(body) } : {}) });
   if (!response.ok) { const error:unknown=await response.json();throw new ApiError('backend',response.status,typeof error==='object'&&error!==null&&'code' in error&&typeof error.code==='string'?error.code:''); }
+  access?.(historyAudioAccess(response.headers));
   return response.json();
 };
 Object.assign(window, { fixture: {

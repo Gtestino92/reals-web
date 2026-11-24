@@ -72,7 +72,8 @@ it('installs the next immutable guidance question and refreshed audio policy fro
 });
 beforeEach(()=>{
   chat=chatFixture();messages=[messageFixture()];exits=[];matchState='CHAT_ACTIVE';controller=controllerFixture();home=vi.fn();
-  request=vi.spyOn(controller,'request').mockImplementation(async(path,_signal,method='GET',body)=>{
+  request=vi.spyOn(controller,'request').mockImplementation(async(path,_signal,method='GET',body,access)=>{
+    access?.('ALLOWED');
     if(method==='GET') {
       if(path==='/matches/m')return {id:'m',userAId:'me',userBId:'them',state:matchState};
       if(path==='/matches/m/chat')return chat;
@@ -157,7 +158,18 @@ it('disposal rejects obsolete async results',async()=>{let resolve:((value:unkno
 it('effect restart works after StrictMode cleanup',async()=>{session.dispose();session.start();await session.refresh();expect(session.getSnapshot().chat?.id).toBe('c');});
 it('audio send uses multipart without boundary and keeps identical bytes/id on retry',async()=>{const base=request.getMockImplementation()!;request.mockImplementation((...args)=>args[0].endsWith('/audio-messages')?Promise.reject(new ApiError('network')):base(...args));await session.refresh();const file=new Blob(['aac'],{type:'audio/mp4'});await session.send('',{type:'MESSAGE',targetId:'1'},file);await session.retry();expect(writes()).toHaveLength(2);const first=writes()[0]?.[3],second=writes()[1]?.[3];expect(first).toBeInstanceOf(FormData);if(!(first instanceof FormData)||!(second instanceof FormData))throw Error();expect(first.get('clientMessageId')).toBe(second.get('clientMessageId'));expect(first.get('replyToType')).toBe('MESSAGE');expect((first.get('file') as File).size).toBe(file.size);});
 it.each([false, true])('enforces audio policy enabled/quota %s',async enabled=>{chat.audioPolicy.enabled=enabled;chat.audioPolicy.remainingMessages=0;await session.refresh();await session.send('',null,new Blob(['aac'],{type:'audio/mp4'}));expect(writes()).toHaveLength(0);});
-it('refreshes signed URLs only through authorized reads',async()=>{const audio:Message={...messageFixture(),messageType:'AUDIO',audio:{url:'https://media.example/a?signature=one',durationMillis:2000,sizeBytes:100,contentType:'audio/mp4'}};const base=request.getMockImplementation()!;request.mockImplementation((...args)=>args[0].startsWith('/chats/c/messages?')?Promise.resolve([audio]):base(...args));await session.refresh();audio.audio={...audio.audio!,url:'https://media.example/a?signature=two'};await session.refresh(true);expect(session.getSnapshot().messages[0]?.audio?.url).toBe(audio.audio.url);});
+it('refreshes signed URLs only through authorized reads',async()=>{
+  const audio:Message={...messageFixture(),messageType:'AUDIO',audio:{url:'https://media.example/a?signature=one',durationMillis:2000,sizeBytes:100,contentType:'audio/mp4'}};
+  const base=request.getMockImplementation()!;
+  request.mockImplementation(async (...args)=>{
+    if (!args[0].startsWith('/chats/c/messages?')) return base(...args);
+    args[4]?.('ALLOWED');
+    return [audio];
+  });
+  await session.refresh();
+  audio.audio={...audio.audio!,url:'https://media.example/a?signature=two'};
+  expect(await session.renewAudio(audio.id)).toBe(audio.audio.url);
+});
 it('superseded poll cannot overwrite a confirmed send',async()=>{
   await session.refresh();const base=request.getMockImplementation()!;let resolve:((v:unknown)=>void)|undefined;
   request.mockImplementation((...args)=>args[0]==='/matches/m'&&args[2]===undefined&&!resolve?new Promise(r=>{resolve=r;}):base(...args));

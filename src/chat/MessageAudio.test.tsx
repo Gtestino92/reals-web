@@ -73,3 +73,28 @@ it('a cancelled pending play promise cannot restart media and a refresh failure 
 it('preserves renewal intent when Chrome pauses loading media before reporting an expired URL',async()=>{
  const refresh=vi.fn(async()=>'https://media.test/renewed');mount(refresh);const a=await start();fireEvent.pause(a);Object.defineProperty(a,'error',{value:{code:4}});fireEvent.error(a);await waitFor(()=>expect(audio()).not.toBe(a));expect(refresh).toHaveBeenCalledOnce();expect(audio().src).toBe('https://media.test/renewed');
 });
+
+it.each(['playing','paused','loading','automatic renewal','manual renewal'])('retiring a player during %s releases its element and ignores late work', async phase => {
+  let renew: ((url: string) => void) | undefined;
+  let rejectPlay: ((error: Error) => void) | undefined;
+  play.mockImplementation(() => new Promise<void>((_, reject) => { rejectPlay = reject; }));
+  const view = mount(() => new Promise<string>(resolve => { renew = resolve; }));
+  const element = await start();
+  if (phase === 'playing' || phase === 'paused') fireEvent.playing(element);
+  if (phase === 'paused') fireEvent.click(screen.getByRole('button',{name:'Pausar audio'}));
+  if (phase.endsWith('renewal')) {
+    Object.defineProperty(element,'error',{value:{code:phase === 'automatic renewal' ? 2 : 3}});
+    fireEvent.error(element);
+    if (phase === 'manual renewal') fireEvent.click(screen.getByRole('button',{name:'Renovar enlace'}));
+    expect(renew).toBeDefined();
+  }
+  view.unmount();
+  expect(vi.mocked(HTMLMediaElement.prototype.pause).mock.contexts).toContain(element);
+  expect(element.isConnected).toBe(false);
+  expect(element.hasAttribute('src')).toBe(false);
+  await act(async () => { renew?.('https://media.test/obsolete'); rejectPlay?.(new Error('obsolete')); });
+  fireEvent.playing(element);
+  fireEvent.error(element);
+  expect(play).toHaveBeenCalledOnce();
+  expect(document.querySelector('audio')).toBeNull();
+});

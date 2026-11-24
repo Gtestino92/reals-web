@@ -1,4 +1,5 @@
 // Synthetic lifecycle scheduler and HTTP contract. No production backend/accounts.
+import { flattenRecording } from '../src/chat/mp4Recording.ts';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 export const iso = n => new Date(n).toISOString();
@@ -18,7 +19,8 @@ export function advance(s, ms) {
 }
 export async function fixtureServer() {
   const scenarios = new Map();
-  const audio = await readFile(new URL('../src/chat/fixtures/valid-aac-short.m4a',import.meta.url));
+  const recording = await readFile(new URL('../src/chat/fixtures/chrome-aac-fragmented.mp4',import.meta.url));
+  const audio = Buffer.from(flattenRecording(new Uint8Array(recording).buffer,2097152));
   let origin;
   const server = createServer(async(req,res) => {
     res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Headers','Content-Type');res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,OPTIONS');
@@ -61,7 +63,13 @@ export async function fixtureServer() {
       const m={id:String(s.messages.length+1),chatSessionId:'c',senderId:me,clientMessageId:path.endsWith('/audio-messages')?raw.match(/name="clientMessageId"\r\n\r\n([^\r\n]+)/)?.[1]:data.clientMessageId,messageType:path.endsWith('/audio-messages')?'AUDIO':'TEXT',content:path.endsWith('/audio-messages')?null:data.content,sentAt:iso(s.now),replyTo:null,reactionType:null,audio:path.endsWith('/audio-messages')?{url:`${origin}/${group}/${me}/audio-valid`,durationMillis:1000,sizeBytes:2000,contentType:'audio/mp4'}:null};s.messages.push(m);if(s.audioCommitAmbiguous&&path.endsWith('/audio-messages')){s.status='ABANDONED';s.endedReason='SECOND_CHAT_NO_CONVERSATION_STARTED';return json({code:'TEMPORARILY_UNAVAILABLE'},503);}if(s.resolution?.type==='MUTUAL_COMPLETION')s.cooldown=s.now+60000;s.resolution=null;return json(m);
     }
     if(path==='/chats/c'){if(s.failChatReadOnce){s.failChatReadOnce=false;return json({code:'TEMPORARILY_UNAVAILABLE'},503);}return json(chat());}
-    if(path.includes('/messages?'))return json((()=>{const messages=s.messages.map(m=>m.audio?{...m,audio:{...m.audio,url:`${origin}/${group}/${me}/audio-${s.audioVersion===1?'expired':'valid'}`}}:m);return path.includes('&after=')?{messages,hasMore:false,serverTime:iso(s.now)}:messages;})());
+    if(path.includes('/messages?')) {
+      res.setHeader('X-Reals-Counterpart-Audio-Access',s.audioAccess ?? 'ALLOWED');
+      res.setHeader('Access-Control-Expose-Headers','X-Reals-Counterpart-Audio-Access');
+      res.setHeader('Cache-Control','no-store');
+      const messages=s.messages.map(m=>m.audio?{...m,audio:{...m.audio,url:`${origin}/${group}/${me}/audio-${s.audioVersion===1?'expired':'valid'}`}}:m);
+      return json(path.includes('&after=')?{messages,hasMore:false,serverTime:iso(s.now)}:messages);
+    }
     return json({});
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;

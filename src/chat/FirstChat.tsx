@@ -2,7 +2,7 @@ import { useChatDraftHeight, useChatViewport } from './useChatViewport';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { SessionController } from '../auth/session';
 import { ChatSession } from './ChatSession';
-import { plainText, policy, reactable } from './contracts';
+import { plainText, policy } from './contracts';
 import type { Message } from './contracts';
 import { MessageAudio } from './MessageAudio';
 import { AudioComposer } from './AudioComposer';
@@ -34,13 +34,16 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
     document.addEventListener('visibilitychange',resume); window.addEventListener('online',resume);
     return () => { session.dispose(); clearInterval(timer); clearInterval(tick); document.removeEventListener('visibilitychange',resume); window.removeEventListener('online',resume); };
   }, [session]);
+  useEffect(() => {
+    if (state.audioAccess === 'RESTRICTED' && !state.outgoing && reply?.type === 'MESSAGE' && reply.messageType === 'AUDIO' && reply.senderId !== session.me) setReply(null);
+  }, [state.audioAccess, state.outgoing, reply, session]);
   useEffect(() => { if (state.confirmationVersion > 0) { setDraft(d => d === state.confirmed ? '' : d); setReply(current => current?.type === state.confirmedReply?.type && current?.targetId === state.confirmedReply?.targetId ? null : current); } }, [state.confirmationVersion]);
   useEffect(() => {
     const list = timeline.current;
     if (nearBottom.current && list) { list.scrollTop = list.scrollHeight; setUnseen(false); } else setUnseen(true);
   }, [state.messages.length]);
   useEffect(() => { const warn = (e: BeforeUnloadEvent) => { if (dirty.current) { e.preventDefault(); } }; window.addEventListener('beforeunload',warn); return () => window.removeEventListener('beforeunload',warn); }, [draft,state.outgoing]);
-  const chat = state.chat, p = policy(chat,state.exits,now+state.offset), me = session.me, eligible = reactable(state.messages,me), g = chat?.guidance;
+  const chat = state.chat, p = policy(chat,state.exits,now+state.offset), me = session.me, eligible = session.eligible, g = chat?.guidance;
   usePresentedActivity(root, chat?.status === 'ACTIVE' && !knownClosed.current ? activityId('FIRST_CHAT', matchId, chatId) : null);
   const partner = chat?.partner.displayName.trim();
   const disabled = state.busy || state.blocked, ordinary = p.ordinary && !disabled && !state.outgoing;
@@ -97,7 +100,7 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       {state.messages.map((m, index, messages) => <li key={m.id} className={`chat-message-row ${m.senderId === me ? 'outgoing' : 'incoming'}${messages[index - 1]?.senderId === m.senderId ? ' chat-message-continuation' : ''}`}>
         <ReplySwipe enabled={ordinary && !audioDirty && m.senderId !== me && ((m.messageType === 'TEXT' && !!m.content) || (m.messageType === 'AUDIO' && !!m.audio))} label={`Responder mensaje de ${chat?.partner.displayName ?? 'tu match'}`} onReply={() => beginReply({ type: 'MESSAGE', targetId: m.id, senderId: m.senderId, messageType: m.messageType }, m.messageType === 'AUDIO' ? 'Mensaje de audio' : m.content ?? '')}><article className={m.senderId === me ? 'chat-message outgoing' : 'chat-message incoming'}>
         {m.replyTo && <blockquote className="chat-quote"><ReplyQuote {...replyPreview(m.replyTo,me,chat?.partner.userId,chat?.partner.displayName)}/></blockquote>}
-        {m.messageType === 'TEXT' && m.content ? <p>{m.content}</p> : m.messageType === 'AUDIO' && m.audio ? <MessageAudio source={m.audio.url} durationMillis={m.audio.durationMillis} refresh={async () => { await session.refresh(true); const current=session.getSnapshot(); return current.blocked ? null : current.messages.find(message=>message.id===m.id)?.audio?.url ?? null; }}/> : <p>Mensaje no compatible.</p>}
+        {m.messageType === 'TEXT' && m.content ? <p>{m.content}</p> : m.messageType === 'AUDIO' && m.audio ? <MessageAudio source={m.audio.url} durationMillis={m.audio.durationMillis} refresh={() => session.renewAudio(m.id)}/> : <p>Mensaje no compatible.</p>}
         <time dateTime={m.sentAt}>{new Date(m.sentAt).toLocaleTimeString('es-AR',{ hour: '2-digit',minute:'2-digit' })}</time>
         </article></ReplySwipe>
         {m.senderId === me ? m.reactionType && <span className="chat-received-heart" role="img" aria-label={(partner || 'La otra persona') + ' reaccionó con corazón'}>♥</span> : <ReactionLane confirmed={m.reactionType === 'HEART'} eligible={eligible.has(m.id)} disabled={!ordinary || audioDirty} react={() => session.react(m.id)}/>}

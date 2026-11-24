@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { ChatIcon } from './ChatIcon';
 
 type Phase = 'idle' | 'loading' | 'playing' | 'paused' | 'ended' | 'failed';
@@ -18,7 +18,7 @@ export function MessageAudio({ source, durationMillis, refresh }: {
     if(r.phase==='loading' || dispose) { const position=r.phase==='loading'?r.position:r.audio?.currentTime ?? r.position;r.serial++;release();update({phase:'paused',position}); }
     else { r.audio?.pause();if(r.phase==='playing')update({phase:'paused'}); }
   };
-  useEffect(()=>{
+  useLayoutEffect(()=>{
     const r=owner.current;r.alive=true;
     const hide=()=>{if(document.visibilityState!=='visible')pause(true);};
     const other=(event: Event)=>{if(event.target instanceof HTMLMediaElement && event.target!==r.audio)pause(true);};

@@ -11,6 +11,18 @@ function harness(...responses: Response[]) {
   responses.forEach(item => fetcher.mockResolvedValueOnce(item));
   return { fetcher, api: new ApiClient(fetcher), user: identity(), signal: new AbortController().signal };
 }
+it('delivers only history access on success after token refresh and keeps the JSON return contract', async () => {
+  const success = Response.json([], {headers:{'X-Reals-Counterpart-Audio-Access':'RESTRICTED'}});
+  const {api, user, fetcher, signal} = harness(failure(401,'INVALID_TOKEN'),success,response(account));
+  const observe = vi.fn();
+  const client = api.withAppCheck(async () => 'synthetic-check');
+  await expect(client.request('/chats/c/messages?limit=500',signal,user,'GET',undefined,undefined,true,undefined,observe)).resolves.toEqual([]);
+  expect(observe).toHaveBeenCalledExactlyOnceWith('RESTRICTED');
+  expect(user.getIdToken).toHaveBeenLastCalledWith(true);
+  expect(fetcher.mock.calls.map(([,init]) => init?.cache)).toEqual(['no-store','no-store']);
+  await expect(client.request('/me',signal,user)).resolves.toEqual(account);
+  expect(fetcher.mock.lastCall?.[1]?.cache).toBeUndefined();
+});
 describe('remote API routing', () => {
   const railwayOrigin = 'https://reals-backend-dev.up.railway.app';
   function remote(name: 'dev' | 'prod', origin = `${railwayOrigin}/`) {

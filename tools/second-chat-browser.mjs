@@ -23,7 +23,7 @@ async function page(group,user,width,ownership=false){
  await call('Page.navigate',{url:`http://127.0.0.1:5175/tools/second-chat-fixture.html?user=${user}&backend=${encodeURIComponent(origin+'/'+group)}&ownership=${ownership?'1':'0'}`});
  // Ownership order depends on mounted managers, not Page.navigate acknowledgement.
  // Finish mounting the first participant before creating its competing tab.
- if(ownership){let mounted=false;for(let i=0;i<120;i++){try{mounted=await evaluate("!!window.fixture && !!document.querySelector('.second-chat')");}catch(error){if(!/Execution context was destroyed|Cannot find context/.test(error.message))throw error;}if(mounted)break;await new Promise(r=>setTimeout(r,100));}if(!mounted)throw Error('Ownership fixture did not mount');}
+ if(ownership && user==='a'){let mounted=false;for(let i=0;i<120;i++){try{mounted=await evaluate("!!window.fixture && !!document.querySelector('.second-chat')");}catch(error){if(!/Execution context was destroyed|Cannot find context/.test(error.message))throw error;}if(mounted)break;await new Promise(r=>setTimeout(r,100));}if(!mounted)throw Error('Ownership fixture did not mount');}
  return {call,evaluate,close:()=>{closing=true;return Promise.race([new Promise(r=>ws.addEventListener('close',r,{once:true})),call('Page.close').catch(error=>{if(!/Not attached to an active page|Target closed/.test(error.message))throw error;})]);}};
 }
 async function wait(p,expression){await p.call('Page.bringToFront');for(let i=0;i<120;i++){try{if(await p.evaluate(expression)){checks++;return;}}catch(error){if(!/Execution context was destroyed|Inspected target navigated|Cannot find context|Not attached to an active page/.test(error.message))throw error;}await new Promise(r=>setTimeout(r,100));}throw Error('Timeout '+expression+' '+await p.evaluate('document.body.innerText+JSON.stringify([...document.querySelectorAll(\"audio\")].map(a=>({src:a.src,error:a.error?.code,paused:a.paused})))'));}
@@ -91,6 +91,18 @@ try{
    s.now=s.scheduled+15*60000;await refresh(a);await assert(a,"!![...document.querySelectorAll('.second-chat button')].find(b=>b.textContent==='Volver a Inicio')");await click(a,'Volver a Inicio');await assert(a,"!document.querySelector('.second-chat')");await history(a,1);await assert(a,"!document.querySelector('.second-chat')");
   });
   await run('absolute-expiry-home',width,{},async({a,b,s})=>{await open(a);await open(b);s.now=s.scheduled+120*60000;await refresh(a);await assert(a,"!document.querySelector('.second-chat') && document.body.innerText.includes('El segundo chat venció.')");});
+  await run('counterpart-audio-retirement',width,{audioVersion:2},async({a,s})=>{
+   s.messages.push({id:'1',chatSessionId:'c',senderId:'b',clientMessageId:null,messageType:'AUDIO',content:null,sentAt:iso(s.now),replyTo:null,reactionType:null,audio:{durationMillis:1000,sizeBytes:2000,contentType:'audio/mp4'}});
+   await open(a);
+   await setText(a,'#second-draft','Synthetic draft');
+   await a.evaluate("document.addEventListener('play', e => { if(e.target instanceof HTMLAudioElement) e.target.loop = true; }, {capture:true,once:true})");
+   await click(a,'Reproducir audio');
+   await wait(a,"(window.retiringPlayer=document.querySelector('audio')) && !retiringPlayer.paused && retiringPlayer.currentTime > 0");
+   s.audioAccess='RESTRICTED';
+   await refresh(a);
+   await wait(a,"retiringPlayer.paused && !retiringPlayer.isConnected && !retiringPlayer.hasAttribute('src') && !document.querySelector('.chat-playback')");
+   await assert(a,"document.querySelector('#second-draft').value==='Synthetic draft'");
+  });
   await run('audio-policy-url-upload-and-identity',width,{},async({a,b,s})=>{
    s.messages.push({id:'1',chatSessionId:'c',senderId:'b',clientMessageId:null,messageType:'AUDIO',content:null,sentAt:iso(s.now),replyTo:null,reactionType:null,audio:{url:'placeholder',durationMillis:1000,sizeBytes:2000,contentType:'audio/mp4'}});
    await open(a);await open(b);await refresh(a);await assert(a,"!document.querySelector('[aria-label=\"Grabar audio\"]')");await click(a,'Reproducir audio');await wait(a,`document.querySelector('audio')?.src.includes('audio-valid')`);if(s.audioReads<1)throw Error('No audio request');checks++;

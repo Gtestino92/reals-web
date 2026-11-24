@@ -3,7 +3,7 @@ import { parseAppeal, validStatement, validExpiry } from './suspension';
 import type { Appeal } from './suspension';
 import type { TabOwnershipManager } from '../tabs/TabOwnershipManager';
 import { ApiClient, ApiError, DeletedAccountError, bootstrap, object, parseUser } from './api';
-import type { BackendUser, Profile } from './api';
+import type { BackendUser, Profile, HistoryAccessListener } from './api';
 import { errorCode, isRateLimitResponse, safeMessage, terminalCodes, verificationErrorMessage, verificationRateLimited } from './errors';
 import type { AuthService, Identity } from './firebase';
 import type { LoginErrorOwner } from './LoginScreen';
@@ -133,7 +133,7 @@ export class SessionController {
   getSnapshot = () => this.snapshot;
   // Domain requests share the existing identity, cancellation and restriction handling.
   readonly legalEvents = new EventTarget();
-  request = async (path: string, signal: AbortSignal, method = 'GET', body?: unknown) => {
+  request = async (path: string, signal: AbortSignal, method = 'GET', body?: unknown, onHistoryAccess?: HistoryAccessListener) => {
     this.ownership?.assert();
     const generation = this.generation;
     const user = this.user;
@@ -143,7 +143,10 @@ export class SessionController {
     const viewEpoch = this.adminViewEpoch;
     if (path.startsWith('/admin/') && (!this.adminView || !grant || this.admin.getSnapshot().phase !== 'allowed')) throw new ApiError('authorization', 403, 'ADMIN_MFA_REQUIRED');
     try {
-      const result = await this.api.request(path, AbortSignal.any([signal, this.controller.signal]), user, method, body, administrative ? (path === '/admin-auth/revoke' ? 204 : 200) : undefined, !administrative, grant);
+      const result = await this.api.request(path, AbortSignal.any([signal, this.controller.signal]), user, method, body, administrative ? (path === '/admin-auth/revoke' ? 204 : 200) : undefined, !administrative, grant,
+        onHistoryAccess && (access => {
+          if (!signal.aborted && this.current(generation)) onHistoryAccess(access);
+        }));
       if (path.startsWith('/admin/') && (!this.adminView || viewEpoch !== this.adminViewEpoch || this.admin.token() !== grant || this.admin.getSnapshot().phase !== 'allowed')) throw new DOMException('Sesión obsoleta', 'AbortError');
       if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
       return result;

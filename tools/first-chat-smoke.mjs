@@ -35,13 +35,13 @@ try {
     const {default:React}=await import('/node_modules/.vite/deps/react.js'),{default:ReactDOM}=await import('/node_modules/.vite/deps/react-dom_client.js'),{FirstChat}=await import('/src/chat/FirstChat.tsx'); const {createRoot}=ReactDOM;
     document.getElementById('root').style.display='none';const el=document.createElement('div');document.body.append(el);
     const messages=[{id:'1',chatSessionId:'c',senderId:'them',clientMessageId:null,messageType:'TEXT',content:'¡Hola! ¿Cómo estás?',reactionType:null,replyTo:null,audio:null,sentAt:new Date().toISOString()}];
-    const controller={snapshot:{account:{id:'me'}},request:async(path,signal,method='GET',body)=>{
+    const controller={getSnapshot(){return this.snapshot;},snapshot:{phase:'ready',account:{id:'me'}},request:async(path,signal,method='GET',body,access)=>{
       signal.throwIfAborted();
       if(path==='/matches/m')return{id:'m',userAId:'me',userBId:'them',state:'CHAT_ACTIVE'};
       if(path==='/matches/m/chat')return{id:'c',matchId:'m',chatType:'FIRST_CHAT',status:'ACTIVE',partner:{userId:'them',displayName:'María'},myDecision:'PENDING',partnerDecision:'PENDING',timeoutAt:new Date(Date.now()+600000).toISOString(),inactivityExpiresAt:new Date(Date.now()+300000).toISOString(),serverTime:new Date().toISOString(),guidance:null,audioPolicy:null};
       if(path.endsWith('exit-requests'))return[];
       if(path==='/chats/c/messages'&&method==='POST'){const m={...messages[0],...body,id:'2',senderId:'me',sentAt:new Date().toISOString()};messages.push(m);return m;}
-      if(path.includes('/messages?'))return[...messages];throw Error('Unexpected fixture endpoint');
+      if(path.includes('/messages?')){access?.('ALLOWED');return[...messages];}throw Error('Unexpected fixture endpoint');
     }};
     createRoot(el).render(React.createElement(FirstChat,{controller,matchId:'m',chatId:'c',onHome:()=>{}}));
     await new Promise(r=>setTimeout(r,500));
