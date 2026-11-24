@@ -12,7 +12,8 @@ function harness(...responses: Response[]) {
   return { fetcher, api: new ApiClient(fetcher), user: identity(), signal: new AbortController().signal };
 }
 describe('remote API routing', () => {
-  function remote(name: 'dev' | 'prod', origin = 'https://reals-web.pages.dev/') {
+  const railwayOrigin = 'https://reals-backend-dev.up.railway.app';
+  function remote(name: 'dev' | 'prod', origin = `${railwayOrigin}/`) {
     vi.stubEnv('DEV', false);
     vi.stubEnv('PROD', true);
     vi.stubEnv('VITE_REALS_ENVIRONMENT', name);
@@ -32,7 +33,7 @@ describe('remote API routing', () => {
     expect(user.getIdToken).toHaveBeenNthCalledWith(1, false);
     expect(user.getIdToken).toHaveBeenNthCalledWith(2, true);
     expect(tokens).toHaveBeenCalledTimes(2);
-    expect(fetcher.mock.calls).toEqual(Array(2).fill(['https://reals-web.pages.dev/api/me', expect.objectContaining({
+    expect(fetcher.mock.calls).toEqual(Array(2).fill([`${railwayOrigin}/api/me`, expect.objectContaining({
       signal, credentials: 'omit', headers: { Authorization: 'Bearer fake-token', 'X-Firebase-AppCheck': 'synthetic-app-check' },
     })]));
   });
@@ -47,7 +48,7 @@ describe('remote API routing', () => {
     const client = api.withOwnership().withAppCheck(async () => 'synthetic-app-check');
     await expect(client.request('/admin/photos', signal, user, 'POST', body, undefined, true, 'synthetic-grant'))
       .rejects.toMatchObject({ kind: 'backend', status: 429, code: 'RATE_LIMIT_EXCEEDED', retryAfterSeconds: 5 });
-    expect(fetcher).toHaveBeenCalledExactlyOnceWith('https://reals-web.pages.dev/api/admin/photos', {
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(`${railwayOrigin}/api/admin/photos`, {
       method: 'POST', signal, body, credentials: 'omit', cache: 'no-store', redirect: 'error',
       headers: { Authorization: 'Bearer fake-token', 'X-Firebase-AppCheck': 'synthetic-app-check', 'X-Reals-Admin-Grant': 'synthetic-grant' },
     });

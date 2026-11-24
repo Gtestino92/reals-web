@@ -5,7 +5,7 @@
 | Reals environment | Branch and frontend | API routing | Firebase App Check |
 | --- | --- | --- | --- |
 | `local` | Any working branch using `npm run dev` on loopback. See [local development](local-development.md) for ADB reverse. | Leave `VITE_API_BASE_URL` empty. Vite forwards relative `/api/...` to Spring Boot at `http://localhost:8080`. | Use the local Web app's registered provider. SDK debug is opt-in on localhost or 127.0.0.1. |
-| `dev` | `development` on the existing Pages project at `https://reals-web.pages.dev`. | Enter the Railway development backend's public HTTPS origin when available. | reCAPTCHA Enterprise for the development Firebase Web app. |
+| `dev` | `development` on the existing Pages project at `https://reals-web.pages.dev`. | The deployed bundle calls `https://reals-backend-dev.up.railway.app` directly. | reCAPTCHA Enterprise for the development Firebase Web app. |
 | `prod` | `main` on a future independent Pages project. | Enter the production backend's public HTTPS origin. | reCAPTCHA Enterprise for the production Firebase Web app. |
 
 For local use, copy [`.env.example`](../.env.example) to `.env.local`, leave the API base empty and enter your local Firebase settings. Existing local setups can omit the selector on the Vite dev server. Compiled builds require an explicit remote environment, an HTTPS origin with a public DNS hostname, Firebase Web app settings and an Enterprise site key. Enter the origin alone, with an optional trailing slash. The client appends `/api/...`. URL validation rejects paths, user info, queries, fragments, IP literals, local-only names and reserved or common placeholder names. For a local shell build, supply remote values through the shell or Vite's ignored mode-specific env files and override any local flags inherited from `.env.local`. Preview uses the settings compiled into `dist/`.
@@ -23,7 +23,7 @@ The existing project's **production branch** is already set to `development`. It
 | Pages Production scope variable | Existing development project | Future production project |
 | --- | --- | --- |
 | `VITE_REALS_ENVIRONMENT` | `dev` | `prod` |
-| `VITE_API_BASE_URL` | Railway development backend's public HTTPS origin, pending availability | Production backend's public HTTPS origin |
+| `VITE_API_BASE_URL` | `https://reals-backend-dev.up.railway.app` | Production backend's public HTTPS origin |
 | `VITE_FIREBASE_API_KEY` | Development Web app `apiKey` | Production Web app `apiKey` |
 | `VITE_FIREBASE_AUTH_DOMAIN` | Development Web app `authDomain` | Production Web app `authDomain` |
 | `VITE_FIREBASE_PROJECT_ID` | Development Web app `projectId` | Production Web app `projectId` |
@@ -36,6 +36,40 @@ Keep Cloudflare's injected `CF_PAGES*` metadata intact. The build requires `CF_P
 
 All `VITE_*` values are public browser data. Keep service accounts, passwords, private keys and debug credentials out of these variables. GitHub CI uses synthetic Firebase values and an HTTPS syntax fixture. Its bundles are for validation only.
 
+## HTTP security headers
+
+### Deployed development baseline
+
+Unauthenticated GETs on 2026-11-23 returned the following headers from `reals-web.pages.dev`. “Absent” refers to the named header on that response.
+
+| Header | HTTPS document `/`, JS, CSS, manifest, favicon and SPA fallback (200) | HTTP `/` (301 to HTTPS) | HTTPS `/index.html` (308 to `/`) |
+| --- | --- | --- | --- |
+| Content-Security-Policy | Absent | Absent | Absent |
+| Content-Security-Policy-Report-Only | Absent | Absent | Absent |
+| X-Frame-Options | Absent | Absent | Absent |
+| X-Content-Type-Options | `nosniff` | Absent | Absent |
+| Referrer-Policy | `strict-origin-when-cross-origin` | Absent | `strict-origin-when-cross-origin` |
+| Permissions-Policy | Absent | Absent | Absent |
+| Strict-Transport-Security | Absent | Absent | Absent |
+| Cross-Origin-Opener-Policy | Absent | Absent | Absent |
+| Cache-Control | `public, max-age=0, must-revalidate` | Absent | Absent |
+
+A missing route and a missing `/assets/*.js` path both returned the SPA HTML with HTTP 200. The missing script's body matched the root document. A request to `/sw.js` also returned HTML. The observed 200 response headers match documented Cloudflare Pages defaults. The audited base commit had no `_headers` or Pages Functions, and neither its HTML nor Vite config configured these headers. Dashboard rules and the independent production environment were outside the audit. [Cloudflare Pages serving and default headers](https://developers.cloudflare.com/pages/configuration/serving-pages/)
+
+### First increment in source
+
+Vite copies [`public/_headers`](../public/_headers) to `dist/_headers`. Pages interprets the single `/*` rule for static responses on its own host. The rule pins `X-Content-Type-Options: nosniff` and `Referrer-Policy: strict-origin-when-cross-origin` to their observed values. It sets `X-Frame-Options: DENY` because the Web app is a top-level destination with no embedding requirement identified. The policy applies to pages that embed Reals. Firebase Auth and reCAPTCHA frames are served by their own origins.
+
+The Permissions Policy disables camera capture and Payment Request, which the current app does not use. Photo selection uses a file input and local canvas cropping. Geolocation and microphone are available to the same origin, subject to normal browser permission prompts, with no cross-origin delegation. CSP and CSP Report-Only remain pending the [resource inventory gaps](security-technical-debt.md#1-content-security-policy-csp).
+
+Railway keeps its own headers and CORS. For comparison, its public `/api/ping` returned JSON with `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, and `Cache-Control: no-cache, no-store, max-age=0, must-revalidate`. Pages applies redirects ahead of custom header rules. Its asset rules also have no effect on a Pages Function response. [Cloudflare Pages header scope](https://developers.cloudflare.com/pages/configuration/headers/)
+
+### Verification and rollout
+
+- The automated check asserts a single rule with exactly the reviewed headers and permissions and compares the source file with the Vite build output. API transport tests exercise the separate Railway origin. Synthetic `dev` and `prod` builds both copied the file byte for byte.
+- The deployed baseline rendered the login form without horizontal overflow in clean Chromium at desktop and mobile emulated viewports. The Google popup reached Google's sign-in page. No CSP violations were observed on anonymous startup, where both CSP headers were absent. Local Chromium with the built headers denied framing and confirmed the camera, payment, microphone and geolocation policy settings.
+- After an authorized deployment, repeat the document, fallback, asset and redirect checks against Pages. Verify real email sign-in, Google popup completion, App Check exchange and refresh, authenticated Railway traffic, signed image/audio loading, recording, geolocation and Calendar navigation with an approved test account. These checks are pending, as is deployed verification of the new headers.
+
 ## Remaining rollout steps
 
 1. Use the existing `development` branch for the workflow PR, wait for **Web validation** to pass on GitHub, and enforce required PR checks on both branches where supported before merging.
@@ -44,7 +78,7 @@ All `VITE_*` values are public browser data. Keep service accounts, passwords, p
 
 ## Remaining integration
 
-1. Deploy the development backend to Railway and obtain its public HTTPS origin. Aiven PostgreSQL and R2 integration for that backend are pending.
-2. Coordinate backend CORS for `https://reals-web.pages.dev`. The browser calls Railway directly. The backend needs to answer preflights for the API's methods and headers, including `Authorization`, `X-Firebase-AppCheck`, `Content-Type` and `X-Reals-Admin-Grant` where applicable. Expose `Retry-After` so the Web client can read it on cross-origin responses. API fetches omit credentials.
+1. The deployed Pages bundle points to Railway and `GET /api/ping` returned HTTP 200 on 2026-11-23. The database provider and private R2 integration require separate verification.
+2. A Pages-origin preflight for `GET /api/me` with `Authorization` and `X-Firebase-AppCheck` returned HTTP 200 with the expected allowed origin and headers and exposed `Retry-After`. Verify other authenticated CORS paths and headers, including `Content-Type` and `X-Reals-Admin-Grant` where applicable. API fetches omit credentials.
 3. Verify the existing development Firebase Auth and reCAPTCHA Enterprise registrations cover the unchanged Pages domain and exact development Web App ID. Confirm the backend trusts the matching Firebase project and Web App ID where required. See [Firebase Web App Check setup](https://firebase.google.com/docs/app-check/web/recaptcha-enterprise-provider).
 4. Verify a deployed browser can sign in, obtain and refresh real App Check tokens, and call a protected Railway endpoint. Confirm preflight, JSON errors and `Retry-After` where used.

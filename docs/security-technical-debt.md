@@ -15,30 +15,37 @@ incomplete. Completed source controls do not establish deployed protection.
 ## 1. Content Security Policy (CSP)
 
 - Priority: P1.
-- Status: NOT STARTED.
-- Current evidence: No CSP implementation was identified in the reviewed Vite configuration or index.html; deployed headers were not inspected.
+- The development Pages document, assets and SPA fallback served neither CSP header in the [deployed baseline](deployment.md#http-security-headers). Production remains unverified.
 - Risk: Potential script/resource injection impact if an unsafe sink exists; no exploitable XSS is confirmed.
-- Recommended mitigation: Inventory required Firebase, API and media origins; stage report-only then enforce a reviewed policy without unsafe broad allowlists.
-- Deployment dependency: Deployment host/CDN header support and final service origins.
-- Acceptance criteria: Enforced CSP response verified in deployment; login, popup, media and navigation pass; violations reviewed.
+- The first increment leaves both CSP headers unset. The inventory below covers the known development origins. Exact signed photo/audio origins and redirect destinations, production origins, and the full authenticated Firebase/reCAPTCHA resource trace are pending. An origin policy based on guesses would make report-only results difficult to interpret.
+- With an approved test account, confirm hostnames and redirect destinations without retaining signed paths, queries, credentials or HARs. Test a narrow report-only policy in a clean Chromium profile, inspect directive names and sanitized origins locally, and validate the authenticated workflows before enforcing. External reporting is deferred because reports can disclose signed media URLs.
+
+### Resource inventory for a future policy
+
+| Flow | CSP surface | Evidence and gaps |
+| --- | --- | --- |
+| Pages application shell | `script-src`, `style-src`, `img-src`, `manifest-src` | `'self'` for the built JS, CSS, local images and manifest. Static URLs and anonymous startup were observed on Pages. Some components use dynamic DOM styles. Check the actual style sinks in Chromium before choosing a style policy. |
+| Firebase email/password and session refresh | `connect-src` | The installed Firebase SDK targets `https://identitytoolkit.googleapis.com` and `https://securetoken.googleapis.com`. The built app includes these hosts. Real sign-in and token refresh were outside the signed-out browser check. |
+| Google OAuth | `script-src`, `frame-src`, popup navigation | The SDK config uses `https://apis.google.com/js/api.js` and creates an auth iframe at `https://reals-backend-firebase.firebaseapp.com/__/auth/iframe` using the deployed Auth domain. It opens the same domain's `/__/auth/handler` in a popup. Deployed Chromium reached `https://accounts.google.com` as a popup destination. Account selection, return to the opener, and the complete SDK iframe/script chain remain to be verified. |
+| Firebase App Check | `script-src`, `frame-src`, `connect-src` | The installed SDK loads `https://www.google.com/recaptcha/enterprise.js` and exchanges attestations at `https://content-firebaseappcheck.googleapis.com`. Google's documented CSP path allowances also cover script resources from `https://www.gstatic.com/recaptcha/`, frames from `https://www.google.com/recaptcha/` and `https://recaptcha.google.com/recaptcha/`, and connections to `https://www.google.com/recaptcha/`. Actual authenticated request, refresh and auxiliary resource traces are pending. [Google's reCAPTCHA CSP guidance](https://docs.cloud.google.com/recaptcha/docs/faq) |
+| Railway API | `connect-src` | `https://reals-backend-dev.up.railway.app` is compiled into the deployed client. Public ping and an unauthenticated Pages-origin CORS preflight succeeded. Authenticated responses and the production API host remain pending. |
+| Signed photos and remote audio | `img-src`, `media-src` | Profile, discovery and admin images load backend-issued HTTPS URLs in image elements. Chat and admin audio use native audio elements and backend-issued HTTPS URLs. Uploads go through the API. The [backend R2 runbook](../../reals-backend/docs/storage-r2-configuration.md) describes an account-specific origin. The exact photo/audio hosts and any redirects need authenticated confirmation. |
+| Local image and audio previews | `img-src`, `media-src` | The crop dialog decodes a selected file with `createImageBitmap` and renders to canvas. It needs no external image origin. Tab indicators generate a `data:` PNG favicon, and the audio recorder uses a local `blob:` URL for playback. Check these uses in the target browser before allowing either scheme where needed. Microphone and geolocation are separate browser permissions. |
+| Calendar and legal links | Top-level navigation | `https://calendar.google.com` and backend-supplied HTTPS legal document URLs open in new tabs. The Cafecito link exists only on the local Vite dev server. These links are destinations, separate from subresource source lists. |
 
 ## 2. Production HTTP security headers
 
 - Priority: P1.
-- Status: NOT STARTED.
-- Current evidence: The repository contains a local Vite server; production response-header policy was not verified.
-- Risk: Potential framing, MIME sniffing or referrer leakage; missing production headers are not established.
-- Recommended mitigation: Review framing restrictions, nosniff, Referrer-Policy, Permissions-Policy and OAuth-compatible opener policy.
-- Deployment dependency: Production hosting/ingress configuration.
-- Acceptance criteria: Automated deployed-response assertions and real Google popup/media tests pass with documented exceptions.
+- The first increment is implemented in `public/_headers`. It adds explicit framing and permissions controls and pins the existing Pages MIME and referrer defaults. The scope is Pages static responses. See [deployed baseline and verification](deployment.md#http-security-headers).
+- A focused test checks the exact header and permission list, rejects additional or conflicting rules, and verifies a byte-for-byte copy in a real Vite build. The API transport test uses Railway as a separate origin. A local Chromium check confirmed framing denial and top-level microphone and geolocation eligibility.
+- Post-deployment verification remains pending. Check the document, fallback and assets again after rollout, then complete the authenticated browser checks. Revisit opener and embedder policies only with successful OAuth, reCAPTCHA and media compatibility evidence.
 
 ## 3. HTTPS/HSTS and deployment configuration
 
 - Priority: P0 before production exposure.
-- Status: NOT STARTED.
-- Current evidence: Local development uses HTTP and a Vite /api proxy; the build has no development proxy. Live TLS/production routing was not audited.
+- Live development Pages HTTPS and its HTTP-to-HTTPS redirect were verified. The sampled responses had no HSTS. The deployed client points directly to the HTTPS Railway development API. Local development uses HTTP and a Vite `/api` proxy.
 - Risk: Potential transport interception, mixed content or incorrect routing if deployment is misconfigured.
-- Recommended mitigation: Validate TLS termination, HTTP redirects, same-origin API routing, media HTTPS and certificates; introduce HSTS after affected domains are ready.
+- Verify production TLS, routing, redirects and media HTTPS when the production hosts are known. Review HSTS with the production domain and subdomain strategy before adopting it.
 - Deployment dependency: Hosting, DNS, certificates, backend/API and media origins.
 - Acceptance criteria: HTTPS, routing, redirect and certificate checks pass; HSTS scope/subdomain policy tested; no mixed-content failures.
 
@@ -68,12 +75,9 @@ incomplete. Completed source controls do not establish deployed protection.
 ## 6. Firebase App Check for Web
 
 - Priority: P1.
-- Status: NOT STARTED.
-- Current evidence: Reviewed src/auth/firebase.ts initializes Firebase App/Auth only; no Web App Check setup was found. Backend/Android and live Firebase console were not inspected for this task.
+- The app initializes Firebase App Check on demand via `src/auth/appCheck.ts`. Remote builds require reCAPTCHA Enterprise. Automatic refresh is enabled, and `src/auth/api.ts` attaches `X-Firebase-AppCheck` on applicable requests. SDK debug is local and opt-in. SDK and transport tests cover configuration, token failures and header forwarding.
 - Risk: Potential automated/unofficial client abuse; attestation is separate from identity and authorization.
-- Recommended mitigation: Choose/register Web provider, attach and refresh tokens, handle errors safely, coordinate an incremental enforcement rollout.
-- Deployment dependency: Firebase console provider/domain configuration and backend acceptance of the Web App ID.
-- Acceptance criteria: Valid Web attestation accepted; missing/invalid tokens handled as agreed; refresh/local debug/Android compatibility checked without secrets in Git.
+- Confirm live provider/domain registration, Web App ID acceptance and the backend's enforcement mode. Verify real token acquisition and refresh, protected API acceptance and agreed missing/invalid-token handling with an approved account.
 
 ## 7. Sensitive media URL handling
 
@@ -120,6 +124,7 @@ incomplete. Completed source controls do not establish deployed protection.
 - Priority: P1.
 - Status: PARTIAL.
 - Current evidence: Vitest/RTL authentication/API/race tests and new persistence regressions exist. No real-provider browser E2E suite or DAST stage was found in reviewed Web CI.
+- CodeQL Advanced is active. The default setup API returned `not-configured`, and both Actions and JavaScript/TypeScript jobs passed for the audited `development` commit. The checked-in configuration excludes root `tools/**` from CodeQL analysis, and the Web validation suite still tests those tools. CodeQL is static analysis, separate from dependency scanning and browser validation. [Successful CodeQL run](https://github.com/Gtestino92/reals-web/actions/runs/45115596187)
 - Risk: Potential security regressions that mocked SDK, jsdom and build checks cannot detect.
 - Recommended mitigation: Add isolated browser E2E for auth persistence, popup timing, cross-tab logout, URL handling and private caching; consider scoped DAST with synthetic identities.
 - Deployment dependency: Disposable Firebase/test environment, approved accounts and CI browser setup.
