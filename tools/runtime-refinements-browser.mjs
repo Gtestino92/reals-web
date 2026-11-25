@@ -15,6 +15,8 @@ const server = createServer(async (req, res) => {
   requests.push({ path: req.url, method: req.method, receivedAt: Date.now() });
   await new Promise(r => setTimeout(r, delay));
   let value;
+  if (req.url === '/me/legal-status') value = { requirementsSatisfied: true, documents: [] };
+  if (req.url === '/legal/documents/current') value = { documents: [] };
   if (req.url === '/me') value = { id: 'me', status: 'ACTIVE' };
   if (req.url === '/me/profile') value = { id: 'p', userId: 'me', status: 'ACTIVE', displayName: 'Fixture' };
   if (req.url === '/me/home/status') value = { version: 1, dirty: false, nextRefreshAt: null, serverTime: new Date().toISOString() };
@@ -80,7 +82,8 @@ try {
     })()`);
     await wait(p, "document.querySelector('.search-screen')?.getAttribute('aria-busy')==='false'");
     await p.evaluate('window.checkSearch()');
-    await click(p, 'Cancelar búsqueda');
+    const history = await p.call('Page.getNavigationHistory');
+    await p.call('Page.navigateToHistoryEntry', { entryId: history.entries[history.currentIndex - 1].id });
     await wait(p, "document.querySelector('.search-screen button')?.disabled===true");
     await p.evaluate('window.checkSearch()');
     await new Promise(r => setTimeout(r, 100));

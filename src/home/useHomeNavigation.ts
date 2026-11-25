@@ -26,6 +26,21 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
   const [state, setState] = useState(initial);
   const current = useRef(initial), guard = useRef(canLeave), moving = useRef(false);
   guard.current = canLeave;
+  // The queue belongs to the server. History records only that Search is visible.
+  const searchBack = useRef<(() => void) | null>(null);
+  const setSearchBack = useCallback((back: (() => void) | null) => {
+    searchBack.current = back;
+    const installed: unknown = window.history.state;
+    const release = () => { if (searchBack.current === back) searchBack.current = null; };
+    if (moving.current || !object(installed) || installed.owner !== current.current.owner) return release;
+    if (back && installed.search !== true) {
+      window.history.pushState({ ...current.current, search: true }, '', '/');
+    } else if (!back && installed.search === true) {
+      moving.current = true;
+      window.history.back();
+    }
+    return release;
+  }, []);
   const secondChat = useRef<{ canLeave: () => boolean; leave: () => void } | null>(null);
   const registerSecondChat = useCallback((policy: { canLeave: () => boolean; leave: () => void }) => {
     secondChat.current = policy;
@@ -49,6 +64,16 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const pop = (event: PopStateEvent) => {
       const previous = current.current;
       let incoming = entry(event.state);
+      if (searchBack.current && incoming?.owner === previous.owner && event.state.search !== true) {
+        // Keep repeated Back inside Search until cancellation or reconciliation settles.
+        window.history.pushState({ ...previous, search: true }, '', '/');
+        searchBack.current();
+        return;
+      }
+      if (incoming?.owner === previous.owner && event.state.search === true && !searchBack.current) {
+        // Forward into a finished search never repeats admission.
+        window.history.replaceState(incoming, '', path(incoming));
+      }
       if(retiredActivity.current&&incoming?.owner===previous.owner&&incoming.trail.at(-1)==='activity'){
         incoming={owner:previous.owner,trail:['home']};window.history.replaceState(incoming,'','/');
       }
@@ -169,6 +194,6 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const value:Entry={owner:initial.owner,trail:target==='home'?['home']:['home','activity']};
     window.history.replaceState(value,'','/');current.current=value;setState(value);
   };
-  return { registerVisualReview, finishVisualReview, registerSecondChat, openSecondChat, restoreSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
+  return { setSearchBack, registerVisualReview, finishVisualReview, registerSecondChat, openSecondChat, restoreSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
 }
 export type HomeNavigation = ReturnType<typeof useHomeNavigation>;
