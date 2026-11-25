@@ -67,6 +67,8 @@ it('supports keyboard pickup, grid arrows, empty positions, confirmation and esc
   const { onMove } = mount(); const source = handle(); source.focus();
   fireEvent.keyDown(source,{ key:' ' }); expect(source).toHaveAttribute('aria-pressed','true');
   fireEvent.keyDown(source,{ key:'ArrowDown' }); fireEvent.keyDown(source,{ key:'ArrowRight' });
+  expect(screen.queryByText(/foto .*seleccionada/i)).toBeNull();
+  expect(screen.getByRole('status')).toHaveTextContent(/5/);
   expect(screen.getByRole('article',{ name:'Foto 5' })).toHaveAttribute('data-reorder-target','true'); expect(source).toHaveFocus();
   fireEvent.keyDown(source,{ key:'Enter' }); expect(onMove).toHaveBeenCalledExactlyOnceWith('first',5);
   fireEvent.keyDown(source,{ key:'Enter' }); fireEvent.keyDown(source,{ key:'End' }); fireEvent.keyDown(source,{ key:'Escape' });
