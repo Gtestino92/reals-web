@@ -8,10 +8,10 @@ async function ready() {vi.useFakeTimers();vi.setSystemTime(time);const f=setup(
 it('preserves draft during polling and resets only on round change',async()=>{
  const {model,state}=await ready();model.setDraft([slot]);await model.refresh();expect(model.getSnapshot().draft).toEqual([slot]);state.n={...state.n,roundNumber:2};await model.refresh();expect(model.getSnapshot().draft).toEqual([]);
 });
-it('overlaps independent reads while preserving both final authority checks',async()=>{
- const {model,request,state}=await ready();const base=request.getMockImplementation()!;let proposals!:(value:unknown)=>void,availability!:(value:unknown)=>void;
- request.mockClear();request.mockImplementation((path,...args)=>path.endsWith('/proposals')?new Promise(r=>{proposals=r;}):path.endsWith('/scheduling-availability')?new Promise(r=>{availability=r;}):base(path,...args));
- const refresh=model.poll();await vi.waitFor(()=>expect(availability).toBeTypeOf('function'));expect(proposals).toBeTypeOf('function');expect(request.mock.calls.filter(c=>c[0].endsWith('/negotiation'))).toHaveLength(1);proposals(state.p);await Promise.resolve();expect(request.mock.calls.filter(c=>c[0].endsWith('/negotiation'))).toHaveLength(1);availability(state.a);await refresh;expect(request.mock.calls.filter(c=>c[0].endsWith('/negotiation'))).toHaveLength(2);expect(request.mock.calls.filter(c=>c[0]==='/connections/c')).toHaveLength(2);expect(model.getSnapshot().verified).toBe(true);
+it('uses one snapshot GET for an ordinary negotiation poll',async()=>{
+ const {model,request}=await ready();request.mockClear();await model.poll();
+ expect(request.mock.calls.map(([path])=>path)).toEqual(['/connections/c/scheduling-snapshot']);
+ expect(model.getSnapshot().verified).toBe(true);
 });
 it('abandons only background reads on hide and preserves snapshot/draft across a fresh resume',async()=>{
  const {model,request}=await ready();model.setDraft([slot]);const base=request.getMockImplementation()!;let reject!:(error:unknown)=>void;
@@ -40,8 +40,24 @@ it('rejects changed round without posting or replaying',async()=>{
 it('retains newly conflicting draft and disables writes on availability failure',async()=>{
  const {model,request}=await ready();model.setDraft([slot]);request.mockRejectedValue(new ApiError('network'));await model.refresh();expect(model.getSnapshot().draft).toEqual([slot]);expect(model.getSnapshot().verified).toBe(false);await model.act('submit');expect(request.mock.calls.filter(c=>c[2]==='POST')).toHaveLength(0);
 });
-it('discards late reads after session replacement and dispose',async()=>{
- const {model,controller,request}=await ready();let resolve!:(v:unknown)=>void;request.mockReturnValueOnce(new Promise(r=>{resolve=r;}));const pending=model.refresh();controller.snapshot={...controller.snapshot,authContextVersion:2};model.dispose();resolve({});await pending;expect(model.getSnapshot().verified).toBe(false);
+it.each(['account replacement','logout','owner disposal'])('ignores a complete deferred poll after %s',async reason=>{
+ const {model,controller,request,snapshot}=await ready();
+ const pending=deferred<unknown>();
+ request.mockReturnValueOnce(pending.promise);
+ const poll=model.poll(),old=snapshot(),before=model.getSnapshot();
+ if(reason==='account replacement')controller.snapshot={...controller.snapshot,account:{id:'replacement',status:'ACTIVE'}};
+ else if(reason==='logout')controller.snapshot={...controller.snapshot,phase:'login',account:null,profile:null};
+ else model.dispose(); // Both navigation and the inactive TabGate unmount the scheduling owner.
+ pending.resolve({...old,connection:{...old.connection,state:'CLOSED'}});
+ await poll;
+ expect(model.getSnapshot().connection).toBe(before.connection);
+ expect(model.getSnapshot().terminal).toBe(false);
+});
+it.each([new ApiError('invalid',404),new ApiError('backend',404,'RESOURCE_NOT_FOUND',{message:'Resource not found'}),new ApiError('backend',503)])('recovers from an unavailable snapshot endpoint',async error=>{
+ const {model,request}=await ready();request.mockClear();request.mockRejectedValueOnce(error);
+ await model.poll();expect(model.getSnapshot()).toMatchObject({verified:false,terminal:false,availability:null});
+ expect(request.mock.calls.map(([path])=>path)).toEqual(['/connections/c/scheduling-snapshot']);
+ await model.refresh();expect(model.getSnapshot().verified).toBe(true);
 });
 it('handles activation pending without failed negotiation',async()=>{
  const {model,state}=await ready();state.c={...state.c,state:'SCHEDULING_PENDING'};await model.refresh();expect(model.getSnapshot().negotiation).toBeNull();expect(model.getSnapshot().connection?.state).toBe('SCHEDULING_PENDING');
@@ -52,15 +68,14 @@ it('does not release a replacement refresh gate when an obsolete read fails',asy
  request.mockReturnValueOnce(new Promise((_,r)=>{reject=r;}));const old=model.refresh();model.dispose();model.start();
  request.mockReturnValueOnce(new Promise(r=>{resolve=r;}));const fresh=model.refresh();reject(new ApiError('network'));await old;
  const count=request.mock.calls.length;await model.refresh();expect(request.mock.calls).toHaveLength(count);expect(model.getSnapshot().busy).toBe(true);
- resolve(await read('/connections/c',new AbortController().signal));await fresh;expect(model.getSnapshot().verified).toBe(true);
+ resolve(await read('/connections/c/scheduling-snapshot',new AbortController().signal));await fresh;expect(model.getSnapshot().verified).toBe(true);
 });
 it('locks navigation synchronously before the first await',async()=>{
  vi.useFakeTimers();vi.setSystemTime(time);const f=setup(),lock=vi.fn(),model=new SchedulingSession(f.controller,'c','m',vi.fn(),lock);await model.refresh();model.setDraft([slot]);
  const action=model.act('submit');expect(lock).toHaveBeenCalledWith(true);await action;expect(lock).toHaveBeenLastCalledWith(false);
 });
 it('rejects contradictory snapshots instead of installing mixed rounds',async()=>{
- const {model,request,state}=await ready();const read=request.getMockImplementation()!;let negotiations=0;
- request.mockImplementation(async(path,...args)=>{if(path.endsWith('/negotiation')&&++negotiations===2)return {...state.n,roundNumber:2};return read(path,...args);});
+ const {model,state}=await ready();state.p=[proposal({roundNumber:2})];
  await model.refresh();expect(model.getSnapshot().verified).toBe(false);expect(model.getSnapshot().negotiation?.roundNumber).toBe(1);
 });
 it('revalidates newly conflicting drafts and does not post',async()=>{
@@ -95,11 +110,11 @@ it('respects authoritative closure without inventing negotiation failure',async(
 
 
 function deferred<T>() {let resolve!:(v:T)=>void, reject!:(error:unknown)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
-it('keeps a slow poll editable and retains six guarded GETs per complete snapshot',async()=>{
+it('keeps a slow poll editable and retains one guarded GET per complete snapshot',async()=>{
  const {model,request,state}=await ready();request.mockClear();const slow=deferred<unknown>();request.mockReturnValueOnce(slow.promise);
  const poll=model.poll();expect(model.getSnapshot()).toMatchObject({activity:'polling',busy:false,verified:true,pending:false});
- model.setDraft([slot]);slow.resolve({...state.c});await poll;
- expect(model.getSnapshot().draft).toEqual([slot]);expect(request).toHaveBeenCalledTimes(6);expect(model.getSnapshot().activity).toBe('idle');
+ model.setDraft([slot]);slow.resolve({connection:state.c,negotiation:state.n,proposals:state.p,availability:state.a,serverTime:state.a.serverTime});await poll;
+ expect(model.getSnapshot().draft).toEqual([slot]);expect(request).toHaveBeenCalledTimes(1);expect(model.getSnapshot().activity).toBe('idle');
 });
 it.each(['submit','accept','reject','block'] as const)('prioritizes %s over an ignored-abort poll and retains the mutation navigation lock',async operation=>{
  vi.useFakeTimers();vi.setSystemTime(time);const f=setup(),lock=vi.fn(),model=new SchedulingSession(f.controller,'c','m',vi.fn(),lock);await model.refresh();
@@ -109,17 +124,17 @@ it.each(['submit','accept','reject','block'] as const)('prioritizes %s over an i
  f.request.mockImplementation(async(path,abort,method,body)=>method==='POST'?write.promise:read(path,abort,method,body));
  const action=model.act(operation,'p1');expect(signal?.aborted).toBe(true);expect(lock).toHaveBeenLastCalledWith(true);
  await vi.waitFor(()=>expect(f.request.mock.calls.some(c=>c[2]==='POST')).toBe(true));
- stale.resolve({...f.state.c,state:'CLOSED'});await poll;
+ stale.resolve({...f.snapshot(),connection:{...f.state.c,state:'CLOSED'}});await poll;
  expect(model.getSnapshot()).toMatchObject({activity:'mutating',pending:true,busy:true});expect(lock).toHaveBeenLastCalledWith(true);
  await model.act(operation,'p1');await model.poll();expect(f.request.mock.calls.filter(c=>c[2]==='POST')).toHaveLength(1);
  write.resolve(operation==='submit'?[]:operation==='block'?{id:'block'}:f.state.n);await action;expect(lock).toHaveBeenLastCalledWith(false);
 });
 it('discards a stale poll after a completed mutation and does not continue its GET chain',async()=>{
- const {model,request,state}=await ready();model.setDraft([slot]);const read=request.getMockImplementation()!,stale=deferred<unknown>();
+ const {model,request,state,snapshot}=await ready();model.setDraft([slot]);const before=snapshot(),read=request.getMockImplementation()!,stale=deferred<unknown>();
  request.mockReturnValueOnce(stale.promise);const poll=model.poll();
- request.mockImplementation(async(path,signal,method,body)=>{if(method==='POST'){state.p=[proposal({userId:'me'})];return state.p;}return read(path,signal,method,body);});
- await model.act('submit');const count=request.mock.calls.length;stale.resolve({...state.c});await poll;
- expect(request.mock.calls).toHaveLength(count);expect(model.getSnapshot().proposals).toEqual(state.p);expect(model.getSnapshot().verified).toBe(true);
+ request.mockImplementation(async(path,signal,method,body)=>{if(method==='POST'){state.p=[proposal({userId:'me'})];state.n={...state.n,status:'CONFIRMED',confirmedDateTime:slot};state.c={...state.c,state:'SECOND_CHAT_SCHEDULED'};return state.p;}return read(path,signal,method,body);});
+ await model.act('submit');const count=request.mock.calls.length;stale.resolve(before);await poll;
+ expect(request.mock.calls).toHaveLength(count);expect(model.getSnapshot().negotiation?.status).toBe('CONFIRMED');expect(model.getSnapshot().proposals).toEqual(state.p);expect(model.getSnapshot().verified).toBe(true);
 });
 it('refuses to replay against a round changed while a poll yields',async()=>{
  const {model,request,state}=await ready();model.setDraft([slot]);const stale=deferred<unknown>();request.mockReturnValueOnce(stale.promise);const poll=model.poll();
@@ -135,15 +150,14 @@ it('installs a background server-clock expiry and enforces it before POST',async
  expect(model.now()).toBeGreaterThanOrEqual(Date.parse(state.n.schedulingExpiresAt));await model.act('submit');expect(request.mock.calls.filter(c=>c[2]==='POST')).toHaveLength(0);
 });
 it('a torn background snapshot invalidates write eligibility without installing mixed rounds',async()=>{
- const {model,request,state}=await ready();const read=request.getMockImplementation()!;let count=0;
- request.mockImplementation(async(path,...args)=>path.endsWith('/negotiation')&&++count===2?{...state.n,roundNumber:2}:read(path,...args));
+ const {model,request,state}=await ready();request.mockResolvedValueOnce({connection:state.c,negotiation:state.n,proposals:state.p,availability:state.a,serverTime:slot});
  await model.poll();expect(model.getSnapshot()).toMatchObject({verified:false,availability:null});expect(model.getSnapshot().negotiation?.roundNumber).toBe(1);
 });
 it('does not let a poll bypass unresolved uncertain-write reconciliation',async()=>{
  const {model,request}=await ready();model.setDraft([slot]);const read=request.getMockImplementation()!;let failed=false;
  request.mockImplementation(async(path,...args)=>{if(args[1]==='POST'){failed=true;throw new ApiError('network');}if(failed)throw new ApiError('network');return read(path,...args);});await model.act('submit');
  failed=false;const slow=deferred<unknown>();request.mockReturnValueOnce(slow.promise);const recovery=model.poll();expect(model.getSnapshot()).toMatchObject({activity:'reconciling',busy:true,uncertain:true});
- const count=request.mock.calls.length;await model.act('submit');expect(request.mock.calls).toHaveLength(count);slow.resolve(await read('/connections/c',new AbortController().signal));await recovery;
+ const count=request.mock.calls.length;await model.act('submit');expect(request.mock.calls).toHaveLength(count);slow.resolve(await read('/connections/c/scheduling-snapshot',new AbortController().signal));await recovery;
  expect(model.getSnapshot().uncertain).toBe(false);expect(request.mock.calls.filter(c=>c[2]==='POST')).toHaveLength(1);
 });
 
@@ -292,4 +306,31 @@ it.each(['mutation','recovery'] as const)('keeps an owned pair block terminal du
  });
  await model.act('submit');expect(model.getSnapshot()).toMatchObject({terminal:true,verified:false,pending:false,busy:false});
  const count=request.mock.calls.length;await model.refresh();await model.poll();await model.act('submit');expect(request).toHaveBeenCalledTimes(count);
+});
+
+it('retires access for a missing connection reported by the snapshot endpoint',async()=>{
+ const {model,request}=await ready();
+ request.mockRejectedValueOnce(new ApiError('backend',404,'RESOURCE_NOT_FOUND',{message:'Connection not found: c'}));
+ await model.poll();expect(model.getSnapshot()).toMatchObject({verified:false,terminal:true,availability:null});
+});
+it.each([
+ ['connection ID',{connection:{id:'other'}}],
+ ['match ID',{connection:{matchId:'other'}}],
+ ['participant identity',{connection:{userAId:'other'}}],
+ ['negotiation association',{negotiation:{connectionId:'other'}}],
+ ['proposal association',{proposals:[proposal({connectionId:'other'})]}],
+ ['proposal author',{proposals:[proposal({userId:'other'})]}],
+ ['deadline',{negotiation:{schedulingExpiresAt:slot}}],
+ ['lifecycle',{connection:{state:'SECOND_CHAT_SCHEDULED'}}],
+ ['pending envelope',{connection:{state:'SCHEDULING_PENDING'}}],
+ ['clock',{serverTime:'invalid'}],
+] as const)('rejects a snapshot with inconsistent %s before installation',async(_,patch)=>{
+ const {model,request,snapshot}=await ready();const before=model.getSnapshot();
+ const raw=snapshot();
+ request.mockResolvedValueOnce({...raw,...patch,connection:{...raw.connection,...('connection' in patch?patch.connection:{})},
+  negotiation:{...raw.negotiation,...('negotiation' in patch?patch.negotiation:{})}});
+ await model.poll();
+ expect(model.getSnapshot().verified).toBe(false);
+ expect(model.getSnapshot().connection).toBe(before.connection);
+ expect(model.getSnapshot().negotiation).toBe(before.negotiation);
 });

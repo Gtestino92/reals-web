@@ -238,7 +238,7 @@ it('places biography, answers and affinities before every browse photo',async()=
  const f=setup(),read=f.request.getMockImplementation()!;f.request.mockImplementation(async(path,...args)=>path.endsWith('/visual-profile')?visualProfile():read(path,...args));const v=view(f);await screen.findByRole('heading',{name:'Proponé tus horarios'});v.rerender(<Scheduling {...v.props} browse/>);await screen.findByRole('heading',{name:'María, 29'});const image=screen.getAllByRole('img')[0]!;for(const title of ['Bio','Preguntas del perfil','Afinidades compartidas'])expect(screen.getByRole('heading',{name:title}).compareDocumentPosition(image)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(screen.queryByRole('heading',{name:'Mensaje personal'})).toBeNull();
 });
 it('reserves initial scheduling structure and keeps all placeholder content noninteractive',async()=>{
- const f=setup();let release!:(value:unknown)=>void;f.request.mockReturnValueOnce(new Promise(r=>{release=r;}));view(f);expect(screen.getByRole('status')).toHaveTextContent('Cargando coordinación…');expect(document.querySelector('.scheduling-placeholder button')).toBeNull();expect(screen.queryByRole('combobox')).toBeNull();await act(async()=>release(f.state.c));await screen.findByRole('heading',{name:'Proponé tus horarios'});expect(document.querySelector('.scheduling-placeholder')).toBeNull();
+ const f=setup();let release!:(value:unknown)=>void;f.request.mockReturnValueOnce(new Promise(r=>{release=r;}));view(f);expect(screen.getByRole('status')).toHaveTextContent('Cargando coordinación…');expect(document.querySelector('.scheduling-placeholder button')).toBeNull();expect(screen.queryByRole('combobox')).toBeNull();await act(async()=>release(f.snapshot()));await screen.findByRole('heading',{name:'Proponé tus horarios'});expect(document.querySelector('.scheduling-placeholder')).toBeNull();
 });
 it('requires permanent block confirmation and serializes double click',async()=>{
  const f=view();await screen.findByRole('heading',{name:'Proponé tus horarios'});fireEvent.click(screen.getByRole('button',{name:'Más acciones'}));fireEvent.click(screen.getByRole('menuitem'));expect(screen.getByRole('dialog')).toBeVisible();expect(f.request.mock.calls.some(c=>c[2]==='POST')).toBe(false);
@@ -256,7 +256,7 @@ it('keeps picker, submit, profile and block responsive during a slow background 
  f.request.mockReturnValueOnce(new Promise(r=>{resolve=r;}));act(()=>window.dispatchEvent(new Event('online')));
  fireEvent.click(screen.getByRole('button',{name:'Agregar opción'}));expect(screen.getByRole('button',{name:'Enviar horarios'})).toBeEnabled();expect(screen.getByRole('button',{name:'Ver perfil'})).toBeEnabled();
  expect(screen.queryByText(/Actualizando/)).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Más acciones'}));fireEvent.click(screen.getByRole('menuitem'));expect(screen.getByRole('button',{name:'Bloquear definitivamente'})).toBeEnabled();
- await act(async()=>resolve(await read('/connections/c',new AbortController().signal)));
+ await act(async()=>resolve(await read('/connections/c/scheduling-snapshot',new AbortController().signal)));
 });
 
 it.each([['Buenos Aires', 'AR', 'Buenos Aires, Argentina'], [null, 'XX', null]])('shows guarded partner location %s through the shared profile', async (city, countryCode, label) => {

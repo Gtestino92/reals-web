@@ -15,7 +15,14 @@ try{
  for(let i=0;i<60;i++){try{port=(await readFile(join(dir,'DevToolsActivePort'),'utf8')).split('\n')[0].trim();break;}catch{}await delay(100);}
  if(process.argv.includes('--scheduling-audit')||process.argv.includes('--layout-audit')){
   const p=await page(),blank=await page(),initialMs=await openScheduling(p);await click(p,'Agregar opción');await p.evaluate('window.picker=document.querySelector("select");scrollTo(0,400);window.previousScroll=scrollY');
-  for(let i=0;i<3;i++){await blank.call('Page.bringToFront');await delay(100);await p.call('Page.bringToFront');await delay(800);}
+  for(let i=0;i<3;i++){
+   await blank.call('Page.bringToFront');await delay(100);
+   const previous=await p.evaluate('visualProbe.requests.length');
+   await p.call('Page.bringToFront');await delay(800);
+   const reads=await p.evaluate(`visualProbe.requests.slice(${previous}).filter(path=>path.startsWith('/connections/'))`);
+   if(JSON.stringify(reads)!==JSON.stringify(['/connections/c/scheduling-snapshot']))throw Error('Unexpected scheduling resume requests: '+JSON.stringify(reads));
+  }
+  console.log('Three tab returns each issued one snapshot fetch');
   await p.evaluate('visualFixture.notify()');await delay(800);console.log(JSON.stringify(await p.evaluate(`({initialMs:${initialMs},sessions:visualProbe.schedulingSessions,disposed:visualProbe.schedulingDisposals,pickerStable:picker===document.querySelector('select'),draftPresent:[...document.querySelectorAll('button')].some(b=>b.textContent==='Quitar opción 1'),scroll:scrollY,previousScroll,loadingText:document.body.innerText.includes('Cargando coordinación')})`)));if(process.argv.includes('--layout-audit')){await click(p,'Ver perfil');await wait(p,"!!document.querySelector('.visual-profile img')");await p.evaluate("document.documentElement.style.fontSize='200%'");console.log(JSON.stringify(await p.evaluate("({innerWidth,scrollWidth:document.documentElement.scrollWidth,nodes:[...document.querySelectorAll('body *')].filter(e=>!e.closest('[hidden]')&&e.getBoundingClientRect().right>390).map(e=>({tag:e.tagName,class:e.className,width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right,min:getComputedStyle(e).minWidth})).slice(0,30)})")));}await p.close();await blank.close();
  }else{
  const a=await page(),blank=await page();await open(a);await a.evaluate("window.first=document.querySelector('.visual-profile img');window.profile=document.querySelector('.visual-profile');window.scrollTo(0,500);window.beforeScroll=scrollY;visualFixture.delay(200);visualProbe.blankFrames=0");

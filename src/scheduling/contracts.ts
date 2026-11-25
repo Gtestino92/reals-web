@@ -41,3 +41,25 @@ export function parseAvailability(v: unknown): Availability {
     return { startsAt, endsAt };
   }) };
 }
+
+export function parseSchedulingSnapshot(raw: unknown, id: string, matchId: string, me: string) {
+  if (!object(raw)) return invalid();
+  const connection = parseConnection(raw.connection, id, matchId, me);
+  const serverTime = timestamp(raw.serverTime);
+  const proposals = parseProposals(raw.proposals, id, [connection.userAId, connection.userBId]);
+  if (connection.state === 'SCHEDULING_PENDING') {
+    if (raw.negotiation !== null || raw.availability !== null || proposals.length) return invalid();
+    return { connection, negotiation: null, proposals, availability: null, serverTime };
+  }
+  const negotiation = parseNegotiation(raw.negotiation, id);
+  const availability = parseAvailability(raw.availability);
+  const allowedStates: Record<string, string[]> = {
+    PENDING: ['SCHEDULING_PHASE', 'CLOSED'],
+    CONFIRMED: ['SECOND_CHAT_SCHEDULED', 'SECOND_CHAT_AVAILABLE', 'SECOND_CHAT', 'CLOSED'],
+    FAILED: ['CLOSED'],
+  };
+  if (!Object.hasOwn(allowedStates, negotiation.status) || !allowedStates[negotiation.status]?.includes(connection.state) ||
+      negotiation.schedulingExpiresAt !== connection.schedulingExpiresAt || availability.serverTime !== serverTime ||
+      proposals.some(proposal => proposal.roundNumber > negotiation.roundNumber)) return invalid();
+  return { connection, negotiation, proposals, availability, serverTime };
+}

@@ -61,7 +61,7 @@ export class ApiClient {
       const multipart = body instanceof FormData;
       if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
       let response: Response;
-      try { response = await this.fetcher(`${this.environment.apiOrigin}/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...(history || method === 'GET' && /^\/matches\/[^/]+(?:\/visual-profile|\/personal-messages\/partner)?$/.test(path) ? { cache: 'no-store' as const } : {}), ...(administrative ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
+      try { response = await this.fetcher(`${this.environment.apiOrigin}/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...(history || method === 'GET' && (/^\/connections\/[^/]+\/scheduling-snapshot$/.test(path) || /^\/matches\/[^/]+(?:\/visual-profile|\/personal-messages\/partner)?$/.test(path)) ? { cache: 'no-store' as const } : {}), ...(administrative ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
       catch { signal.throwIfAborted(); throw new ApiError('network'); }
       signal.throwIfAborted();
       if (!response.ok) {
