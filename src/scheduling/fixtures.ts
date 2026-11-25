@@ -15,12 +15,15 @@ export function setup() {
  const controller=new SessionController({observe:()=>()=>{},signIn:vi.fn(),signUp:vi.fn(),google:vi.fn(),verify:vi.fn(),signOut:vi.fn()},new ApiClient(),false);
  controller.snapshot={...controller.snapshot,phase:'ready',account:{id:'me',status:'ACTIVE'},profile:{id:'profile',userId:'me',status:'ACTIVE'}};
  const state={home:emptyHome(),n:negotiation(),p:[] as ReturnType<typeof proposal>[],a:availability(),c:{id:'c',matchId:'m',userAId:'me',userBId:'them',state:'SCHEDULING_PHASE',schedulingExpiresAt:'2026-11-16T12:00:00Z',createdAt:time,updatedAt:time}};
+ const snapshot=()=>{
+  const pending=state.c.state==='SCHEDULING_PENDING';
+  return {connection:state.c,negotiation:pending?null:state.n,proposals:pending?[]:state.p,availability:pending?null:state.a,serverTime:state.a.serverTime};
+ };
  const request=vi.spyOn(controller,'request').mockImplementation(async path=>{
   if(path==='/me/home')return state.home;
-  if(path.endsWith('/negotiation'))return state.n;
-  if(path.endsWith('/proposals'))return state.p;
-  if(path.endsWith('/scheduling-availability'))return state.a;
-  return state.c;
+  if(path.endsWith('/scheduling-snapshot'))return snapshot();
+  if(path==='/connections/c')return state.c;
+  throw new Error('Unexpected scheduling fixture request');
  });
- return {controller,state,request};
+ return {controller,state,request,snapshot};
 }

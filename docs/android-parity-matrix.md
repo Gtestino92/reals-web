@@ -2188,3 +2188,14 @@ without changing navigation, layout, timers or ordinary image renewal. Focused
 regressions pass; complete Android flow/visual parity and hosted browser access
 validation are not established by this security increment. See
 [security evidence and remaining work](security-technical-debt.md#visual-block-denial-hardening-2026-11-25).
+
+## Consolidated scheduling snapshot
+
+Android references are `SchedulingCoordinator.refresh`, `SchedulingScreen`, `SchedulingLifecycle` and `SchedulingRoundState`. Web retains its seven-second visible-tab polling and operation ownership in `SchedulingSession`. The full read now uses the backend's read-only REPEATABLE READ snapshot.
+
+| Path | Invariant and validation | Parity |
+| --- | --- | --- |
+| Initial read, poll, resume | Validate connection, negotiation, proposals, availability and server clock together before installation. Synthetic Chromium observed one scheduling GET per ordinary refresh at 390px and 1440px. The tab-return audit retained picker identity, draft and scroll. | COMPLETE within synthetic coverage |
+| Submit, accept, reject, block | Preflight preempts the background read. Generation, identity and abort checks protect the result. Reconcile after a write, including an uncertain outcome, without replay. Session and component tests cover obsolete reads, retirement and gallery withdrawal. | COMPLETE within focused tests |
+| Confirmed Calendar and activity | An unchanged confirmed connection costs one connection GET. Full reconciliation uses the snapshot and the authoritative Home read when required. | COMPLETE within focused tests |
+| Deployment and performance | Deploy backend first. The endpoint has no legacy fallback. The backend PostgreSQL integration fixture previously measured 22 SQL statements across six authenticated requests and six statements for one consolidated request. Visible-tab polling, mutation reconciliation and Home reads still incur work. Hosted deployment, latency and database load await verification. | PARTIAL operational evidence |

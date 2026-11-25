@@ -32,10 +32,19 @@ const api=new ApiClient(async(path,options)=>{
  if(p.startsWith('/connections/c')){
   if(delay)await new Promise<void>(r=>setTimeout(r,delay));
   if(profileMode==='network')throw new TypeError('Synthetic offline');
-  if(p.endsWith('/negotiation'))return response({id:'n',connectionId:'c',roundNumber:1,status:'PENDING',confirmedDateTime:null,schedulingExpiresAt:schedulingEnd,createdAt:stamp,updatedAt:stamp});
-  if(p.endsWith('/proposals'))return response(received?[1,2,3].map((n)=>({id:`p${n}`,connectionId:'c',userId:'them',roundNumber:1,preferenceOrder:n,proposedDateTime:new Date(Date.now()+(n+1)*3600000).toISOString(),status:'PENDING',createdAt:stamp})):[]);
-  if(p.endsWith('/scheduling-availability'))return response({conflictWindowMinutes:60,unavailableWindows:[],serverTime:new Date().toISOString()});
-  return response({id:'c',matchId:'m',userAId:'me',userBId:'them',state:'SCHEDULING_PHASE',schedulingExpiresAt:schedulingEnd,createdAt:stamp,updatedAt:stamp});
+  const connection={id:'c',matchId:'m',userAId:'me',userBId:'them',state:'SCHEDULING_PHASE',schedulingExpiresAt:schedulingEnd,createdAt:stamp,updatedAt:stamp};
+  if(p==='/connections/c')return response(connection);
+  const proposals=received?[1,2,3].map(order=>({
+   id:`p${order}`,connectionId:'c',userId:'them',roundNumber:1,preferenceOrder:order,
+   proposedDateTime:new Date(Date.now()+(order+1)*3600000).toISOString(),status:'PENDING',createdAt:stamp,
+  })):[];
+  if(p.endsWith('/scheduling-snapshot')){
+   const serverTime=new Date().toISOString();
+   const negotiation={id:'n',connectionId:'c',roundNumber:1,status:'PENDING',confirmedDateTime:null,schedulingExpiresAt:schedulingEnd,createdAt:stamp,updatedAt:stamp};
+   return response({connection,negotiation,proposals,availability:{conflictWindowMinutes:60,unavailableWindows:[],serverTime},serverTime});
+  }
+  if(p.endsWith('/proposals')&&options?.method==='POST')return response(proposals);
+  throw new Error('Unexpected connection request');
  }
  if(p==='/me')return response({id:uid==='fixture'?'me':'other',status:'ACTIVE'});
  if(p==='/me/profile')return response({id:'p',userId:uid==='fixture'?'me':'other',status:'ACTIVE',displayName:'Lucía'});

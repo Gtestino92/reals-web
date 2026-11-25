@@ -2,7 +2,7 @@ import { ApiError, object } from '../auth/api';
 import type { SessionController } from '../auth/session';
 import { parseHome, type Activity as HomeActivity, type HomeData } from '../home/contracts';
 import { sessionContext } from '../visual/VisualSession';
-import { parseAvailability, parseConnection, parseNegotiation, parseProposals, type Availability, type Connection, type Negotiation, type Proposal } from './contracts';
+import { parseSchedulingSnapshot, parseConnection, parseNegotiation, parseProposals, type Availability, type Connection, type Negotiation, type Proposal } from './contracts';
 import { reviewReason, roundState, validateSlots } from './policy';
 
 type Activity = 'loading' | 'idle' | 'polling' | 'refreshing' | 'mutating' | 'reconciling';
@@ -33,27 +33,23 @@ export class SchedulingSession {
   setDraft=(draft: string[])=>{if(!this.gate||this.state.activity==='polling')this.install({draft});};
   private request=(suffix: string,method='GET',body?: unknown)=>this.controller.request(`/connections/${encodeURIComponent(this.connectionId)}${suffix}`,this.lifetime.signal,method,body);
   private async snapshot(signal: AbortSignal) {
-    // Capture this read's signal; obsolete continuations cannot start more GETs.
-    const read = async (suffix: string) => {
-      signal.throwIfAborted();
-      const result = await this.controller.request(`/connections/${encodeURIComponent(this.connectionId)}${suffix}`,signal);
-      signal.throwIfAborted();
-      return result;
-    };
-    const me=this.controller.getSnapshot().account?.id;
-    if(!me)throw new ApiError('invalid');
-    const c=parseConnection(await read(''),this.connectionId,this.matchId,me);
-    if(c.state==='SCHEDULING_PENDING')return {connection:c,negotiation:null,proposals:[],availability:null,offset:0};
-    if(!['SCHEDULING_PHASE','SECOND_CHAT_SCHEDULED','SECOND_CHAT_AVAILABLE','SECOND_CHAT','CLOSED'].includes(c.state))throw new ApiError('invalid');
-    const n=parseNegotiation(await read('/negotiation'),this.connectionId);
-    // Independent reads share a phase, still bracketed by both authority checks.
-    const [rawProposals,rawAvailability]=await Promise.all([read('/proposals'),read('/scheduling-availability')]);
-    const p=parseProposals(rawProposals,this.connectionId,[c.userAId,c.userBId]),a=parseAvailability(rawAvailability);
-    const [rawAfter,rawEnd]=await Promise.all([read('/negotiation'),read('')]);
-    const after=parseNegotiation(rawAfter,this.connectionId),end=parseConnection(rawEnd,this.connectionId,this.matchId,me);
-    if(JSON.stringify(n)!==JSON.stringify(after)||c.updatedAt!==end.updatedAt||c.state!==end.state||p.some(v=>v.roundNumber>n.roundNumber)||n.schedulingExpiresAt!==c.schedulingExpiresAt)throw new ApiError('invalid');
-    if(c.state!=='CLOSED'&&((n.status==='PENDING'&&c.state!=='SCHEDULING_PHASE')||(n.status==='CONFIRMED'&&!c.state.startsWith('SECOND_CHAT'))||(n.status==='FAILED'&&c.state!=='CLOSED')))throw new ApiError('invalid');
-    return {connection:c,negotiation:n,proposals:p,availability:a,offset:Date.parse(a.serverTime)-Date.now()};
+    const me = this.controller.getSnapshot().account?.id;
+    if (!me) throw new ApiError('invalid');
+    signal.throwIfAborted();
+    let raw: unknown;
+    try {
+      raw = await this.controller.request(`/connections/${encodeURIComponent(this.connectionId)}/scheduling-snapshot`, signal);
+    } catch (error) {
+      // Spring distinguishes an unmapped route from a missing connection only in its detail.
+      if (error instanceof ApiError && error.status === 404 &&
+          (error.kind === 'invalid' || (error.code === 'RESOURCE_NOT_FOUND' && error.detail.message === 'Resource not found'))) {
+        throw new ApiError('invalid');
+      }
+      throw error;
+    }
+    signal.throwIfAborted();
+    const { serverTime, ...snapshot } = parseSchedulingSnapshot(raw, this.connectionId, this.matchId, me);
+    return { ...snapshot, offset: Date.parse(serverTime) - Date.now() };
   }
   private async reconcile(home: 'required' | 'upcoming' | 'skip', signal = this.lifetime.signal) {
     const ticket=this.generation;

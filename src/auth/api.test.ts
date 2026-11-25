@@ -23,6 +23,11 @@ it('delivers only history access on success after token refresh and keeps the JS
   await expect(client.request('/me',signal,user)).resolves.toEqual(account);
   expect(fetcher.mock.lastCall?.[1]?.cache).toBeUndefined();
 });
+it('fetches the scheduling snapshot once with private caching disabled', async () => {
+  const { api, user, fetcher, signal } = harness(response({}));
+  await api.request('/connections/c/scheduling-snapshot',signal,user);
+  expect(fetcher).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\/api\/connections\/c\/scheduling-snapshot$/),expect.objectContaining({method:'GET',cache:'no-store'}));
+});
 describe('remote API routing', () => {
   const railwayOrigin = 'https://reals-backend-dev.up.railway.app';
   function remote(name: 'dev' | 'prod', origin = `${railwayOrigin}/`) {

@@ -32,8 +32,9 @@ try {
     window.n={id:'n',connectionId:'c',roundNumber:1,status:'PENDING',confirmedDateTime:null,schedulingExpiresAt:end,createdAt:stamp,updatedAt:stamp};window.proposals=[];window.connection={id:'c',matchId:'m',userAId:'me',userBId:'them',state:'SCHEDULING_PHASE',schedulingExpiresAt:end,createdAt:stamp,updatedAt:stamp};
     window.slot=()=>{const d=new Date();d.setDate(d.getDate()+1);d.setHours(16,0,0,0);return d.toISOString();};
     const home=()=>({profileStatus:'ACTIVE',matchmaking:{inQueue:false,canSearch:true,blockedReason:null},activeInteractionsSummary:{activeInitialCount:0,activeConnectionCount:1,actionableConnectionCount:1,hasPendingSchedulingConnection:false},pendingActions:[],nextSteps:connection.state==='CLOSED'?[]:[{type:'SCHEDULING',matchId:'m',connectionId:'c',requiresAction:true,partner:{displayName:'Maria'},createdAt:stamp,schedulingExpiresAt:end}],passiveNotices:[]});
+    const schedulingSnapshot=()=>{const serverTime=new Date().toISOString();return {connection:{...connection},negotiation:{...n},proposals:[...proposals],availability:{conflictWindowMinutes:60,unavailableWindows:[],serverTime},serverTime};};
     const controller={snapshot,getSnapshot:()=>snapshot,subscribe:()=>()=>{},request:async(path,signal,method='GET',body)=>{
-      if(method==='GET'&&path.startsWith('/connections/')){reads.push(path);if(holdPoll){holdPoll=false;const captured={...connection};window.pollSignal=signal;await new Promise(r=>window.releasePoll=r);return captured;}}
+      if(method==='GET'&&path.startsWith('/connections/')){reads.push(path);if(holdPoll){holdPoll=false;const captured=schedulingSnapshot();window.pollSignal=signal;await new Promise(r=>window.releasePoll=r);return captured;}}
       if(method!=='GET'){writes.push({path,method,body});if(holdWrite)await new Promise(r=>window.releaseWrite=r);await new Promise(r=>setTimeout(r,80));if(path.endsWith('/block')){connection.state='CLOSED';rev++;return {id:'block'};}
       if(path.endsWith('/rejections')){proposals=proposals.map(p=>({...p,status:'REJECTED'}));return n;}
       if(path.endsWith('/acceptance')){n={...n,status:'CONFIRMED',confirmedDateTime:proposals[0].proposedDateTime};connection.state='SECOND_CHAT_SCHEDULED';rev++;return n;}
@@ -41,7 +42,7 @@ try {
       if(fail&&path.startsWith('/connections/'))throw new ApiError('network');
       if(path==='/me/home/status')return {version:rev,dirty:false,nextRefreshAt:null,serverTime:new Date().toISOString()};if(path==='/me/profile')return snapshot.profile;if(path==='/me/home')return home();
       if(path.endsWith('/visual-profile'))return {profileId:'partner',displayName:'Maria',age:29,city:'Buenos Aires',countryCode:'AR',bio:'Synthetic profile',photos:[],affinityIndicators:[],profileQuestions:[],myPersonalMessageSubmitted:false,partnerPersonalMessageSubmitted:false,partnerPersonalMessageRead:false,decisionRequiresPartnerPersonalMessageRead:false};
-      if(path.endsWith('/negotiation'))return {...n};if(path.endsWith('/proposals'))return [...proposals];if(path.endsWith('/scheduling-availability'))return {conflictWindowMinutes:60,unavailableWindows:[],serverTime:new Date().toISOString()};if(path==='/connections/c')return {...connection};throw new ApiError('backend',404);
+      if(path.endsWith('/scheduling-snapshot'))return schedulingSnapshot();if(path==='/connections/c')return {...connection};throw new ApiError('backend',404);
     }};
     window.fixtureRoot=ReactDOM.default.createRoot(document.querySelector('#probe'));fixtureRoot.render(React.default.createElement(Home,{controller}));
   })()`);
@@ -51,9 +52,11 @@ try {
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<768});
     await waitFor("!!document.querySelector('[aria-label=\"Ver Actividad\"]')",'Home');
     await evaluate("document.querySelector('.home-activity-entry[aria-label]').click()");await delay(200);await clickText('Elegir horarios');await waitFor("!!document.querySelector('select')",'picker');
+    await evaluate("reads=[];dispatchEvent(new Event('online'))");await delay(150);
+    check(await evaluate("JSON.stringify(reads)===JSON.stringify(['/connections/c/scheduling-snapshot'])"),'one scheduling GET per refresh '+width);
     check(await evaluate("document.querySelector('select').options.length===7&&document.documentElement.scrollWidth<=innerWidth"),'seven days and no overflow '+width);
     check(await evaluate("(()=>{const lines=[...document.querySelector('.scheduling-meta').children].filter(e=>e.tagName==='P'||e.tagName==='SPAN').map(e=>e.getBoundingClientRect());return lines.length===3&&lines.slice(1).every((r,i)=>r.top-lines[i].bottom>=3&&r.top-lines[i].bottom<=5);})()"),'partner round and deadline use compact spacing '+width);
-    check(await evaluate("document.querySelector('.scheduling').getBoundingClientRect().top-document.querySelector('.session-header').getBoundingClientRect().bottom>=24"),'scheduling title separated from brand header '+width);
+    check(await evaluate("document.querySelector('.scheduling').getBoundingClientRect().top-document.querySelector('.session-header .brand-divider').getBoundingClientRect().bottom>=24"),'scheduling title separated from brand header '+width);
     await evaluate('scrollTo(0,0)');await screenshot('heading-'+width);
     check(await evaluate("(()=>{const picker=document.querySelector('.scheduling fieldset'),heading=picker.nextElementSibling;return heading.tagName==='H4'&&heading.getBoundingClientRect().top-picker.getBoundingClientRect().bottom>=24;})()"),'selected options separated from picker '+width);
     await clickText('Agregar opci'+String.fromCharCode(243)+'n');check(await evaluate("!!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Enviar horarios'&&!b.disabled)"),'draft enables submission '+width);
@@ -66,7 +69,7 @@ try {
     check(await evaluate("pollSignal.aborted&&writes.filter(w=>w.path.endsWith('/proposals')).length===1"),'poll aborted and one POST '+width);
     await evaluate("releasePoll();history.back()");await delay(150);
     check(await evaluate("!!document.querySelector('select')&&Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Volver a Actividad').disabled"),'obsolete poll cannot unlock mutation or Back '+width);
-    await evaluate("holdWrite=false;releaseWrite()");await waitFor("document.body.innerText.includes('Esperando a la otra persona')",'uncertain submission reconciled');check(await evaluate("writes.filter(w=>w.path.endsWith('/proposals')).length===1"),'one POST despite uncertain response '+width);
+    await evaluate("holdWrite=false;releaseWrite()");await waitFor("document.body.innerText.includes('Esperando a Maria')",'uncertain submission reconciled');check(await evaluate("writes.filter(w=>w.path.endsWith('/proposals')).length===1"),'one POST despite uncertain response '+width);
     await evaluate("proposals.push({id:'received',connectionId:'c',userId:'them',roundNumber:1,preferenceOrder:1,proposedDateTime:slot(),status:'PENDING',createdAt:new Date().toISOString()});dispatchEvent(new Event('online'))");await waitFor("document.body.innerText.includes('Horarios que recibiste')",'received review');await screenshot('review-'+width);
     await clickText('Aceptar opci'+String.fromCharCode(243)+'n 1');await waitFor("document.body.innerText.includes('Horario confirmado')",'confirmed');check(await evaluate("!document.querySelector('select')"),'terminal stops selector '+width);await screenshot('confirmed-'+width);
     await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Volver a Actividad').click()");await waitFor("!document.querySelector('.scheduling')",'Activity return');
