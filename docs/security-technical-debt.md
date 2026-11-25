@@ -144,3 +144,87 @@ Local regression evidence includes both chat sessions, real response headers, au
 - Recommended mitigation: Add isolated browser E2E for auth persistence, popup timing, cross-tab logout, URL handling and private caching; consider scoped DAST with synthetic identities.
 - Deployment dependency: Disposable Firebase/test environment, approved accounts and CI browser setup.
 - Acceptance criteria: Repeatable Chrome desktop/Android coverage where supported; no real-user data mutations or secret artifacts; confirmed issues get focused regression tests.
+
+### Visual block-denial hardening (2026-11-25)
+
+Source baseline: fetched `origin/development` at `8abd435`, following reviewed
+`3428218` (intervening photo-text change). Both visual and scheduling denial
+regressions failed before the classifier change and passed afterwards.
+Owned HTTP 409 `USER_PAIR_BLOCKED` now retires the loaded profile, photo tree
+and personal message. Scheduling disables retry/resume restoration for the
+mounted retired profile. Visual review preserves its existing terminal outcome.
+
+| Path / invariant | Review |
+| --- | --- |
+| Profile refresh | Only current request/context may install; denial clears the snapshot. |
+| Visual personal-message read/write | Shared denial classifier ends the visual session; mutation and background read are serialized. |
+| Scheduling message read | Denial propagates to the same retirement path; superseded reads are aborted. |
+| Images / retries | Unmount discards retained request state. Callback state updates compare request identity. Successful same-session signature renewal remains pinned without another image request. |
+| Account / sign-out | App ready tree is keyed by account/profile; visual disposal clears profile/message and aborts requests. Existing session/ownership tests remain the evidence for tab transfer. |
+
+Bounded source audit: visual profile/message API GETs use `cache: no-store`.
+Image elements rely on object response headers; application retirement is not
+HTTP cache eviction. `photoIdentity`, `ProfileImage`, `PublicProfileView` and
+own-profile `PhotoSlot` keep their existing signature-insensitive identity and
+loaded-request retention. No media URL persistence was found in application
+localStorage writes (calendar markers and activity metadata). Firebase owns its
+auth persistence. No application IndexedDB, Cache Storage or Service Worker
+usage was found by source search. This does not inventory SDK or hosted storage.
+AudioComposer revokes its preview object URL on replacement/cleanup.
+
+Synthetic Chromium navigation observed stable image/profile DOM and scroll on
+tab return and token notification. The command failed cleaning up a locked
+Chromium temporary profile; this is partial evidence, not a passing browser run.
+No hosted objects or credentials were accessed. A dedicated HTTP-cache/storage
+browser audit, denial concurrency browser scenarios and hosted validation remain
+outstanding. The reported R2 `no-store` header applies to new objects; it neither
+retroactively removes old cached bytes nor revokes issued signed URLs.
+Android Coil account isolation remains deferred until before public production.
+
+Validation commands: `npm run test:focused -- src/visual/VisualReview.test.tsx
+src/scheduling/Scheduling.test.tsx` (83 passed); `npm run typecheck` (passed);
+`npm run check:architecture` (105 modules, zero cycles); `npm run build` with
+CI synthetic environment and explicit `VITE_REALS_ENVIRONMENT=dev`, then `prod`
+(both passed, chunk-size warning). Unconfigured builds correctly failed.
+`npm test -- --reporter=dot` had 2099 passes and two onboarding timeouts;
+a two-worker rerun was requested. `node tools/visual-navigation-browser.mjs`
+had the cleanup failure described above.
+The full rerun `npm test -- --reporter=dot --maxWorkers=2` passed all
+2103 tests in 83 files (186.84 seconds), including own-profile, session and tab
+ownership regressions. The focused follow-up below completes deferred block-denial races and
+scheduling personal-message denial coverage.
+
+
+### Focused visual-access follow-up (2026-11-25)
+
+Based on `61a3fb1`, verified against the remote task branch. Immediate withdrawal
+is distinct from irreversible retirement: PartnerProfile clears content for all
+classified denials, but only owned HTTP 409 USER_PAIR_BLOCKED disables retry and
+resume for that interaction owner. HTTP 401/403/404 recovery requires a fresh
+successful profile response. Authentication/session invalidation is unchanged.
+The VISUAL_CONTENT_NOT_AVAILABLE regression is retained alongside the block case.
+
+Confirmed enclosing-owner gap: SchedulingSession previously treated pair block
+as a generic failure and could leave a mounted gallery visible. An owned block
+from reads, mutations or mutation recovery now sets its existing terminal state;
+the existing Scheduling terminal branch unmounts the gallery and aborts its read.
+Further refresh/poll operations cannot restore that blocked owner. No polling
+interval, image identity, same-session retention or transient-error policy changed.
+
+| Installation / mutation path | Invariant and focused evidence |
+| --- | --- |
+| Scheduling profile / personal-message GET | Deferred message block removes already-installed images; obsolete profile success after a newer denial is ignored and its signal is aborted. |
+| Visual profile / message mutation | A message mutation preempts a background profile request; block ends the session; late successful profile response cannot restore images. |
+| Retired image / retry / resume | Detached image load/error events do not restore DOM; retry controls disappear and visibility/online events issue no new requests after block retirement. |
+| Recoverable authorization denial | 401/403/404 remove images immediately; retry remains empty while a deferred fresh read is pending and restores only on success. |
+| Enclosing scheduling owner | Read denial unmounts gallery; mutation and recovery-read denial remain terminal; refresh/poll/mutation attempts issue no subsequent requests. |
+
+Validation: `npm run test:focused -- src/scheduling/PartnerProfile.test.tsx
+src/scheduling/Scheduling.test.tsx src/scheduling/SchedulingSession.test.ts
+src/visual/VisualReview.test.tsx` passed 151 tests in four files. `npm run
+typecheck` passed; `npm run check:architecture` reported 105 production modules
+and zero runtime cycles. These are synthetic Vitest/RTL tests, not hosted browser
+validation. Full-suite validation is left to PR CI for this follow-up. The
+comprehensive HTTP cache/storage browser audit, hosted checks and Android Coil
+account-isolation release gate remain as documented above. No tooling changes,
+credentials, backend contracts, deployment or media TTL changes are included.

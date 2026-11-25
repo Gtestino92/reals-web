@@ -2179,3 +2179,12 @@ node tools/ux-runtime-browser.mjs
 ```
 
 Builds used the synthetic CI configuration. The digest check used a local preview of the dev output. A pre-publication GET on each of the three Pages URLs returned the SPA root bytes. Hosted hash verification is a release step. The backend ran 27 passing tests with JDK 21 and `mvnw.cmd -B "-Dtest=DevLegalCatalogTest,LegalDocumentIntegrityVerifierTest,LegalDocumentControllerIntegrationTest,LegalComplianceServiceIntegrationTest,LegalComplianceEmptyCatalogIntegrationTest,LegalComplianceGateControllerIntegrationTest,LegalDocumentConcurrencyIntegrationTest" test`.
+
+### Visual access denial increment — 2026-11-25
+
+PARTIAL: reviewed Android `PartnerProfileCoordinator` loading/message paths and
+Web visual/scheduling access retirement. Web now recognizes owned block denials
+without changing navigation, layout, timers or ordinary image renewal. Focused
+regressions pass; complete Android flow/visual parity and hosted browser access
+validation are not established by this security increment. See
+[security evidence and remaining work](security-technical-debt.md#visual-block-denial-hardening-2026-11-25).

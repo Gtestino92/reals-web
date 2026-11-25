@@ -7,6 +7,7 @@ import { reviewReason, roundState, validateSlots } from './policy';
 
 type Activity = 'loading' | 'idle' | 'polling' | 'refreshing' | 'mutating' | 'reconciling';
 interface State { activity: Activity; connection: Connection | null; negotiation: Negotiation | null; proposals: Proposal[]; availability: Availability | null; calendarActivity: HomeActivity | null; calendarReadFailed: boolean; draft: string[]; busy: boolean; pending: boolean; verified: boolean; uncertain: boolean; error: string; message: string; errorContext: 'screen' | 'submit' | 'review'; offset: number; terminal: boolean }
+const pairBlocked = (error: unknown) => error instanceof ApiError && error.status===409 && error.code==='USER_PAIR_BLOCKED';
 const accessDenied = (error: unknown) => error instanceof ApiError && [401,403,404].includes(error.status) && !messages[error.code];
 const messages: Record<string,string> = {
   SCHEDULING_NOT_AVAILABLE:'La coordinación ya no está disponible.', SCHEDULING_EXPIRED:'La coordinación venció. Consultamos el estado actual.', SCHEDULING_INVALID_PROPOSALS:'Revisá los horarios elegidos.', SCHEDULING_PROPOSALS_ALREADY_SUBMITTED:'Ya enviaste horarios en esta ronda.', SCHEDULING_ROUND_CHANGED:'La ronda cambió. Revisá las opciones de la ronda actual.', SCHEDULING_PARTNER_PROPOSALS_NOT_AVAILABLE:'La lista recibida ya no está disponible.', SCHEDULING_PROPOSAL_NOT_AVAILABLE:'Este horario ya no está disponible.', SCHEDULING_CANNOT_ACCEPT_OWN_PROPOSAL:'No podés aceptar tu propio horario.', SCHEDULING_SLOT_CONFLICT:'El horario se superpone o no está disponible para confirmar. Elegí otra opción.',
@@ -17,6 +18,7 @@ export class SchedulingSession {
   private listeners = new Set<()=>void>();
   private lifetime = new AbortController();
   private gate = false;
+  private blocked = false;
   private background: { controller: AbortController; calendar: boolean } | null = null;
   private generation = 0;
   readonly context: string;
@@ -76,7 +78,7 @@ export class SchedulingSession {
             Date.parse(item.secondChat.availableAt) === Date.parse(confirmedAt)) calendarActivity = item;
         }
       } catch (error) {
-        if (home === 'required' || accessDenied(error)) throw error;
+        if (home === 'required' || accessDenied(error) || pairBlocked(error)) throw error;
         calendarReadFailed = true;
       }
     }
@@ -127,7 +129,7 @@ export class SchedulingSession {
   stopCalendarPoll=()=>{if(this.background?.calendar)this.pause();};
   refresh=(background = false)=>this.read(background?'background':'refresh');
   private async read(mode: 'refresh' | 'background' | 'calendar') {
-    if(this.gate||!this.current()||document.visibilityState==='hidden')return;
+    if(this.blocked||this.gate||!this.current()||document.visibilityState==='hidden')return;
     const calendarPoll=mode==='calendar';
     const silent=calendarPoll||(mode==='background'&&this.state.verified&&!this.state.uncertain);
     const owned=silent?new AbortController():null;
@@ -156,7 +158,8 @@ export class SchedulingSession {
     this.gate=false;
   }
   private failure(error: unknown) {
-    const denied=accessDenied(error);
+    this.blocked ||= pairBlocked(error);
+    const denied=this.blocked||accessDenied(error);
     this.install({verified:false,availability:null,calendarActivity:null,calendarReadFailed:false,terminal:denied,error:denied?'La coordinación no está disponible para tu cuenta. Volvé a Actividad.':'No pudimos verificar el estado o la disponibilidad. Revisá tu conexión y reintentá.',errorContext:'screen'});
   }
   act=async(operation: 'submit'|'accept'|'reject'|'block',proposalId?: string)=>{
@@ -196,6 +199,7 @@ export class SchedulingSession {
       this.install({message:status==='CONFIRMED'?'':status==='FAILED'?'No hubo acuerdo.':operation==='submit'?'Enviamos tus horarios.':operation==='accept'?'Aceptamos el horario.':this.state.negotiation?.roundNumber!==round?'Ambas listas fueron rechazadas. Se abri\u00f3 una nueva ronda.':'Rechazaste las opciones recibidas.'});
     } catch(error) {
       if(!this.current()||ticket!==this.generation)return;
+      if(pairBlocked(error)){this.failure(error);return;}
       const known=error instanceof ApiError&&error.kind==='backend'&&error.status>=400&&error.status<500;
       this.install({activity:'reconciling',uncertain:attempted&&!known,verified:false});
       const message=known?(messages[error.code]??'No se pudo completar la acción. Revisá los requisitos de tu cuenta y volvé a consultar.'):'No pudimos confirmar el resultado. Consultamos el estado antes de permitir otra acción.';
@@ -205,7 +209,7 @@ export class SchedulingSession {
           if(![...home.pendingActions,...home.nextSteps].some(v=>v.matchId===this.matchId)){if(this.current()&&ticket===this.generation) {this.install({pending:false,busy:false,terminal:true});this.finish();}return;}
         }
         await this.reconcile('required');
-      }catch{if(ticket===this.generation)this.install({verified:false,availability:null});}
+      }catch(error){if(ticket===this.generation){if(pairBlocked(error)){this.failure(error);return;}this.install({verified:false,availability:null});}}
       if(ticket===this.generation)this.install({error:message});
     } finally {if(ticket===this.generation){this.gate=false;this.install({activity:'idle',busy:false,pending:false});}}
   };

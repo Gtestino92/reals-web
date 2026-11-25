@@ -289,12 +289,12 @@ it('keeps partner identity and actions stable while the initial profile is delay
   expect(document.querySelector('.partner-profile-loading')).toBeNull();
 });
 
-it('preserves the selected partner photo on resume and clears it on access denial', async () => {
+it.each(['VISUAL_CONTENT_NOT_AVAILABLE','USER_PAIR_BLOCKED'])('preserves the selected partner photo on resume and clears it on %s', async code => {
   const f=setup(),read=f.request.getMockImplementation()!;
   let renew=false, denied=false;
   f.request.mockImplementation(async(path,...args)=>{
     if(!path.endsWith('/visual-profile')) return read(path,...args);
-    if(denied) throw new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE');
+    if(denied) throw new ApiError('backend',409,code);
     const profile=visualProfile();
     return {...profile,photos:profile.photos.map(photo=>({...photo,url:photo.url+'&X-Amz-Signature='+(renew?'renewed':'initial')}))};
   });
@@ -314,4 +314,13 @@ it('preserves the selected partner photo on resume and clears it on access denia
   await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
   expect(image).not.toBeInTheDocument();
   expect(screen.getByRole('alert')).toBeVisible();
+});
+
+it('withdraws a mounted gallery when the scheduling owner observes a pair block',async()=>{
+ const f=setup(),read=f.request.getMockImplementation()!;
+ f.request.mockImplementation(async(path,...args)=>path.endsWith('/visual-profile')?visualProfile():read(path,...args));
+ const v=view(f);await screen.findByRole('heading',{name:'Proponé tus horarios'});v.rerender(<Scheduling {...v.props} browse/>);const image=await screen.findByRole('img');
+ f.request.mockImplementation(async(path,...args)=>{if(path.startsWith('/connections/'))throw new ApiError('backend',409,'USER_PAIR_BLOCKED');return path.endsWith('/visual-profile')?visualProfile():read(path,...args);});
+ await act(async()=>window.dispatchEvent(new Event('online')));await waitFor(()=>expect(image).not.toBeInTheDocument());expect(screen.getByText('La conexión ya no está disponible.')).toBeVisible();
+ const count=f.request.mock.calls.length;await act(async()=>{document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('online'));});expect(f.request).toHaveBeenCalledTimes(count);expect(screen.queryByRole('img')).toBeNull();
 });
