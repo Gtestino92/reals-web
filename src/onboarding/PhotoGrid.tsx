@@ -127,7 +127,7 @@ export function PhotoGrid({ photos, disabled, uploadsDisabled, onSelect, onDelet
   }, []);
   return <>
     <span hidden id={instructions}>Espacio o Enter para seleccionar, flechas para elegir destino, Enter para confirmar y Escape para cancelar.</span>
-    <p role="status" aria-atomic="true" className="photo-reorder-feedback">{view ? `Foto ${view.photo.position} seleccionada. ${view.target ? `Destino: posición ${view.target}.` : 'Fuera de la grilla.'}` : ''}</p>
+    <span role="status" className="photo-reorder-announcement">{view?.kind === 'keyboard' && view.target ? `Destino: posición ${view.target}.` : ''}</span>
     <div ref={grid} className="photo-grid" onPointerDown={pointerDown} onPointerMove={pointerMove}
       onPointerUp={event => { const current = owned.current; if (current?.kind === 'mouse' && current.id === event.pointerId) { if (current.active) move(current,event.clientX,event.clientY); finish(current); } }}
       onPointerCancel={event => { if (owned.current?.kind === 'mouse' && owned.current.id === event.pointerId) clear(); }}
