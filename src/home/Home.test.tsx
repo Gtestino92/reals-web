@@ -171,6 +171,32 @@ it('blocks ineligible search and offers cancellation while queued', async () => 
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' })); await waitFor(() => expect(writes()).toHaveLength(1));
   await waitFor(() => expect(search()).toBeDisabled()); expect(geo).not.toHaveBeenCalled();
 });
+it.each(['new','restored'])('system Back cancels a %s search and Forward never rejoins', async kind => {
+  home.matchmaking.inQueue = kind === 'restored';
+  mount(); await ready();
+  if (kind === 'new') fireEvent.click(search());
+  await confirmed();
+  expect(history.state.search).toBe(true);
+  act(() => history.back());
+  await screen.findByRole('heading', { name: 'Inicio' });
+  await waitFor(() => expect(history.state.search).toBeUndefined());
+  expect(writes().filter(([,options]) => options?.method === 'DELETE')).toHaveLength(1);
+  const traversed = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), {once:true}));
+  await act(async () => { history.forward(); await traversed; });
+  expect(history.state.search).toBeUndefined();
+  expect(search()).toBeVisible();
+  expect(writes()).toHaveLength(kind === 'new' ? 2 : 1);
+});
+it('system Back before admission cancels the location request and ignores its late result', async () => {
+  let located: PositionCallback | undefined;
+  geo.mockImplementation(ok => { located = ok; });
+  mount(); await ready(); fireEvent.click(search());
+  expect(history.state.search).toBe(true);
+  act(() => history.back());
+  await waitFor(() => expect(search()).toBeEnabled());
+  await act(async () => located?.(position()));
+  expect(writes()).toHaveLength(0);
+});
 it('enqueues with supported location payload, reconciles and cancels', async () => {
   mount(); await ready(); const start = search(); fireEvent.click(start); fireEvent.click(start);
   await screen.findByRole('button', { name: 'Cancelar búsqueda' });
