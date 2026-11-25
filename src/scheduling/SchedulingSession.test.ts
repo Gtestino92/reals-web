@@ -282,3 +282,14 @@ it('waits for authoritative Home after an ambiguous but committed acceptance', a
   expect(model.getSnapshot()).toMatchObject({verified:true,uncertain:false,calendarActivity:{connectionId:'c',matchId:'m'}});
   expect(request.mock.calls.filter(([, ,method])=>method==='POST')).toHaveLength(1);
 });
+
+it.each(['mutation','recovery'] as const)('keeps an owned pair block terminal during %s',async source=>{
+ const {model,request}=await ready();model.setDraft([slot]);const read=request.getMockImplementation()!;let attempted=false;
+ request.mockImplementation(async(path,signal,method,body)=>{
+  if(method==='POST'){attempted=true;throw source==='mutation'?new ApiError('backend',409,'USER_PAIR_BLOCKED'):new ApiError('network');}
+  if(attempted)throw new ApiError('backend',409,'USER_PAIR_BLOCKED');
+  return read(path,signal,method,body);
+ });
+ await model.act('submit');expect(model.getSnapshot()).toMatchObject({terminal:true,verified:false,pending:false,busy:false});
+ const count=request.mock.calls.length;await model.refresh();await model.poll();await model.act('submit');expect(request).toHaveBeenCalledTimes(count);
+});

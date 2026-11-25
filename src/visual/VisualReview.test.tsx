@@ -273,3 +273,15 @@ it.each(['read','save'] as const)('retires loaded content on blocked personal-me
  else fireEvent.click(screen.getByRole('button',{name:'Leer mensaje'}));
  await waitFor(()=>expect(screen.queryByText('María')).toBeNull());expect(screen.queryByRole('img')).toBeNull();
 });
+
+it('does not restore an obsolete profile after a mutation block denial',async()=>{
+ const {controller,request}=setup(),old=deferred(),finish=vi.fn();
+ render(<VisualReview controller={controller} matchId="m" onBack={()=>{}} onFinished={finish}/>);await screen.findByText('María');const images=screen.getAllByRole('img');
+ request.mockResolvedValueOnce({id:'m',userAId:'me',userBId:'them',state:'VISUAL_PHASE'}).mockReturnValueOnce(old.promise);
+ act(()=>window.dispatchEvent(new Event('online')));await waitFor(()=>expect(request).toHaveBeenCalledTimes(4));const signal=request.mock.calls[3]![1];
+ request.mockRejectedValueOnce(new ApiError('backend',409,'USER_PAIR_BLOCKED'));fireEvent.change(screen.getByLabelText('Mensaje personal'),{target:{value:'Synthetic'}});fireEvent.click(screen.getByRole('button',{name:'Guardar mensaje'}));
+ await waitFor(()=>expect(finish).toHaveBeenCalledWith('unavailable'));expect(signal.aborted).toBe(true);images.forEach(image=>expect(image).not.toBeInTheDocument());
+ await act(async()=>old.resolve(visualProfile()));images.forEach(image=>{fireEvent.load(image);fireEvent.error(image);});const count=request.mock.calls.length;
+ await act(async()=>{document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('online'));});
+ expect(screen.queryByRole('img')).toBeNull();expect(screen.queryByRole('button',{name:/Reintentar/})).toBeNull();expect(request).toHaveBeenCalledTimes(count);
+});

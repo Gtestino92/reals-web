@@ -42,7 +42,7 @@ export function PartnerProfile({controller,matchId,partnerName,onBack,menu,disab
           }
         }
       }catch(failure){if(current()){
-        if(denied(failure))retired.current=true;
+        if(failure instanceof ApiError&&failure.status===409&&failure.code==='USER_PAIR_BLOCKED')retired.current=true;
         if(denied(failure)||failure instanceof ApiError&&failure.kind==='invalid')setSnapshot(null);
         setError('No pudimos cargar el perfil. Revisá tu conexión o el acceso a esta interacción.');
       }}
