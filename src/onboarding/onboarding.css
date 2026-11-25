@@ -31,7 +31,7 @@
 .photo-moderation { position: absolute; bottom: 4px; left: 4px; max-width: calc(100% - 8px); padding: 3px 5px; border-radius: var(--radius-extra-small); background: var(--reals-ink); color: var(--reals-ivory); font-size: .6875rem; line-height: 1.2; pointer-events: none; }
 .photo-rejected { background: var(--color-error-container); color: var(--color-on-error-container); }
 .photo-drag-ghost { position: fixed; pointer-events: none; z-index: 30; opacity: .82; border: 2px solid var(--color-primary); border-radius: var(--radius-row); overflow: hidden; box-shadow: 0 4px 16px color-mix(in srgb,var(--reals-ink) 40%,transparent); }
-.photo-reorder-instructions, .photo-reorder-feedback { color: var(--color-on-surface-variant); font-size: .875rem; }
+.photo-reorder-feedback { color: var(--color-on-surface-variant); font-size: .875rem; }
 .photo-reorder-feedback:empty { display: none; }
 .photo-slot input[hidden] { display: none; }
 .photo-slot button { max-width: 100%; overflow-wrap: anywhere; }

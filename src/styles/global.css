@@ -25,6 +25,30 @@ body::before {
   background: url("../assets/reals-background-editorial-light.webp") center / cover no-repeat;
 }
 
+/* Keep the document's edge bounce from moving the standalone app's canvas. */
+@media (display-mode: standalone) {
+  html {
+    overscroll-behavior-y: none;
+  }
+
+  body::before {
+    bottom: auto;
+    height: 100vh;
+    height: 100lvh;
+    transform: translateZ(0);
+  }
+}
+
+/* The portrait artwork is 841px wide. Blend its edges into the page on desktop. */
+@media (min-width: 842px) and (hover: hover) and (pointer: fine) {
+  body::before {
+    max-width: 841px;
+    margin-inline: auto;
+    background-size: 100% auto;
+    mask-image: linear-gradient(to right, transparent, black 18%, black 82%, transparent);
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   body::before {
     background-image: url("../assets/reals-background-editorial-dark.webp");

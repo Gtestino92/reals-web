@@ -72,6 +72,8 @@ it('supports keyboard pickup, grid arrows, empty positions, confirmation and esc
   fireEvent.keyDown(source,{ key:'Enter' }); fireEvent.keyDown(source,{ key:'End' }); fireEvent.keyDown(source,{ key:'Escape' });
   fireEvent.keyDown(source,{ key:'Enter' }); fireEvent.keyDown(source,{ key:'Tab' });
   expect(onMove).toHaveBeenCalledOnce(); expect(source).toHaveAttribute('aria-pressed','false');
+  expect(screen.getByRole('status')).toBeEmptyDOMElement();
+  expect(screen.getByText(/Espacio o Enter/)).not.toBeVisible();
   expect(source).toHaveAccessibleDescription(/Espacio o Enter/);
 });
 it('activates touch only after a long press, prevents scroll only while active, and drops once', () => {
