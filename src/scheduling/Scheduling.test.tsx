@@ -294,7 +294,7 @@ it('preserves the selected partner photo on resume and clears it on access denia
   let renew=false, denied=false;
   f.request.mockImplementation(async(path,...args)=>{
     if(!path.endsWith('/visual-profile')) return read(path,...args);
-    if(denied) throw new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE');
+    if(denied) throw new ApiError('backend',409,'USER_PAIR_BLOCKED');
     const profile=visualProfile();
     return {...profile,photos:profile.photos.map(photo=>({...photo,url:photo.url+'&X-Amz-Signature='+(renew?'renewed':'initial')}))};
   });

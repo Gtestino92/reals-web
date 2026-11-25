@@ -30,7 +30,7 @@ export class VisualSession {
   start() { if(this.lifetime.signal.aborted) { this.lifetime=new AbortController(); this.read=null; this.background=false; this.writing=false; this.serial++; } }
   dispose() {this.serial++;this.lifetime.abort();this.read?.abort();this.state={...this.state,profile:null,message:null,messageLoaded:false};}
   private end(reason: VisualOutcome = 'completed') {if(!this.current()||this.state.terminal)return;this.install({profile:null,message:null,messageLoaded:false,terminal:true,pending:null,busy:false,concealed:true});this.finish(reason);}
-  private denied(error: unknown) { return error instanceof ApiError && ([401,403,404].includes(error.status) || ['VISUAL_CONTENT_NOT_AVAILABLE','VISUAL_REVIEW_EXPIRED'].includes(error.code)); }
+  private denied(error: unknown) { return error instanceof ApiError && ((error.status===409&&error.code==='USER_PAIR_BLOCKED') || [401,403,404].includes(error.status) || ['VISUAL_CONTENT_NOT_AVAILABLE','VISUAL_REVIEW_EXPIRED'].includes(error.code)); }
   private request(path: string, signal: AbortSignal, method='GET', body?: unknown) {return this.controller.request(`/matches/${encodeURIComponent(this.matchId)}${path}`,signal,method,body);}
   conceal = () => {if(!this.writing){this.read?.abort();this.read=null;this.background=false;this.serial++;}this.install({busy:this.writing?this.state.busy:false,concealed:!!this.state.profile?.visualExpiresAt&&Date.parse(this.state.profile.visualExpiresAt)<=Date.now()});};
   resume = () => {

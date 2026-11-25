@@ -33,7 +33,7 @@ it('shows loading, empty-photo state, omits absent sections and supports return'
  expect(await screen.findByText('No hay fotos aprobadas disponibles.')).toBeVisible();expect(screen.queryByText('Bio')).toBeNull();expect(screen.queryByText('Afinidades compartidas')).toBeNull();expect(screen.queryByText('Preguntas del perfil')).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'Decidir más tarde'}));expect(back).toHaveBeenCalledOnce();
 });
-it.each([new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE'),new ApiError('backend',409,'VISUAL_REVIEW_EXPIRED'),new ApiError('authorization',403),new ApiError('authorization',401)])('clears partner data on terminal refresh failure',async error=>{
+it.each([new ApiError('backend',409,'USER_PAIR_BLOCKED'),new ApiError('backend',409,'VISUAL_CONTENT_NOT_AVAILABLE'),new ApiError('backend',409,'VISUAL_REVIEW_EXPIRED'),new ApiError('authorization',403),new ApiError('authorization',401)])('clears partner data on terminal refresh failure',async error=>{
  const {controller,request}=setup();render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');request.mockRejectedValueOnce(error);
  act(()=>window.dispatchEvent(new Event('online')));await screen.findByRole('alert');expect(screen.queryByText('María')).toBeNull();expect(screen.queryByRole('img')).toBeNull();expect(screen.queryByRole('button',{name:'Reintentar'})).toBeNull();
 });
@@ -264,4 +264,12 @@ it.each([['Buenos Aires', 'AR', 'Buenos Aires, Argentina'], [42, {}, null], [und
   else expect(document.querySelector('.public-profile-location')).toBeNull();
   expect(request.mock.calls.map(c => c[0])).toEqual(['/matches/m','/matches/m/visual-profile']);
   expect(screen.getByRole('button', { name: 'Aprobar' })).toBeEnabled();
+});
+it.each(['read','save'] as const)('retires loaded content on blocked personal-message %s',async operation=>{
+ const {controller,request}=setup();const base=request.getMockImplementation()!;
+ request.mockImplementation(async(...args)=>args[0].includes('/personal-messages/')?Promise.reject(new ApiError('backend',409,'USER_PAIR_BLOCKED')):args[0].endsWith('/visual-profile')?visualProfile({partnerPersonalMessageSubmitted:true}):base(...args));
+ render(<VisualReview controller={controller} matchId="m" onBack={()=>{}}/>);await screen.findByText('María');
+ if(operation==='save'){fireEvent.change(screen.getByLabelText('Mensaje personal'),{target:{value:'Synthetic message'}});fireEvent.click(screen.getByRole('button',{name:'Guardar mensaje'}));}
+ else fireEvent.click(screen.getByRole('button',{name:'Leer mensaje'}));
+ await waitFor(()=>expect(screen.queryByText('María')).toBeNull());expect(screen.queryByRole('img')).toBeNull();
 });
