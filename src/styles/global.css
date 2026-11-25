@@ -15,50 +15,52 @@ body {
   line-height: var(--type-body-line-height);
 }
 
-/* Keep the crop anchored to the viewport behind all content, including on long pages. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: url("../assets/reals-background-editorial-light.webp") center / cover no-repeat;
-}
-
-/* Keep the document's edge bounce from moving the standalone app's canvas. */
-@media (display-mode: standalone) {
-  html {
-    overscroll-behavior-y: none;
-  }
-
-  body::before {
-    bottom: auto;
-    height: 100vh;
-    height: 100lvh;
-    transform: translateZ(0);
-  }
-}
-
-/* The portrait artwork is 841px wide. Blend its edges into the page on desktop. */
-@media (min-width: 842px) and (hover: hover) and (pointer: fine) {
-  body::before {
-    max-width: 841px;
-    margin-inline: auto;
-    background-size: 100% auto;
-    mask-image: linear-gradient(to right, transparent, black 18%, black 82%, transparent);
-  }
+/* Keep the light and dark crops aligned across input modes. */
+html {
+  --editorial-art: url("../assets/reals-background-editorial-light.webp");
 }
 
 @media (prefers-color-scheme: dark) {
+  html { --editorial-art: url("../assets/reals-background-editorial-dark.webp"); }
+}
+
+/* Touch scrolling and the artwork share the document canvas, including at its edges. */
+@media (hover: none), (pointer: coarse) {
+  html {
+    overscroll-behavior-y: none;
+    background-image: var(--editorial-art);
+    background-position: center top;
+    background-size: 100% auto;
+    background-repeat: repeat-y;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
   body::before {
-    background-image: url("../assets/reals-background-editorial-dark.webp");
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: var(--editorial-art) center / cover no-repeat;
+  }
+}
+
+@media (min-width: 842px) and (hover: hover) and (pointer: fine) {
+  /* Preserve the outer 280px of each side of the 841 x 1870 artwork.
+     Only the central field expands behind the cards. */
+  body::before {
+    inset-block: 50% auto;
+    height: max(100%, 1870px);
+    transform: translateY(-50%);
+    background: none;
+    border-image: var(--editorial-art) 0 280 fill / 0 280px stretch;
   }
 }
 
 @media (forced-colors: active) {
-  body::before {
-    content: none;
-  }
+  html { background-image: none; }
+  body::before { content: none; }
 }
 
 :is(.placeholder-line, .placeholder-photo, .placeholder-control, .home-placeholder span, .visual-photo-loading) {
