@@ -18,6 +18,7 @@ import type { AuthService, Identity } from './auth/firebase';
 import { emptyHome } from './home/fixtures';
 import { loadPreferences, storageKey } from './notifications/activityStorage';
 import { withEmptyLegalCatalog } from './test/emptyLegalCatalog';
+import { confirmSignOut } from './test/signOut';
 const owners: TabOwnershipManager[] = [];
 const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
 function mount() {
@@ -80,6 +81,59 @@ it('local opt-in fails closed when required ownership APIs are unavailable', asy
   vi.stubGlobal('isSecureContext', false);
   render(<App />);
   expect(await screen.findByRole('alert')).toHaveTextContent('Web Locks'); expect(sdk.onAuthStateChanged).not.toHaveBeenCalled();
+});
+
+it('preserves an authenticated Home on visibility return and restores Firebase identity after a page lifecycle remount', async () => {
+  const ownership = new TabOwnershipManager(); owners.push(ownership);
+  const identity: Identity = { uid: 'restored', emailVerified: true, getIdToken: vi.fn().mockResolvedValue('synthetic'), reload: vi.fn() };
+  let current: Identity | null = identity;
+  const observers: Array<(user: Identity | null) => void> = [];
+  const auth: AuthService = {
+    observe: vi.fn(next => { observers.push(next); next(current); return vi.fn(); }),
+    signIn: vi.fn(), signUp: vi.fn(), google: vi.fn(), verify: vi.fn(),
+    signOut: vi.fn(async () => { current = null; observers.at(-1)?.(null); }),
+  };
+  const api = new ApiClient(withEmptyLegalCatalog(async path => {
+    const json = (value: unknown) => new Response(JSON.stringify(value));
+    switch (path) {
+      case '/api/me': return json({ id: 'restored', status: 'ACTIVE' });
+      case '/api/me/profile': return json({ id: 'profile', userId: 'restored', displayName: 'Restored', status: 'ACTIVE' });
+      case '/api/me/home/status': return json({ version: 1, dirty: false, nextRefreshAt: null, serverTime: new Date().toISOString() });
+      case '/api/me/home': return json(emptyHome());
+      case '/api/reference/affinity-questions': return json({ catalogVersion: 'empty', categories: [], questions: [] });
+      case '/api/me/profile/affinity-answers': return json({ answers: [] });
+      default: throw new Error('Unexpected endpoint');
+    }
+  }));
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  render(<App ownership={ownership} firebase={{ service: auth, localVerification: false }} api={api} />);
+  const home = await screen.findByText('Hola, Restored');
+  const firstGrant = ownership.signal;
+  for (const state of ['hidden', 'visible'] as const) {
+    visibility.mockReturnValue(state);
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  }
+  expect(screen.getByText('Hola, Restored')).toBe(home);
+  expect(auth.observe).toHaveBeenCalledOnce();
+  expect(ownership.signal).toBe(firstGrant);
+  const hide = () => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+  const show = () => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  act(hide);
+  expect(firstGrant.aborted).toBe(true);
+  expect(screen.queryByText('Hola, Restored')).toBeNull();
+  act(show);
+  expect(await screen.findByText('Hola, Restored')).toBeVisible();
+  expect(auth.observe).toHaveBeenCalledTimes(2);
+  expect(auth.signOut).not.toHaveBeenCalled();
+  act(() => observers[0]?.(null));
+  expect(screen.getByText('Hola, Restored')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+  confirmSignOut();
+  await screen.findByRole('button', { name: 'Ingresar' });
+  act(hide); act(show);
+  await screen.findByRole('button', { name: 'Ingresar' });
+  expect(auth.signOut).toHaveBeenCalledOnce();
+  expect(screen.queryByText('Hola, Restored')).toBeNull();
 });
 
 it('retires pending activity reads on ownership transfer and isolates the next authenticated account', async () => {

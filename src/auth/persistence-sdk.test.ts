@@ -65,3 +65,35 @@ it('recreates service wrappers without reinitializing Auth or migrating a restor
     expect(sessionStorage.getItem(key)).not.toBeNull(); expect(localStorage.getItem(key)).toBeNull();
   } finally { await deleteApp(app); }
 });
+
+it('keeps an expired stored session during a network failure, then renews it and honors revocation', async () => {
+  const app = initializeApp({ apiKey: 'fake-key', projectId: 'fake' }, 'restore-expired');
+  const key = `firebase:authUser:fake-key:${app.name}`;
+  sessionStorage.setItem(key, JSON.stringify({
+    uid: 'synthetic-user', emailVerified: true, isAnonymous: false,
+    providerData: [], apiKey: 'fake-key', appName: app.name,
+    stsTokenManager: { refreshToken: 'synthetic-refresh', accessToken: 'synthetic-expired', expirationTime: Date.now() - 1 },
+  }));
+  const fetcher = vi.fn<typeof fetch>()
+    .mockRejectedValueOnce(new TypeError('Synthetic offline'))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      access_token: 'synthetic-renewed', refresh_token: 'synthetic-refresh', expires_in: '3600',
+    })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'TOKEN_EXPIRED' } }), { status: 400 }));
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    const auth = initializeAuth(app, { persistence: [browserSessionPersistence, browserLocalPersistence] });
+    await auth.authStateReady();
+    const user = auth.currentUser;
+    expect(user?.uid).toBe('synthetic-user');
+    if (!user) throw new Error('Expected a restored SDK identity');
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(sessionStorage.getItem(key)).not.toBeNull();
+    await expect(user.getIdToken()).resolves.toBe('synthetic-renewed');
+    expect(auth.currentUser).toBe(user);
+    expect(localStorage.getItem(key)).toBeNull();
+    await expect(user.getIdToken(true)).rejects.toMatchObject({ code: 'auth/user-token-expired' });
+    expect(auth.currentUser).toBeNull();
+    expect(sessionStorage.getItem(key)).toBeNull();
+  } finally { await deleteApp(app); }
+});

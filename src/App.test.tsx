@@ -4,7 +4,7 @@ import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { OperationalApp as App } from './App';
-import { ApiClient } from './auth/api';
+import { ApiClient, ApiError } from './auth/api';
 import type { AuthService, Identity } from './auth/firebase';
 import { configureFirebase, localVerificationEnabled } from './auth/firebase';
 import { SessionController } from './auth/session';
@@ -202,6 +202,21 @@ it('transient backend failure preserves Firebase and retry recovers existing pro
   fetcher.mockRejectedValueOnce(new TypeError()).mockResolvedValueOnce(json({ id: 'u', status: 'ACTIVE' })).mockResolvedValueOnce(json({ id: 'p', userId: 'u', status: 'ACTIVE' }));
   mount(); act(() => observer(user)); await screen.findByRole('alert'); expect(auth.signOut).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); await screen.findByRole('heading', { name: 'Inicio' });
+});
+it('keeps a restored identity on App Check failure and retries bootstrap after attestation recovers', async () => {
+  const appCheck = vi.fn().mockRejectedValueOnce(new ApiError('backend', 503, 'APP_CHECK_VERIFICATION_UNAVAILABLE'))
+    .mockResolvedValue('synthetic-attestation');
+  ready();
+  const api = new ApiClient(withEmptyLegalCatalog(fetcher)).withAppCheck(appCheck);
+  render(<App firebase={{ service: auth, localVerification: false }} api={api} />);
+  act(() => observer(user));
+  expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo verificar App Check');
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(auth.signOut).not.toHaveBeenCalled();
+  expect(screen.queryByLabelText('Email')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  await screen.findByText('Sin perfil: falta completar el registro.');
+  expect(fetcher.mock.calls[0]?.[1]?.headers).toHaveProperty('X-Firebase-AppCheck', 'synthetic-attestation');
 });
 it.each([null, '120', 'malformed'])('restores Firebase under StrictMode and keeps provisioning quota recoverable (%s)', async retry => {
   fetcher.mockResolvedValueOnce(json({ code: 'USER_NOT_FOUND' }, 404)).mockResolvedValueOnce(limited(retry));

@@ -65,6 +65,7 @@ try {
  const blocked=p=>wait(p,"document.body.innerText.includes('Reals está activo en otra pestaña.') && !document.querySelector('.home, .onboarding, .first-chat, .login-form')");
  const takeover=async(p)=>{await p.evaluate("document.querySelector('button').click()");await active(p);};
  const close=async p=>{await p.call('Page.close');};
+ const restoreFixtureUrl = p => p.evaluate(`history.replaceState(history.state, "", ${JSON.stringify(p.fixtureUrl)})`);
  if (process.argv.includes('--install-guidance')) {
   const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1';
   const ipad = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15';
@@ -90,7 +91,7 @@ try {
    await p.evaluate(`${notice}.querySelectorAll('button')[${width === 390 ? 1 : 0}].click()`);
    if (await p.evaluate(`!!${notice} || document.activeElement.textContent !== "Inicio"`)) throw Error('Dismissal or focus restoration failed');
    const loadedAt = await p.evaluate('performance.timeOrigin');
-   await p.evaluate(`history.replaceState(history.state, "", ${JSON.stringify(p.fixtureUrl)})`);
+   await restoreFixtureUrl(p);
    await p.call('Page.reload');
    await wait(p, `performance.timeOrigin !== ${loadedAt}`);
    await homeReady(p);
@@ -113,6 +114,32 @@ try {
   console.log('Installation guidance checks passed in Chromium with emulated Safari signals. Screenshots:', dir);
  }
  else {
+ const lifecycle = [];
+ const hide = p => p.evaluate('window.oldOwnershipSignal = ownership.signal; window.dispatchEvent(new PageTransitionEvent("pagehide", {persisted:true}))');
+ const show = p => p.evaluate('window.dispatchEvent(new PageTransitionEvent("pageshow", {persisted:true}))');
+ reset();
+ const returning = await page('home','identity-a'); await active(returning);
+ await hide(returning); await blocked(returning); await show(returning); await active(returning);
+ if (!await returning.evaluate('oldOwnershipSignal.aborted && !ownership.signal.aborted && oldOwnershipSignal !== ownership.signal && signouts === 0')) throw Error('Restoration reused a revoked grant or signed out');
+ lifecycle.push('Synthetic persisted lifecycle with real Web Locks reacquired a vacant lock');
+ await hide(returning); await blocked(returning);
+ const current = await page('home','identity-b'); await active(current);
+ await show(returning); await blocked(returning); await active(current);
+ await close(current);
+ await returning.call('Page.bringToFront');
+ await returning.evaluate('window.dispatchEvent(new Event("focus")); document.dispatchEvent(new Event("visibilitychange"))');
+ await new Promise(r=>setTimeout(r,250)); await blocked(returning);
+ await takeover(returning);
+ lifecycle.push('Synthetic persisted lifecycle with a real competing owner stayed blocked until explicit activation');
+ await restoreFixtureUrl(returning);
+ await returning.evaluate('window.addEventListener("pageshow", event => { window.restoredFromCache = event.persisted; })');
+ const loadedAt = await returning.evaluate('performance.timeOrigin');
+ await returning.call('Page.navigate',{url:'data:text/html,browser-back-fixture'});
+ await wait(returning,'document.body.innerText === "browser-back-fixture"');
+ await returning.evaluate('history.back()'); await active(returning);
+ const restored = await returning.evaluate(`performance.timeOrigin === ${loadedAt} && window.restoredFromCache === true`);
+ lifecycle.push(restored ? 'Actual Back restored the cached document and reacquired ownership' : 'Actual Back recreated the document and acquired ownership through startup');
+ await close(returning);
  const results=[];
  for(const [first,second] of [['login','login'],['login','home'],['home','home'],['chat','home'],['onboarding','home']]) {
   reset(first==='chat'?'chat':'home');
@@ -128,7 +155,7 @@ try {
   await takeover(a);await blocked(b);
   if(first==='home'){for(const [p,label] of [[a,'mobile-active'],[b,'desktop-blocked']]){const shot=await p.call('Page.captureScreenshot');await writeFile(join(dir,label+'.png'),Buffer.from(shot.data,'base64'));}console.log('Screenshots:',dir);}
   for(let i=0;i<4;i++){await takeover(i%2? a:b);await blocked(i%2? b:a);}
-  await a.call('Page.reload');await active(a);await blocked(b);
+  await restoreFixtureUrl(a);await a.call('Page.reload');await active(a);await blocked(b);
   await close(a);await takeover(b);
   if(requests.some(r=>r.method!=='GET'))throw Error('Unexpected domain write');
   results.push({first,second,identities:'synthetic per-document Firebase identities',takeover:true,focus:true,inactiveMutationRejected:true,reload:true,close:true,rapid:true});
@@ -143,7 +170,7 @@ try {
  if(requests.filter(r=>r.method==='POST').length!==1 || requests.some(r=>r.method==='DELETE'))throw Error('Uncertain write replayed or canceled');
  results.push({pendingMutation:'aborted locally, persisted queue recovered without replay',inactivePollingStopped:true});
  await close(a);await close(b);
- console.log(JSON.stringify({sameBrowserContext:true,results,requests:requests.length,writes:requests.filter(r=>r.method!=='GET')},null,2));
+ console.log(JSON.stringify({sameBrowserContext:true,lifecycle,results,requests:requests.length,writes:requests.filter(r=>r.method!=='GET')},null,2));
  }
 } finally {
  server.closeAllConnections();server.close();for(const ws of sockets)ws.close();chrome.kill();
