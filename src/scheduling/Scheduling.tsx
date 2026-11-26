@@ -14,7 +14,7 @@ import { useActivityNotificationContext } from '../notifications/useActivityNoti
 import './scheduling.css';
 
 export const formatSlot=(v: string)=>new Date(v).toLocaleString('es-AR',{dateStyle:'full',timeStyle:'short'});
-export function Scheduling({controller,connectionId,matchId,partnerName,onBack,onFinished,onBlocked,browse,onBrowse,onCloseBrowse}: {controller: SessionController;connectionId: string;matchId: string;partnerName: string|null;onBack:()=>void;onFinished:()=>void;onBlocked:(value:boolean)=>void;browse:boolean;onBrowse:()=>void;onCloseBrowse:()=>void}) {
+export function Scheduling({controller,connectionId,matchId,partnerName,onLeave,onBack,onFinished,onBlocked,browse,onBrowse,onCloseBrowse}: {controller: SessionController;connectionId: string;matchId: string;partnerName: string|null;onLeave?: (connectionId: string, matchId: string, eligible: boolean) => void;onBack:()=>void;onFinished:()=>void;onBlocked:(value:boolean)=>void;browse:boolean;onBrowse:()=>void;onCloseBrowse:()=>void}) {
   const session=useSyncExternalStore(controller.subscribe,controller.getSnapshot);
   const context=sessionContext(controller), finish=useRef(onFinished), lock=useRef(onBlocked);finish.current=onFinished;lock.current=onBlocked;
   const notifications = useActivityNotificationContext();
@@ -25,6 +25,13 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onBack,o
     if (observing.current) latestHome.current = { context, read };
   }),[controller,context,connectionId,matchId]);
   const s=useSyncExternalStore(model.subscribe,model.getSnapshot), clock=useVisualNow(), now=clock+s.offset;
+  useLayoutEffect(() => () => {
+    const last = model.getSnapshot();
+    const coordinating = last.connection?.state === 'SCHEDULING_PENDING' ||
+      (last.connection?.state === 'SCHEDULING_PHASE' && last.negotiation?.status === 'PENDING');
+    onLeave?.(connectionId, matchId, coordinating && sessionContext(controller) === context &&
+      last.verified && !last.pending && !last.uncertain && !last.terminal);
+  }, [controller, context, model, connectionId, matchId, onLeave]);
   const r=roundState(s.busy&&!s.negotiation,s.negotiation,s.proposals,controller.getSnapshot().account?.id??'');
   const [menu,setMenu]=useState(false),[dialog,setDialog]=useState(false);
   const dialogRef=useRef<HTMLDialogElement>(null),menuButton=useRef<HTMLButtonElement>(null),menuItem=useRef<HTMLButtonElement>(null);

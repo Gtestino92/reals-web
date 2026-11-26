@@ -1,6 +1,7 @@
 import { withEmptyLegalCatalog } from '../test/emptyLegalCatalog';
 import { homeSecondFixture } from './secondHome.fixtures';
 import { secondFixture, secondChatResponse } from '../chat/secondFixtures';
+import { negotiation, availability, time } from '../scheduling/fixtures';
 import { visualProfile } from '../visual/fixtures';
 import { confirmSignOut } from '../test/signOut';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -304,7 +305,7 @@ it('failed reconciliation blocks further queue writes', async () => {
   mount(); await ready(); fireEvent.click(search()); await screen.findByRole('alert');
   expect(screen.queryByRole('button', { name: 'Buscar chat' })).toBeNull(); expect(screen.getByRole('button', { name: 'Consultar estado' })).toBeEnabled(); expect(writes()).toHaveLength(1);
 });
-it('opens Activity and returns with heading focus without fetching again', async () => {
+it('opens Activity and restores Home heading focus with only the affinity summary reads', async () => {
   home.pendingActions = [{ type: 'VISUAL_REVIEW', matchId: 'v', chatId: null }];
   home.nextSteps = ['SCHEDULING','SECOND_CHAT_AVAILABLE','SECOND_CHAT_SCHEDULED','SECOND_CHAT_EXPIRED','FUTURE'].map(type => ({ type, connectionId: type, matchId: 'm', requiresAction: true }));
   mount(); await ready(); fetcher.mockClear();
@@ -313,7 +314,7 @@ it('opens Activity and returns with heading focus without fetching again', async
   expect(screen.getByRole('heading', { name: 'Actividad', level: 2 })).toHaveFocus();
   for (const name of ['Requiere tu acción','En curso','Próximamente','Recientes','Otros']) expect(screen.getByRole('region', { name })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
-  expect(await screen.findByRole('heading', { name: 'Inicio' })).toHaveFocus(); expect(fetcher).not.toHaveBeenCalled();
+  expect(await screen.findByRole('heading', { name: 'Inicio' })).toHaveFocus(); expect(fetcher.mock.calls.map(([url])=>url)).toEqual(affinityPaths);
 });
 it('can cancel location acquisition, reconcile and ignore a late position', async () => {
   let done: PositionCallback | undefined; geo.mockImplementation(ok => { done = ok; });
@@ -686,7 +687,7 @@ it.each(['home','search'])('keeps %s controls, DOM and focus unchanged during an
   fetcher.mockImplementation((url,options)=>url==='/api/me/home/status'?new Promise(r=>{done=r;}):base(url,options));
   fireEvent(document,new Event('visibilitychange'));await waitFor(()=>expect(done).toBeDefined());
   expect(root).toHaveAttribute('aria-busy','false');expect(button).toBeEnabled();expect(button).toHaveFocus();expect(button.closest('.home')).toBe(root);expect(screen.queryByText('Actualizando Inicio…')).toBeNull();
-  await act(async()=>done?.(json(status)));expect(button).toHaveFocus();expect(button).toBeEnabled();expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/api/me/home/status', '/api/reference/affinity-questions', '/api/me/profile/affinity-answers']);
+  await act(async()=>done?.(json(status)));expect(button).toHaveFocus();expect(button).toBeEnabled();expect(fetcher.mock.calls.map(c=>c[0])).toEqual(surface==='search'?['/api/me/home/status']:['/api/me/home/status', ...affinityPaths]);
 });
 it('reconciles a changed foreground Home version and routes Search to the authoritative First Chat',async()=>{
   installFirstChatBackend();home.matchmaking.inQueue=true;mount();await ready();
@@ -874,4 +875,64 @@ it('reconciles a rejected queue admission and gates the next explicit search fro
   expect(await screen.findByRole('button', { name: 'Leer documento' })).toBeVisible();
   expect(geo).toHaveBeenCalledTimes(1);
   expect(writes()).toHaveLength(1);
+});
+
+const affinityPaths = ['/api/reference/affinity-questions','/api/me/profile/affinity-answers'];
+const affinityReads = () => fetcher.mock.calls.map(([url]) => String(url)).filter(url => affinityPaths.includes(url));
+async function resumeTab() {
+  const visibility = vi.spyOn(document,'visibilityState','get');
+  visibility.mockReturnValue('hidden');
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  visibility.mockReturnValue('visible');
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+}
+it('reads affinities once on visible Home and questionnaire entry and skips Account resume',async()=>{
+  mount();await ready();expect(affinityReads()).toEqual(affinityPaths);
+  fireEvent.click(screen.getByRole('button',{name:'Cuenta'}));fetcher.mockClear();
+  await resumeTab();expect(affinityReads()).toEqual([]);
+  fireEvent.click(screen.getByRole('button',{name:'Volver a Inicio'}));
+  await waitFor(()=>expect(affinityReads()).toEqual(affinityPaths));
+  fetcher.mockClear();fireEvent.click(screen.getByRole('button',{name:'Afinidades'}));
+  await screen.findByRole('heading',{name:'Preguntas de afinidad'});expect(affinityReads()).toEqual(affinityPaths);
+  fetcher.mockClear();await resumeTab();expect(affinityReads()).toEqual(affinityPaths);
+});
+it.each(['healthy','failed Home','denied scheduling'] as const)('guards scheduling re-entry during a delayed %s return',async mode=>{
+  home.nextSteps=[{type:'SCHEDULING',connectionId:'c',matchId:'m',requiresAction:true}];
+  const n=negotiation(),snapshot={connection:{id:'c',matchId:'m',userAId:'u',userBId:'them',state:'SCHEDULING_PHASE',
+    schedulingExpiresAt:n.schedulingExpiresAt,createdAt:time,updatedAt:time},negotiation:n,availability:availability(),proposals:[],serverTime:time};
+  const base=fetcher.getMockImplementation()!;
+  let holdHome=false,holdScheduling=false,denied=false,homeSignal:AbortSignal|null|undefined;
+  let finishHome!:(r:Response)=>void,finishScheduling!:(r:Response)=>void;
+  fetcher.mockImplementation((url,options)=>{
+    if(url==='/api/me/home' && holdHome){homeSignal=options?.signal;return new Promise(resolve=>{finishHome=resolve;});}
+    if(url==='/api/connections/c/scheduling-snapshot'){
+      if(holdScheduling)return new Promise(resolve=>{finishScheduling=resolve;});
+      return Promise.resolve(denied?json({code:'USER_PAIR_BLOCKED'},409):json(snapshot));
+    }
+    return base(url,options);
+  });
+  mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));fetcher.mockClear();
+  await resumeTab();expect(affinityReads()).toEqual([]);
+  fireEvent.click(screen.getByRole('button',{name:'Elegir horarios'}));
+  await screen.findByRole('heading',{name:'Proponé tus horarios'});
+  denied=mode==='denied scheduling';await resumeTab();expect(affinityReads()).toEqual([]);
+  holdHome=true;
+  fireEvent.click(screen.getAllByRole('button',{name:'Volver a Actividad'})[0]!);
+  const entry=await screen.findByRole('button',{name:'Elegir horarios'});
+  await waitFor(()=>expect(finishHome).toBeDefined());
+  expect(screen.getByRole('button',{name:'Ver perfil'})).toBeDisabled();
+  if(denied){expect(entry).toBeDisabled();await act(async()=>finishHome(json(emptyHome())));expect(entry).not.toBeInTheDocument();return;}
+  if(mode==='failed Home'){
+    await act(async()=>finishHome(json({},503)));await screen.findByRole('alert');expect(entry).toBeDisabled();return;
+  }
+  expect(entry).toBeEnabled();holdScheduling=true;fireEvent.click(entry);
+  await waitFor(()=>expect(finishScheduling).toBeDefined());
+  expect(homeSignal?.aborted).toBe(true);
+  const obsolete=emptyHome();obsolete.pendingActions=[{type:'FIRST_CHAT',matchId:'obsolete',chatId:'old',requiresAction:true}];
+  await act(async()=>finishHome(json(obsolete)));
+  expect(screen.getByRole('heading',{name:'Coordinar horarios'})).toBeVisible();
+  expect(screen.queryByRole('button',{name:'Enviar horarios'})).toBeNull();
+  await act(async()=>finishScheduling(json(snapshot)));
+  expect(screen.getByRole('heading',{name:'Proponé tus horarios'})).toBeVisible();
+  expect(affinityReads()).toEqual([]);
 });

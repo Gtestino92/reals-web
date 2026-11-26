@@ -241,3 +241,22 @@ it('retains local affinity selection, focused controls and enabled saving while 
   expect(screen.getByText('Siguiente')).toBeEnabled();
   await act(async () => old.resolve(fixture())); expect(screen.getByLabelText('Nada')).toBe(option); expect(option).toBeChecked(); expect(option).toHaveFocus();
 });
+
+it('retires a departed surface read and ignores its response after returning to Home', async () => {
+  const { controller, request } = setup();
+  const view = renderHook(({visible}) => useAffinityQuestionnaire(controller, visible ? 'home' : null), {initialProps:{visible:false}});
+  expect(request).not.toHaveBeenCalled();
+  const old = deferred<unknown>();
+  request.mockReturnValueOnce(old.promise);
+  view.rerender({visible:true});
+  const signal = request.mock.calls[0]![1];
+  view.rerender({visible:false});
+  expect(signal.aborted).toBe(true);
+  view.rerender({visible:true});
+  await waitFor(()=>expect(view.result.current.catalog).toBeTruthy());
+  const catalog = view.result.current.catalog;
+  await act(async()=>old.resolve({}));
+  expect(view.result.current.catalog).toBe(catalog);
+  expect(view.result.current.uncertain).toBe(false);
+  expect(request).toHaveBeenCalledTimes(4);
+});

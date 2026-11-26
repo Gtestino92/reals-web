@@ -71,3 +71,11 @@ Validation completed so far:
 - `npm run typecheck`, `npm run build`, `npm run check:architecture`, `git diff --check`: PASS; 85 production modules, zero runtime cycles; existing Vite bundle-size advisory remains.
 
 The full regression command `npm test -- --maxWorkers=2 --reporter=json --outputFile=artifacts/resume-glitch-tests.json` was interrupted at the developer's request; it produced no completed suite result and must not be described as passing. No further tests or smoke runs were started. Going forward, default validation is affected tests plus typecheck; the developer owns smoke and full regression unless explicitly requested.
+
+## Home, Activity and scheduling re-entry
+
+| Path | Read ownership and navigation |
+| --- | --- |
+| Affinity summary or questionnaire entry and visible-tab return | The mounted account owner reads the catalog and answers once per refresh. Home requests them when its summary is displayed. Questionnaire subpages share the same read. Leaving both surfaces aborts an outstanding read and invalidates its serial. Answer mutations and uncertain-write recovery retain their account owner. |
+| Scheduling Back to Activity | During a healthy Home return read, only the matching scheduling entry can reopen early. Scheduling must have verified that the same session and connection were still coordinating. The profile shortcut and other cards wait for Home. A pending automatic first-chat entry, restoration gate, failed verification, terminal state or uncertain mutation prevents early entry. |
+| Immediate re-entry | Leaving Activity aborts the Home read and retires its serial. An ignored-abort response cannot install Home or open a chat. The new Scheduling session reads its own snapshot before offering mutations. |
