@@ -2233,3 +2233,24 @@ Reviewed Android `83e4ef7` through `SchedulingScreen`, the scheduling round and 
 | Audio delivery and playback | **COMPLETE** in focused tests and native Chromium playback. The two Web timelines own delivery status and explicit retry. The shared composer keeps preparation and recording feedback and retains the preview while delivery is unresolved. Ended playback survives resource release, resets on replay and never starts automatically on return. **PLATFORM-LIMITED** for native permission, codec, gesture and audio session behavior. |
 
 See the [runtime review](ux-runtime-audit.md#scheduling-and-second-chat-refinements) for mutation ownership, confirmed causes, commands and browser evidence. Android comparison used source and existing test code. No current Android screenshots or device captures were available for the scoped states. Physical iPhone Safari, WebKit and Android device rendering remain unverified.
+
+## Cold startup and Home return
+
+Reference `83e4ef7f`: [Android root](../../reals-app/app/src/main/java/com/reals/app/ui/root/RealsApp.kt),
+[session coordinator](../../reals-app/app/src/main/java/com/reals/app/ui/root/SessionCoordinator.kt),
+[Home coordinator](../../reals-app/app/src/main/java/com/reals/app/ui/root/HomeCoordinator.kt),
+[Home router tests](../../reals-app/app/src/test/java/com/reals/app/ui/matchmaking/HomeRouterTest.kt)
+and [profile-status tests](../../reals-app/app/src/test/java/com/reals/app/ui/root/HomeCoordinatorProfileStatusTest.kt).
+See the [Web decision, invariant and timing review](navigation-flicker.md#startup-and-home-return).
+
+| Behavior | Baseline → updated status | Evidence and difference |
+| --- | --- | --- |
+| Session preparation and destination handoff | PARTIAL → COMPLETE for the tested Web flow | Android has a Compose full-screen session message and separate Ready/Home-loading state. Web uses a shared branded presentation across initial ownership, session, legal and Home/chat resolution. Focused tests cover Login, setup, restriction, recovery, legal failure/retry and replacement. Chromium at 390/1440 px observed one fixed loading presentation and no Login or ordinary Home flash during ACTIVE Home startup. |
+| Queue, automatic First Chat and passive Second Chat | PARTIAL → COMPLETE for the covered paths | Android resolves routes from Home projections. Web keeps queue and restoration authority and waits for usable content. Focused tests cover queued startup, delayed First Chat, delayed passive history and no duplicate JOIN. Chromium verified Second Chat reload when alone or with a partner. |
+| Profile Back and eligibility | PARTIAL → COMPLETE for the scoped return | Android `closeProfileManagementWithHomeReload` reloads Home and preserves an error retry. Web returns to mounted Home with current profile and status verification. The full projection still runs when required. No new gesture or history behavior. Chromium checks profile Back with and without a save. Unit coverage includes preferences, version, due boundary, failure, stale replies and queue recovery. |
+| Tab ownership, Admin, viewport and input | PLATFORM-LIMITED | Browser-only ownership and MFA follow Web Locks/BFCache and independent authorization. Responsive light/dark screenshots and keyboard semantics are Web evidence. Current native screenshots were unavailable for these scoped states. Physical Android/iOS, WebKit and live backend performance remain unverified. |
+
+The [retained Admin grant correction](navigation-flicker.md#retained-admin-grant-and-home-return)
+keeps Android's queue and conversation priority during the Web-only Admin
+navigation flow. Focused tests cover both completion orders and Chromium
+verifies clean entry and retirement on queue discovery.

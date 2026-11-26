@@ -18,7 +18,8 @@ export class TabOwnershipManager {
   get signal() { return this.lease.signal; }
   assert = () => { if (this.state !== 'active') throw new DOMException('Pestaña inactiva', 'AbortError'); };
   private install(state: OwnershipState) { this.state = state; this.listeners.forEach(fn => fn()); }
-  start = () => {
+  start = () => this.startOwnership(true);
+  private startOwnership(initial: boolean) {
     if (this.running) return;
     this.running = true;
     if (!globalThis.isSecureContext || !navigator.locks || !globalThis.BroadcastChannel) { this.install('unsupported'); return; }
@@ -27,13 +28,16 @@ export class TabOwnershipManager {
       this.channel.onmessage = ({ data }: MessageEvent<unknown>) => {
         if (typeof data !== 'object' || !data) return;
         if ('type' in data && data.type === 'ask' && this.grant) this.send({ type: 'owner', grant: this.grant });
-        if ('type' in data && data.type === 'owner' && 'grant' in data && typeof data.grant === 'string' && this.pending?.transfer) this.send({ type: 'release', grant: data.grant });
+        if ('type' in data && data.type === 'owner' && 'grant' in data && typeof data.grant === 'string' && this.pending?.transfer) {
+          this.install('requesting-transfer');
+          this.send({ type: 'release', grant: data.grant });
+        }
         if ('type' in data && data.type === 'release' && 'grant' in data && data.grant === this.grant && this.grant) this.revoke();
       };
       this.channel.onmessageerror = () => this.fail();
       window.addEventListener('pagehide', this.hide);
       window.addEventListener('pageshow', this.show);
-      this.request();
+      this.acquire(true, initial);
     } catch { this.fail(); }
   };
   private send(message: { type: string; grant?: string }) { try { this.channel?.postMessage(message); } catch { this.fail(); } }
@@ -47,15 +51,15 @@ export class TabOwnershipManager {
   }
   private fail() { this.clearPending(); this.revoke(); this.channel?.close(); this.channel = null; this.install('error'); }
   request = () => this.acquire(true);
-  private acquire(transfer: boolean) {
+  private acquire(transfer: boolean, initial = false) {
     if (!this.running || this.pending || this.state === 'active') return;
     if (!this.channel) {
-      if (transfer) { this.running = false; this.start(); }
+      if (transfer) { this.running = false; this.startOwnership(false); }
       return;
     }
     const pending = { controller: new AbortController(), transfer };
     this.pending = pending;
-    this.install('requesting-transfer');
+    this.install(initial || !transfer ? 'initializing' : 'requesting-transfer');
     if (transfer) {
       this.timer = setInterval(() => this.send({ type: 'ask' }), 250);
       this.deadline = setTimeout(() => { if (this.pending === pending) this.fail(); }, 8000);

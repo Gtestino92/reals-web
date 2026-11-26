@@ -6,6 +6,7 @@ import { emptyHome, homeStatus } from './fixtures';
 import { homeSecondFixture } from './secondHome.fixtures';
 import { secondHarness } from '../chat/secondFixtures';
 import { ApiError } from '../auth/api';
+import { StartupBoundary } from '../SessionLoading';
 
 function harness() {
   const h=secondHarness(),home=emptyHome(),item=homeSecondFixture(),base=h.request.getMockImplementation()!;
@@ -81,6 +82,24 @@ it('uses the same chat shell through delayed passive history and the ready conve
   await act(async()=>release());
   expect(screen.getByRole('textbox',{name:'Mensaje'})).toBeEnabled();
   expect(onChatActiveChange).not.toHaveBeenCalledWith(false);
+  expect(postCount(h)).toBe(0);
+});
+it('holds the cold startup presentation through passive Second Chat restoration', async () => {
+  const h = harness(), base = h.request.getMockImplementation()!;
+  let release!: () => void;
+  h.request.mockImplementation(async (...args) => {
+    if (args[0].includes('/messages?')) await new Promise<void>(resolve => { release = resolve; });
+    return base(...args);
+  });
+  render(<StrictMode><StartupBoundary><Home controller={h.controller} /></StartupBoundary></StrictMode>);
+  const startup = screen.getByRole('status');
+  await waitFor(() => expect(release).toBeDefined());
+  expect(startup).toBeVisible();
+  expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: 'Mensaje' })).toBeNull();
+  await act(async () => release());
+  expect(await screen.findByRole('textbox', { name: 'Mensaje' })).toBeEnabled();
+  expect(startup).not.toBeInTheDocument();
   expect(postCount(h)).toBe(0);
 });
 it('allows Home when a stale active Home item is authoritatively inaccessible',async()=>{

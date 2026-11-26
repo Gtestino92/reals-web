@@ -13,7 +13,7 @@ import { PhotoGrid } from './PhotoGrid';
 import { photoPlacements } from './photoReorder';
 import { photoFileError } from './photoFiles';
 import './onboarding.css';
-import { SessionLoading } from '../SessionLoading';
+import { SessionLoading, useStartupDestination } from '../SessionLoading';
 import { parseQueue } from '../home/contracts';
 import type { Home as HomeComponent } from '../home/Home';
 import { AccountSection } from '../home/AccountSection';
@@ -63,7 +63,7 @@ export function onboardingError(error: unknown, activation = false) {
   return `No se pudo completar la operación${error.code ? ` (${error.code})` : ''}. Revisá los datos y actualizá el estado.`;
 }
 interface Model { profile: FullProfile | null; photos: Photo[] | null; interactions: boolean | null }
-export function Onboarding({ Home, active = true, controller, management, navigation: providedNavigation, onBack, onPreferencesSaved, onNavigationBlockedChange, onAccountAvailableChange, onAdminNavigationBlockedChange }: { Home: typeof HomeComponent; active?: boolean; onAdminNavigationBlockedChange?: ((blocked: boolean) => void) | undefined; controller: SessionController; management?: 'details' | 'filters'; navigation?: HomeNavigation; onAccountAvailableChange?: (available: boolean) => void; onBack?: () => void; onPreferencesSaved?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
+export function Onboarding({ Home, active = true, controller, management, navigation: providedNavigation, onBack, onPreferencesSaved, onHomeInvalidated, onNavigationBlockedChange, onAccountAvailableChange, onAdminNavigationBlockedChange }: { Home: typeof HomeComponent; active?: boolean; onAdminNavigationBlockedChange?: ((blocked: boolean) => void) | undefined; controller: SessionController; management?: 'details' | 'filters'; navigation?: HomeNavigation; onAccountAvailableChange?: (available: boolean) => void; onBack?: () => void; onPreferencesSaved?: () => void; onHomeInvalidated?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
   const [model, setModel] = useState<Model | null>(null), [catalog, setCatalog] = useState<Country[]>([]), [countryError,setCountryError] = useState('');
   const previousProfile = useRef<string | null | undefined>(undefined);
   useLayoutEffect(() => {
@@ -72,6 +72,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     if (model) previousProfile.current = id ?? null;
   }, [model, management]);
   const [busy, setBusy] = useState(!management), [blocked,setBlocked] = useState(true);
+  const starting = useStartupDestination(!management && active && (!!model || !busy));
   const [loadingCountries, setLoadingCountries] = useState(true);
   const [blockingRead, setBlockingRead] = useState(!!management);
   const [navigationLocked, setNavigationLocked] = useState(!management);
@@ -276,6 +277,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
       if (!currentAccount()) return false;
       if (!result) {
         setBlocked(true);
+        onHomeInvalidated?.();
         returnHome = true;
         return true;
       }
@@ -305,6 +307,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
       setBlocked(result.queued || resource.creationNeedsCheck || resource.activationNeedsCheck || resource.writeUncertain || (uncertain && profileMode !== 'create' && !activation));
       if (!task && readError.current && !resource.writeUncertain) { readError.current = false; setError(null); }
       returnHome = result.queued && !failure;
+      if (result.queued) onHomeInvalidated?.();
       savedPreferences = activeFilters && !failure && activated && result.profile?.id === model?.profile?.id;
       if (activated && !management) setError(current => current?.activation ? null : current);
       if ((management || profileMode && profileMode !== 'create') && task && !failure && !signal.aborted) setFeedback({ message: 'Cambios guardados.', profileMode: profileMode ?? null });
@@ -327,6 +330,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     finally {
       if (owner.current === resource && !signal.aborted && resource.operation === operation && currentAccount()) {
         resource.locked = false; resource.background = false; resource.operation = null;
+        if (resource.writeUncertain) onHomeInvalidated?.();
         resource.navigationLocked = resource.writeUncertain;
         setNavigationLocked(resource.navigationLocked); setBusy(false); setBlockingRead(false); setSavingProfile(null); setActivating(false);
         onNavigationBlockedChange?.(resource.navigationLocked || cropOwned.current || accountLocked.current || nestedHomeLock.current);
@@ -467,7 +471,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
       void loadManagementPhotos(profile, resource.abort.signal);
     }
   };
-  if (!model && busy && !management) return <SessionLoading />;
+  if (!model && busy && !management) return starting ? null : <SessionLoading />;
   return <><div className="onboarding" hidden={questionsActive || previewActive} aria-busy={!management && busy}>
     {management && <header className="home-heading"><h2>{management === 'details' ? 'Tu perfil' : 'Preferencias'}</h2><button type="button" className="login-button login-outlined" disabled={navigationLocked || !!crop || accountBusy || nestedHomeBlocked} onClick={onBack}>Volver a Inicio</button></header>}
     <div>

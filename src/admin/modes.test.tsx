@@ -5,6 +5,7 @@ import { OperationalApp } from '../App';
 import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
 import { emptyHome, homeStatus } from '../home/fixtures';
+import { homeSecondFixture } from '../home/secondHome.fixtures';
 import { defaults } from '../onboarding/contracts';
 import { confirmSignOut } from '../test/signOut';
 import { diag, photo } from './fixtures';
@@ -188,15 +189,108 @@ it('verifies eligibility immediately after bootstrap, independently of a delayed
   const h = setup(), base = h.fetcher.getMockImplementation()!;
   let finish!: (response: Response) => void;
   h.fetcher.mockImplementation((path, options) => path === '/api/me/home' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
-  const entry = await screen.findByRole('button', { name: 'Admin' });
-  expect(entry.closest('header')).toHaveClass('home-heading');
-  expect(entry).toBeDisabled(); // The existing pending-operation guard still applies.
+  await waitFor(() => expect(h.status).toHaveBeenCalledOnce());
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando Reals…');
+  expect(screen.queryByRole('button', { name: 'Admin' })).toBeNull();
   expect(h.status).toHaveBeenCalledOnce();
   await waitFor(() => expect(finish).toBeDefined());
   await act(async () => finish(json(emptyHome())));
-  await waitFor(() => expect(entry).toBeEnabled());
-  expect(screen.getByRole('button', { name: 'Admin' })).toBe(entry);
+  const entry = await screen.findByRole('button', { name: 'Admin' });
+  expect(entry.closest('header')).toHaveClass('home-heading');
+  expect(entry).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Actualizar' })).toBeNull();
+});
+
+it('starts independent Admin verification on a healthy profile return while Search waits for Home', async () => {
+  const h = setup();
+  const search = await screen.findByRole('button', { name: 'Buscar chat' });
+  const admin = await screen.findByRole('button', { name: 'Admin' });
+  fireEvent.click(screen.getByRole('button', { name: 'Tu perfil' }));
+  await screen.findByRole('form', { name: 'Datos del perfil' });
+  const base = h.fetcher.getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  h.fetcher.mockImplementation((path, options) => path === '/api/me/home/status' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(screen.getByRole('button', { name: 'Admin' })).toBe(admin);
+  expect(admin).toBeEnabled();
+  expect(search).toBeDisabled();
+  expect(screen.queryByText('Preparando Reals…')).toBeNull();
+  fireEvent.click(admin);
+  await screen.findByLabelText('Código de seis dígitos');
+  expect(h.status).toHaveBeenCalledTimes(2);
+  expect(h.events.some(path => path.startsWith('/api/admin/'))).toBe(false);
+  await act(async () => finish(json(homeStatus())));
+  expect(search).toBeEnabled();
+});
+
+async function retainedGrantReturn() {
+  const h = setup();
+  await enter(); await verify(); await back();
+  fireEvent.click(screen.getByRole('button', { name: 'Tu perfil' }));
+  await screen.findByRole('form', { name: 'Datos del perfil' });
+  const base = h.fetcher.getMockImplementation()!;
+  let home!: (response: Response) => void;
+  let access!: (response: Response) => void;
+  h.fetcher.mockImplementation((path, options) => path === '/api/me/home/status' ? new Promise(resolve => { home = resolve; }) : base(path, options));
+  h.status.mockImplementationOnce(() => new Promise(resolve => { access = resolve; }));
+  h.events.length = 0;
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
+  await enter();
+  await waitFor(() => { expect(home).toBeDefined(); expect(access).toBeDefined(); });
+  return { ...h, home, access, base };
+}
+
+it.each(['Home', 'Admin'])('enters once with the retained grant when %s verification completes first', async first => {
+  const h = await retainedGrantReturn();
+  const finishHome = () => h.home(json(homeStatus()));
+  const finishAdmin = () => h.access(json({ configured: true, grantValid: true }));
+  await act(async () => (first === 'Home' ? finishHome : finishAdmin)());
+  expect(h.events.filter(path => path.startsWith('/api/admin/'))).toEqual([]);
+  expect(screen.queryByText('Dato privado admin')).toBeNull();
+  await act(async () => (first === 'Home' ? finishAdmin : finishHome)());
+  await screen.findByText('Dato privado admin');
+});
+
+it.each(['queue', 'first chat', 'second chat', 'changed version', 'failed read'] as const)(
+  'retires retained-grant entry when the Home return produces %s', async outcome => {
+    const h = await retainedGrantReturn();
+    await act(async () => h.access(json({ configured: true, grantValid: true })));
+    await screen.findByRole('button', { name: 'Cancelar entrada a Admin' });
+    const projection = emptyHome();
+    if (outcome === 'queue') projection.matchmaking.inQueue = true;
+    if (outcome === 'first chat') projection.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }];
+    if (outcome === 'second chat') {
+      const chat = homeSecondFixture();
+      Object.assign(chat.secondChat!, { chatId: 'c', chatStatus: 'ACTIVE', myAttendanceStatus: 'ON_TIME' });
+      projection.nextSteps = [chat];
+    }
+    h.fetcher.mockImplementation((path, options) => path === '/api/me/home' ? Promise.resolve(json(projection)) : h.base(path, options));
+    await act(async () => h.home(outcome === 'failed read' ? json({}, 503) : json({ ...homeStatus(), version: 2 })));
+    if (outcome === 'queue') await screen.findByRole('heading', { name: 'Buscando chat' });
+    else if (outcome === 'first chat') await screen.findByRole('region', { name: 'Primer chat' });
+    else if (outcome === 'failed read') await screen.findByText(/No pudimos actualizar Inicio/);
+    else await waitFor(() => expect(screen.getByRole('button', { name: 'Buscar chat' })).toBeEnabled());
+    expect(screen.queryByRole('button', { name: 'Cancelar entrada a Admin' })).toBeNull();
+    expect(h.events.filter(path => path.startsWith('/api/admin/'))).toEqual([]);
+  },
+);
+
+it.each(['cancel', 'navigate', 'replace', 'expire'] as const)('does not enter if the retained intent must %s while Home is pending', async mode => {
+  const h = await retainedGrantReturn();
+  await act(async () => h.access(json({ configured: true, grantValid: true })));
+  const cancel = await screen.findByRole('button', { name: 'Cancelar entrada a Admin' });
+  if (mode === 'cancel') fireEvent.click(cancel);
+  if (mode === 'navigate') fireEvent.click(screen.getByRole('button', { name: 'Tu perfil' }));
+  if (mode === 'replace') {
+    h.fetcher.mockImplementation(h.base);
+    act(() => h.replace('different-uid'));
+  }
+  if (mode === 'expire') vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 900001);
+  await act(async () => h.home(json(homeStatus())));
+  if (mode === 'expire') await screen.findByLabelText('Código de seis dígitos');
+  expect(h.events.filter(path => path.startsWith('/api/admin/'))).toEqual([]);
+  expect(screen.queryByText('Dato privado admin')).toBeNull();
 });
 
 it('does not flash an unverified entry and rejects late eligibility after identity replacement', async () => {

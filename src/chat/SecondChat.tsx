@@ -15,6 +15,7 @@ import { ReactionLane } from './ReactionLane';
 import { ChatMenu, ConfirmDialog, ConfirmDialogActions, submitChatOnEnter, TextSendButton } from './ChatControls';
 import { ChatIcon } from './ChatIcon';
 import { SecondChatSkeleton } from './SecondChatSkeleton';
+import { useStartupDestination } from '../SessionLoading';
 import './chat.css';
 const endedCopy: Record<string,string> = {
   SECOND_CHAT_MUTUAL_COMPLETION: 'Finalizaron el chat de común acuerdo.', SECOND_CHAT_PARTNER_INACTIVITY: 'El chat terminó por falta de respuesta.',
@@ -64,14 +65,15 @@ function SecondChatView({ controller, connectionId, matchId, onHome, navigation,
   const presentation = secondPresentation(s,now);
   const loading = !state.returnHome && !state.error && presentation !== 'terminal-unavailable' && !(p.active && p.expired) &&
     (!s || state.entryPending || (p.readable && !state.historyReady));
+  const starting = useStartupDestination(!loading);
   const historyVisible = p.readable && state.historyReady && !state.returnHome && !loading;
   const headingFocused = useRef(false);
   useLayoutEffect(() => {
-    if (!loading && !headingFocused.current && heading.current) {
+    if (!starting && !loading && !headingFocused.current && heading.current) {
       headingFocused.current = true;
       heading.current.focus({ preventScroll: true });
     }
-  },[loading]);
+  },[loading, starting]);
   usePresentedActivity(root, p.active && historyVisible ? activityId('SECOND_CHAT_AVAILABLE', connectionId, s?.scheduledAt) : null);
   const writable = p.writable && !state.blocked, ordinary = writable && !state.busy && !state.outgoing && !audioDirty;
   const canHome = session.canReturnHome;

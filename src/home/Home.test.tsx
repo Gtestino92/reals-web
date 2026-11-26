@@ -284,6 +284,29 @@ it('enqueues with supported location payload, reconciles and cancels', async () 
   expect(fetcher.mock.calls.some(([url, o]) => String(url).endsWith('/queue') && o?.method === 'GET')).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' })); await waitFor(() => expect(search()).toBeEnabled()); expect(writes()).toHaveLength(2);
 });
+it('accepts a single Search click during an unrelated status poll and retires the obsolete read', async () => {
+  mount(); await ready();
+  const base = fetcher.getMockImplementation()!;
+  let finish: ((response: Response) => void) | undefined;
+  let oldSignal: AbortSignal | null | undefined;
+  fetcher.mockImplementation((path, options) => {
+    if (path === '/api/me/home/status' && !finish) {
+      oldSignal = options?.signal;
+      return new Promise(resolve => { finish = resolve; });
+    }
+    return base(path, options);
+  });
+  act(() => window.dispatchEvent(new Event('online')));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(search()).toBeEnabled();
+  fireEvent.click(search());
+  await confirmed();
+  expect(oldSignal?.aborted).toBe(true);
+  expect(writes()).toHaveLength(1);
+  await act(async () => finish?.(json(status)));
+  expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible();
+  expect(writes()).toHaveLength(1);
+});
 it.each([1,2,3])('location error %s is actionable and never submits', async code => {
   geo.mockImplementation((_ok, fail) => fail?.({ code, message: 'sensitive', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }));
   mount(); await ready(); fireEvent.click(search()); expect(await screen.findByRole('alert')).not.toHaveTextContent('sensitive'); expect(writes()).toHaveLength(0); fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' })); expect(search()).toBeEnabled();
@@ -603,9 +626,23 @@ function installFirstChatBackend() {
     return original(url,options);
   });
 }
-it('keeps active chat on Back and hides session chrome',async()=>{
-  installFirstChatBackend();home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();
+it('keeps startup visible until automatic First Chat is ready, then keeps chat on Back',async()=>{
+  installFirstChatBackend();home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];
+  const original = fetcher.getMockImplementation()!;
+  let release!: () => void;
+  fetcher.mockImplementation(async (path, options) => {
+    if (String(path).includes('/messages?')) await new Promise<void>(resolve => { release = resolve; });
+    return original(path, options);
+  });
+  mount();
+  const startup = screen.getByRole('status');
+  await waitFor(() => expect(release).toBeDefined());
+  expect(startup).toBeVisible();
+  expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Primer chat' })).toBeNull();
+  await act(async () => release());
   await screen.findByRole('region',{name:'Primer chat'});
+  expect(startup).not.toBeInTheDocument();
   expect(screen.queryByRole('heading',{name:'Reals'})).toBeNull();
   expect(screen.queryByRole('button',{name:'Cerrar sesión'})).toBeNull();
   expect(screen.queryByRole('button',{name:'Volver a Inicio'})).toBeNull();
@@ -839,12 +876,15 @@ it('retains loaded affinity card content across a foreground refresh', async () 
   expect(card.textContent).toBe(content); expect(screen.getByRole('button', { name: 'Cuenta' })).toBe(account);
 });
 
-it('renders a noninteractive structure while the first Home projection is pending', async () => {
+it('keeps startup visible and Home noninteractive until the first projection resolves', async () => {
   const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => url === '/api/me/home' ? new Promise(() => {}) : base(url, options));
-  mount(); await screen.findByText('Actualizando Inicio…');
-  expect(document.querySelector('.home-placeholder')).toHaveAttribute('aria-hidden', 'true');
-  expect(document.querySelectorAll('.home-placeholder-card')).toHaveLength(4);
+  mount(); const startup = screen.getByRole('status');
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url === '/api/me/home')).toBe(true));
+  expect(startup).toBeVisible();
+  expect(startup).toHaveTextContent('Preparando Reals…');
+  expect(document.querySelector('.home-placeholder')).not.toBeVisible();
+  expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Cuenta' })).toBeNull();
 });
 

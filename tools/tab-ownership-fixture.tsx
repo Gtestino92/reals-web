@@ -24,7 +24,14 @@ let signoutCount = 0;
 const observers = new Set<(identity: null) => void>();
 if (params.has('geo')) Object.defineProperty(navigator, 'geolocation', { configurable: true, value: { getCurrentPosition: (ok: PositionCallback) => setTimeout(() => ok({ coords: { latitude: 12, longitude: -21, accuracy: 25, altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}) }, timestamp: Date.now(), toJSON: () => ({}) }), 300) } });
 const root = document.getElementById('root')!;
+if (params.has('startup-home')) {
+  const locks = navigator.locks;
+  const request = locks.request.bind(locks);
+  locks.request = (...args: Parameters<LockManager['request']>) =>
+    new Promise(resolve => setTimeout(resolve, 120)).then(() => request(...args));
+}
 createRoot(root).render(<React.StrictMode><App {...(params.get('ownership') === 'auto' ? {} : { ownership: manager })} api={api} firebase={{ localVerification: false, service: {
+  ...(params.has('startup-home') ? { googleContext: async () => ({ provider: 'google.com', authTime: Date.now() }) } : {}),
   observe: next => { observers.add(next); next(params.get('kind') === 'login' ? null : { uid: params.get('uid') ?? 'fixture', emailVerified: true, getIdToken: async () => 'synthetic', reload: async () => {} }); return () => { observers.delete(next); }; },
   signIn: async () => { throw Error('Fixture'); }, signUp: async () => { throw Error('Fixture'); }, google: async () => { throw Error('Fixture'); }, verify: async () => {}, signOut: async () => { if (!params.has('signout')) throw Error('Unexpected fixture signout'); Object.assign(window, { signouts: ++signoutCount }); observers.forEach(next => next(null)); },
 } }} /></React.StrictMode>);
