@@ -40,12 +40,30 @@
 }
 .legal-reader[open] { display: flex; flex-direction: column; }
 .legal-reader::backdrop { background: rgb(0 0 0 / 55%); }
-.legal-reader header, .legal-reader footer { padding: 12px 16px; }
-.legal-reader h2 { font-family: var(--font-display); margin: 0; }
-.legal-reader small { color: var(--color-on-surface-variant); }
-.legal-reader-body { flex: 1; min-height: 0; scrollbar-gutter: stable; padding: 0 16px; overflow: auto; overscroll-behavior: contain; line-height: 1.55; }
+.legal-reader > header, .legal-reader > footer { padding: 12px 16px; }
+.legal-reader > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 12px; }
+.legal-reader-heading { min-width: 0; }
+.legal-reader-heading h2 { font-family: var(--font-display); margin: 0; }
+.legal-reader-meta { display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; }
+.legal-reader-meta small { color: var(--color-on-surface-variant); }
+.legal-reader-meta a { display: flex; align-items: center; min-height: var(--control-min-height); color: var(--color-primary); font-size: 0.875rem; }
+.legal-reader > header button { flex-shrink: 0; padding-inline: 12px; max-width: 40%; }
+.legal-reader-body { flex: 1; min-height: 0; scrollbar-gutter: stable; padding: 0 16px 12px; overflow: auto; overscroll-behavior: contain; line-height: 1.55; }
 .legal-reader-body > [role="status"] { text-align: center; color: var(--color-on-surface-variant); }
-.legal-reader footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--color-outline); }
-.legal-reader footer a { margin-inline-end: auto; color: var(--color-primary); padding-block: 10px; }
-.legal-reader footer button { width: auto; }
+.legal-reader > footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--color-outline); }
 .legal-reader-status { margin: 4px 16px; }
+
+@media (max-width: 40rem), (pointer: coarse) and (max-height: 32rem) {
+  .legal-reader {
+    inset: 0;
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .legal-reader > footer button { width: 100%; }
+}
