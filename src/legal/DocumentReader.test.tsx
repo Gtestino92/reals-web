@@ -69,9 +69,22 @@ it('requires successful presentation, allows retry and submits only on explicit 
   expect(submit).toHaveBeenCalledOnce();
 });
 
-it.each(['http://reals-web.pages.dev/legal/doc', 'https://example.org/legal/doc', 'https://reals-web.pages.dev/app'])('rejects an untrusted publication before fetching %s', async target => {
+it.each([
+  'http://reals-web.pages.dev/legal/doc',
+  'https://example.org/legal/doc',
+  'https://reals-web.pages.dev/app',
+  'https://reals-web.pages.dev/legal/%2e%2e/app',
+  'https://@reals-web.pages.dev/legal/doc',
+  'https://reals-web.pages.dev/legal/doc#fragment',
+  'javascript:void(0)',
+])('rejects an untrusted publication before fetching or offering navigation to %s', async target => {
   const fetcher = vi.fn();
   vi.stubGlobal('fetch', fetcher);
+  render(<DocumentReader doc={{ type: 'TERMS_OF_USE', requiredAction: 'ACCEPTED', version: 'v1', satisfied: false, url: target }}
+    title="Términos de uso" action="Aceptar" disabled={false} onClose={vi.fn()} onSubmit={vi.fn()}/>);
+  expect(screen.queryByRole('link', { name: 'Abrir en navegador' })).toBeNull();
+  expect(await screen.findByRole('alert')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Aceptar' })).toBeDisabled();
   await expect(loadDocument(target, new AbortController().signal)).rejects.toThrow();
   expect(fetcher).not.toHaveBeenCalled();
 });

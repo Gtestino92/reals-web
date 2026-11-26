@@ -1,12 +1,13 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { LegalDocument } from '../onboarding/contracts';
-import { loadDocument } from './documentContent';
+import { loadDocument, publicationUrl } from './documentContent';
 
 export function DocumentReader({ doc, title, action, disabled, status, onClose, onSubmit }: {
   doc: LegalDocument; title: string; action: string | null; disabled: boolean; status?: string | undefined; onClose: () => void; onSubmit: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const id = useId();
+  const href = publicationUrl(doc.url);
   const [attempt, setAttempt] = useState(0);
   const [content, setContent] = useState<ReactNode>(null);
   const [failed, setFailed] = useState(false);
@@ -37,7 +38,7 @@ export function DocumentReader({ doc, title, action, disabled, status, onClose, 
         <p role="status">Cargando documento…</p>)}
     </div>
     {status && <p className="legal-reader-status" role="status">{status}</p>}
-    <footer><a href={doc.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Abrir en navegador</a>
+    <footer>{href && <a href={href} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Abrir en navegador</a>}
       <button className="login-button login-outlined" onClick={onClose}>Cerrar</button>
       {action && !doc.satisfied && <button className="login-button login-primary" disabled={!content || disabled} onClick={onSubmit}>{action}</button>}
     </footer>
