@@ -37,7 +37,7 @@ export class ApiClient {
   ) {}
   withOwnership(ownership?: TabOwnershipManager) { return new ApiClient(this.fetcher, ownership, this.appCheckToken, this.environment); }
   withAppCheck(provider?: AppCheckTokenProvider) { return new ApiClient(this.fetcher, this.ownership, provider, this.environment); }
-  async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true, adminGrant?: string, onHistoryAccess?: HistoryAccessListener): Promise<unknown> {
+  async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true, adminGrant?: string, onHistoryAccess?: HistoryAccessListener, contactRevision?: string): Promise<unknown> {
     this.ownership?.assert();
     if (this.ownership) signal = AbortSignal.any([signal, this.ownership.signal]);
     const route = path.split('?', 1)[0];
@@ -49,6 +49,9 @@ export class ApiClient {
     for (let attempt = 0; attempt < 2; attempt++) {
       signal.throwIfAborted();
       const headers: Record<string, string> = {};
+      if (contactRevision !== undefined && method === 'PUT' && (path === '/me/shared-contacts/consent' || path === '/me/shared-contacts/selection')) {
+        headers['X-Contact-Revision'] = contactRevision;
+      }
       if (user) {
         const token = await abortable(user.getIdToken(attempt === 1), signal);
         if (!token.trim()) throw new ApiError('authorization', 401, 'INVALID_TOKEN');

@@ -132,8 +132,11 @@ export class SessionController {
   private install(patch: Partial<SessionSnapshot>) { this.snapshot = { ...this.snapshot, ...patch }; this.listeners.forEach(listener => listener()); }
   getSnapshot = () => this.snapshot;
   // Domain requests share the existing identity, cancellation and restriction handling.
+  get sessionSignal() {
+    return this.ownershipSignal ? AbortSignal.any([this.controller.signal, this.ownershipSignal]) : this.controller.signal;
+  }
   readonly legalEvents = new EventTarget();
-  request = async (path: string, signal: AbortSignal, method = 'GET', body?: unknown, onHistoryAccess?: HistoryAccessListener) => {
+  request = async (path: string, signal: AbortSignal, method = 'GET', body?: unknown, onHistoryAccess?: HistoryAccessListener, contactRevision?: string) => {
     this.ownership?.assert();
     const generation = this.generation;
     const user = this.user;
@@ -146,7 +149,7 @@ export class SessionController {
       const result = await this.api.request(path, AbortSignal.any([signal, this.controller.signal]), user, method, body, administrative ? (path === '/admin-auth/revoke' ? 204 : 200) : undefined, !administrative, grant,
         onHistoryAccess && (access => {
           if (!signal.aborted && this.current(generation)) onHistoryAccess(access);
-        }));
+        }), contactRevision);
       if (path.startsWith('/admin/') && (!this.adminView || viewEpoch !== this.adminViewEpoch || this.admin.token() !== grant || this.admin.getSnapshot().phase !== 'allowed')) throw new DOMException('Sesión obsoleta', 'AbortError');
       if (!this.current(generation)) throw new DOMException('Sesión obsoleta', 'AbortError');
       return result;
