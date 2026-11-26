@@ -27,7 +27,7 @@ export function useSecondChatRestoration(controller: SessionController, home: Ho
           session.dispose(); session = null;
           setState({ready:false,error:'No pudimos verificar tu segundo chat activo. Revisá tu conexión y reintentá.'}); return;
         }
-        if (!session.rules.canReturn) {
+        if (!session.getSnapshot().returnHome && !session.rules.canReturn) {
           completed.current = true; transferred = true;
           callback.current(item,session); setState({ready:true,error:''}); return;
         }

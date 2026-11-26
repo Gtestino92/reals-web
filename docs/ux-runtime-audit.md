@@ -147,3 +147,40 @@ generation, development and production-preview checks (all final exit codes 0),
 light/dark review and native-tab limitations. The final build was rerun after
 asset generation; application code and unit tests did not change after the full
 suite above. No commit, push, merge or deployment was performed.
+
+## Scheduling and Second Chat refinements
+
+Branch `fix/second-chat-visual-refinements` starts at fetched `origin/development` `a954fa6ee85b5cfa93738bcb361584d80455a8bd`. See the [Android parity matrix](android-parity-matrix.md#scheduling-exits-and-second-chat-presentation) for the source comparison.
+
+- Scheduling rendered a font glyph inside the outline control and used the same trail-relative callback for both return buttons. Confirmed scheduling now names and targets Activity and Home separately. The unconfirmed exit follows the caller. The 48px icon button retains the scoped block menu and native modal.
+- Second Chat installed status before verifying the chat and fetching history. The view rendered that intermediate status and its actions. It now presents a structural skeleton until authoritative data, entry reconciliation and initial history are ready. Empty validated pages satisfy readiness. Passive restoration uses the same shell from skeleton through chat. The original light-theme timeline used a transparent border. Retained history now has a visible frame in both themes.
+- Global busy feedback competed with action-specific feedback. Safety and resolution confirmations announce progress and show errors within the dialog. A transient error retains the form and permits connection recovery. The timeline owns outgoing delivery status and audio retry in both chats.
+- Playback formatted elapsed seconds by flooring and duration by rounding up. Visibility changes and competing media released the element through the pause path, which relabeled completion as paused at the end. Clock rounding is now shared and completion owns the final position. Release preserves completed playback, and one gesture resets visual progress and starts a new media element at zero.
+
+| Installation or mutation path | Invariant |
+| --- | --- |
+| Scheduling reads, confirmation and block | The existing lifecycle model owns actions, aborts overlapping reads, and reconciles writes. Both exit buttons respect the pending lock and the same History guard as profile browsing and browser Back. |
+| Second Chat initial reads, JOIN and restoration | Match validation, status and chat/history reads use the current account, connection, abort signal and generation. JOIN requires a consumed explicit intent or an explicit entry button. Polling/restoration never JOIN. An initial error exits the skeleton with recovery. A history marker is installed with validated rows, including an empty result. |
+| Same-chat refresh, focus return and overlapping responses | Status remains immediate for deadline enforcement. A compatible history remains mounted and usable, with the draft and reply retained. Transient failures block writes and show retry. Replaced or unreadable history clears readiness. A canceled or obsolete read cannot install. |
+| Retention, terminal states and private audio | Retention expiry or authoritative history denial withdraws protected content. The participant media access header still owns counterpart audio. An access restriction removes the player from the timeline and preserves permitted rows. Account replacement and unmount retire scoped media. |
+| Text/audio send, reactions and resolution | Existing synchronous write guards continue to own mutation and reconciliation. The timeline models a pending, failed or uncertain delivery, and retries reconcile the same client ID. No automatic mutation replay was added. Temporary write gates can hide the active composer while retaining its audio payload. |
+| Recording and playback | Recorder generation and confirmation ownership still fence preparation, blob release and duplicate sends. Playback serial, element and intent fence old events and delayed URL renewals. Completion survives hide or competing playback. Paused media keeps its current position. Tab return never plays automatically. |
+
+### Validation
+
+```powershell
+npm run test:focused -- src/chat/SecondChat.test.tsx src/chat/SecondChat.review.test.tsx src/chat/SecondChat.contract.test.tsx src/chat/SecondChatSession.test.ts src/chat/SecondChatSession.media.test.ts src/chat/SecondChatSession.terminalAudio.test.ts src/chat/FirstChat.test.tsx src/chat/AudioComposer.test.tsx src/chat/MessageAudio.test.tsx src/chat/postBlockMedia.security.test.ts src/chat/textSend.test.tsx src/home/Home.secondRestoration.test.tsx src/home/useHomeNavigation.test.tsx src/home/Home.test.tsx src/scheduling/Scheduling.test.tsx --maxWorkers=2
+npm run test:focused -- src/home/Home.secondRestoration.test.tsx src/home/Home.test.tsx src/chat/SecondChat.test.tsx src/chat/SecondChat.review.test.tsx src/chat/SecondChatSession.terminalAudio.test.ts --maxWorkers=2
+npm run typecheck
+npm run check:architecture
+npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
+node tools/scheduling-smoke.mjs
+node tools/first-chat-composer.mjs
+npm run dev -- --host 127.0.0.1 --port 5175 --strictPort
+node tools/second-chat-browser.mjs '--case=refinements|audio-policy-url-upload-and-identity|counterpart-audio-retirement'
+git diff --check
+```
+
+Focused passes were 401 tests across 15 files and 172 tests across the five files affected by the final restoration/dialog checks. Typecheck and the architecture guard passed with 106 production modules and zero runtime cycles. Chromium Scheduling passed at 390×844 and 1440×900. First Chat composer passed at 390, 768 and 1440px, including a browser-generated AAC preview and same-ID delivery retry. Second Chat passed 106 checks over eight scenario/viewport combinations at 390×900 and 1280×900. Those checks used native AAC media events for natural completion, release on a real Chromium tab switch, replay and access retirement. The HTTP 403/503 diagnostics came from the scripted signed-link renewal and uncertain upload cases.
+
+Screenshots are under ignored `artifacts/second-chat-refinements/` and `artifacts/scheduling/`, including light and dark layouts for delayed loading, composer, both dialogs, retained history and confirmed scheduling. HTTP responses and the Second Chat recorder were synthetic. Physical Safari, WebKit, device microphone behavior, live authentication/backend races and Android device rendering remain unverified. The full CI suite and production build were outside this focused pass.

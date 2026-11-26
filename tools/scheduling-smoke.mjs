@@ -72,9 +72,23 @@ try {
     await evaluate("holdWrite=false;releaseWrite()");await waitFor("document.body.innerText.includes('Esperando a Maria')",'uncertain submission reconciled');check(await evaluate("writes.filter(w=>w.path.endsWith('/proposals')).length===1"),'one POST despite uncertain response '+width);
     await evaluate("proposals.push({id:'received',connectionId:'c',userId:'them',roundNumber:1,preferenceOrder:1,proposedDateTime:slot(),status:'PENDING',createdAt:new Date().toISOString()});dispatchEvent(new Event('online'))");await waitFor("document.body.innerText.includes('Horarios que recibiste')",'received review');await screenshot('review-'+width);
     await clickText('Aceptar opci'+String.fromCharCode(243)+'n 1');await waitFor("document.body.innerText.includes('Horario confirmado')",'confirmed');check(await evaluate("!document.querySelector('select')"),'terminal stops selector '+width);await screenshot('confirmed-'+width);
+    for(const theme of ['light','dark']){
+      await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
+      check(await evaluate(`(()=>{
+        const heading=document.querySelector('.scheduling .home-heading'), trigger=heading.querySelector('.scheduling-overflow-trigger');
+        const icon=trigger.querySelector('svg'), back=heading.querySelector('.scheduling-activity-back');
+        return trigger.offsetWidth>=48&&trigger.offsetHeight>=48&&icon.getBoundingClientRect().width===24
+          &&trigger.getBoundingClientRect().top===heading.getBoundingClientRect().top&&back.textContent==='Volver a Actividad'
+          &&document.querySelector('.scheduling > .login-primary').textContent==='Volver a Inicio';
+      })()`),'aligned overflow and distinct exits '+width+' '+theme);
+      await evaluate('scrollTo(0,0)');await screenshot('confirmed-'+width+'-'+theme);
+    }
     await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Volver a Actividad').click()");await waitFor("!document.querySelector('.scheduling')",'Activity return');
+    check(await evaluate("history.state.trail.at(-1)==='activity'"),'secondary goes to Activity '+width);
+    await evaluate('history.forward()');await waitFor("document.body.innerText.includes('Horario confirmado')",'Forward restores confirmed Scheduling');
+    await clickText('Volver a Inicio');await waitFor("history.state.trail.at(-1)==='home' && !document.querySelector('.scheduling')",'primary goes to Home');
     await evaluate("n={...n,status:'PENDING',confirmedDateTime:null};connection.state='SCHEDULING_PHASE';proposals=[];writes=[];rev++");
-    if(width===390){await clickText('Volver a Inicio');}
+    if(width===1440)await clickText('Ver Actividad');
   }
   // The same local wall time must not be silently moved across a DST gap.
   await call('Emulation.setTimezoneOverride',{timezoneId:'Europe/Berlin'});

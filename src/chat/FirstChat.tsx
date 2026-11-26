@@ -12,7 +12,7 @@ import { ReactionLane } from './ReactionLane';
 import { ChatIcon } from './ChatIcon';
 import { replyPreview, ReplyQuote } from './ReplyQuote';
 
-import { ConfirmDialog, ChatMenu, TextSendButton } from './ChatControls';
+import { ConfirmDialog, ChatMenu, submitChatOnEnter, TextSendButton } from './ChatControls';
 import { activityId } from '../notifications/activityPolicy';
 import { usePresentedActivity } from '../notifications/usePresentedActivity';
 type DialogAction = 'mutual' | 'cancel' | 'safety' | 'block';
@@ -79,7 +79,7 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       { label: 'Reportar por seguridad', disabled: disabled || !p.safety, run: () => setDialog('safety') },
       { label: 'Bloquear', disabled: disabled || !p.safety, run: () => setDialog('block') },
     ]}/></header>
-    {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && state.reactionFeedback === null && !state.messagePending && !state.guidancePending && !state.decisionPending && <p className="chat-status" role="status">Actualizando…</p>}{state.error && !state.messageError && <p className={state.reactionFeedback === 'error' ? 'chat-reaction-error' : undefined} role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
+    {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && dialog === null && state.reactionFeedback === null && !state.messagePending && !state.guidancePending && !state.decisionPending && <p className="chat-status" role="status">Actualizando…</p>}{state.error && !state.messageError && !dialog && <p className={state.reactionFeedback === 'error' ? 'chat-reaction-error' : undefined} role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
     {chat && remaining <= 60 && <p role="status">{remaining ? `El plazo del chat termina en ${remaining} s.` : 'El plazo local terminó. Consultando el estado del servidor…'}</p>}
     {decisionPanel && <aside className="chat-panel chat-decision-card" aria-labelledby="chat-decision-title">
       <h3 ref={decisionTitle} id="chat-decision-title" tabIndex={-1}>{chat?.partner.displayName.trim() || 'La otra persona'} aprobó el chat.</h3>
@@ -112,22 +112,15 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
     {/* Hide ordinary composition while retaining draft ownership and delivery reconciliation. */}
     <form hidden={p.decisionOnly} className="chat-composer" aria-busy={state.messagePending} onSubmit={e => { e.preventDefault(); if (ordinary && !audioDirty && !composing.current && plainText(draft)) void session.send(draft,reply ? { type:reply.type,targetId:reply.targetId } : null); }}>
       {reply && <aside className="chat-reply-preview" aria-label="Respuesta seleccionada"><ReplyQuote {...replyPreview(reply,me,chat?.partner.userId,chat?.partner.displayName)}/><button type="button" className="chat-icon-button" aria-label="Quitar respuesta" disabled={!!state.outgoing} onClick={() => setReply(null)}><ChatIcon name="close"/></button></aside>}
-      <AudioComposer key={audioEpoch} textDraft={text} textConfirmationVersion={state.confirmed !== null && state.confirmedFile === null ? state.confirmationVersion : 0} policy={chat?.audioPolicy ?? null} disabled={!ordinary || dialog !== null} payloadLocked={!!state.outgoing} confirmedFile={state.confirmedFile} delivery={state.outgoing?.file ? state.outgoing.phase : null} onRetry={session.retry} onDirtyChange={setAudioDirty} onSend={file => session.send('',reply ? { type:reply.type,targetId:reply.targetId } : null,file)}>{microphone => <>
+      <AudioComposer key={audioEpoch} textDraft={text} textConfirmationVersion={state.confirmed !== null && state.confirmedFile === null ? state.confirmationVersion : 0} policy={chat?.audioPolicy ?? null} disabled={!ordinary || dialog !== null} payloadLocked={!!state.outgoing} confirmedFile={state.confirmedFile} onDirtyChange={setAudioDirty} onSend={file => session.send('',reply ? { type:reply.type,targetId:reply.targetId } : null,file)}>{microphone => <>
       <div className="chat-composer-row">
       <label className="chat-visually-hidden" htmlFor="chat-draft">Mensaje</label><textarea placeholder="Mensaje" id="chat-draft" ref={setText} maxLength={1000} value={draft} onChange={e => setDraft(e.target.value)} disabled={!p.ordinary || state.blocked || audioDirty} rows={1}
         onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onBlur={() => { composing.current = false; }}
-        onKeyDown={event => {
-          // No standard API identifies a physical keyboard. Use conservative
-          // desktop input capabilities plus a concrete key code, never viewport/UA.
-          if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 ||
-            !['Enter','NumpadEnter'].includes(event.code) || !window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) return;
-          event.preventDefault();
-          if (!event.repeat && ordinary && !audioDirty && plainText(draft)) event.currentTarget.form?.requestSubmit();
-        }}/>{microphone}<TextSendButton draft={text} className="chat-icon-button chat-send" disabled={!ordinary || audioDirty || !plainText(draft)}><ChatIcon name="send"/></TextSendButton></div><span className="chat-character-count">{draft.length}/1000</span>
+        onKeyDown={event => submitChatOnEnter(event, composing.current, ordinary && !audioDirty && plainText(draft))}/>{microphone}<TextSendButton draft={text} className="chat-icon-button chat-send" disabled={!ordinary || audioDirty || !plainText(draft)}><ChatIcon name="send"/></TextSendButton></div><span className="chat-character-count">{draft.length}/1000</span>
       {!!draft && !plainText(draft) && <p>Usá texto sin &lt;, &gt; ni caracteres de control. Máximo 1000 caracteres.</p>}
       </>}</AudioComposer>
-      {state.error && state.messageError && <p className="chat-composer-error" role="alert">{state.error} <button type="button" disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
+      {state.error && state.messageError && !dialog && <p className="chat-composer-error" role="alert">{state.error} <button type="button" disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
     </form>
-    {dialog && (!p.decisionOnly || dialog==='safety' || dialog==='block') && <ConfirmDialog kind={dialog} busy={state.busy} close={() => setDialog(null)} confirm={body => { void (async () => { await session.action(dialog,body); if (!session.getSnapshot().error) setDialog(null); })(); }}/> }
+    {dialog && (!p.decisionOnly || dialog==='safety' || dialog==='block') && <ConfirmDialog kind={dialog} busy={state.busy} disabled={state.blocked} feedback={state.error && <p role="alert">{state.error} <button type="button" disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>} close={() => setDialog(null)} confirm={body => { void (async () => { await session.action(dialog,body); if (!session.getSnapshot().error) setDialog(null); })(); }}/> }
   </section>;
 }

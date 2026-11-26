@@ -74,6 +74,62 @@ it('preserves renewal intent when Chrome pauses loading media before reporting a
  const refresh=vi.fn(async()=>'https://media.test/renewed');mount(refresh);const a=await start();fireEvent.pause(a);Object.defineProperty(a,'error',{value:{code:4}});fireEvent.error(a);await waitFor(()=>expect(audio()).not.toBe(a));expect(refresh).toHaveBeenCalledOnce();expect(audio().src).toBe('https://media.test/renewed');
 });
 
+it.each(['tab visibility','another player'] as const)('preserves fractional completion and one-click replay after %s',async interruption=>{
+  mount();
+  const other=document.createElement('audio');
+  const visibility=vi.spyOn(document,'visibilityState','get');
+  document.body.append(other);
+  try {
+    const first=await start();
+    Object.defineProperty(first,'duration',{value:2.35});
+    fireEvent.loadedMetadata(first);
+    fireEvent.playing(first);
+    first.currentTime=2.35;
+    fireEvent.ended(first);
+    // A final queued event can arrive after the browser resets its time.
+    first.currentTime=0;
+    fireEvent.timeUpdate(first);
+    fireEvent.pause(first);
+    expect(screen.getByLabelText('Tiempo de audio')).toHaveTextContent('0:03 / 0:03');
+    if(interruption==='tab visibility') {
+      visibility.mockReturnValue('hidden');
+      fireEvent(document,new Event('visibilitychange'));
+      visibility.mockReturnValue('visible');
+      fireEvent(document,new Event('visibilitychange'));
+    } else {
+      fireEvent.play(other);
+    }
+    expect(first.isConnected).toBe(false);
+    expect(play).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText('Tiempo de audio')).toHaveTextContent('0:03 / 0:03');
+    fireEvent.click(screen.getByRole('button',{name:'Reproducir audio de nuevo'}));
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText('Tiempo de audio')).toHaveTextContent('0:00 / 0:03');
+    const replay=audio();
+    expect(replay).not.toBe(first);
+    expect(replay.currentTime).toBe(0);
+    fireEvent.ended(first);
+    fireEvent.timeUpdate(first);
+    fireEvent.playing(replay);
+    expect(screen.getByRole('button',{name:'Pausar audio'})).toBeVisible();
+  } finally {
+    visibility.mockRestore();
+    other.remove();
+  }
+});
+
+it('recognizes natural completion if hiding precedes the queued ended event',async()=>{
+ const visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');
+ try {
+   mount();const first=await start();metadata(first);fireEvent.playing(first);
+   first.currentTime=7;Object.defineProperty(first,'ended',{value:true});
+   fireEvent(document,new Event('visibilitychange'));
+   fireEvent.ended(first);
+   expect(screen.getByRole('button',{name:'Reproducir audio de nuevo'})).toBeVisible();
+   expect(first.isConnected).toBe(false);
+ } finally {visibility.mockRestore();}
+});
+
 it.each(['playing','paused','loading','automatic renewal','manual renewal'])('retiring a player during %s releases its element and ignores late work', async phase => {
   let renew: ((url: string) => void) | undefined;
   let rejectPlay: ((error: Error) => void) | undefined;
