@@ -69,6 +69,29 @@ it('requires successful presentation, allows retry and submits only on explicit 
   expect(submit).toHaveBeenCalledOnce();
 });
 
+it.each([true, false])('keeps closing and opening the publication available during verification (completed: %s)', async satisfied => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(publication('<p>Texto íntegro</p>')));
+  const close = vi.fn(), submit = vi.fn();
+  render(<DocumentReader doc={{ type: 'PRIVACY_NOTICE', requiredAction: 'ACKNOWLEDGED', version: 'v1', satisfied, url }}
+    title="Aviso de privacidad" action="Confirmar lectura" disabled status="Verificando la versión vigente…" onClose={close} onSubmit={submit}/>);
+
+  const body = screen.getByRole('region', { name: 'Contenido del documento' });
+  expect(await screen.findByText('Texto íntegro')).toBeVisible();
+  const closeButton = screen.getByRole('button', { name: 'Cerrar' });
+  const link = screen.getByRole('link', { name: 'Abrir en navegador' });
+  expect(closeButton.closest('header')).toContainElement(link);
+  expect(closeButton.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const action = screen.queryByRole('button', { name: 'Confirmar lectura' });
+  if (satisfied) expect(action).toBeNull();
+  else {
+    expect(action).toBeDisabled();
+    expect(action?.closest('footer')).toContainElement(action);
+  }
+  fireEvent.click(closeButton);
+  expect(close).toHaveBeenCalledOnce();
+  expect(submit).not.toHaveBeenCalled();
+});
+
 it.each([
   'http://reals-web.pages.dev/legal/doc',
   'https://example.org/legal/doc',
