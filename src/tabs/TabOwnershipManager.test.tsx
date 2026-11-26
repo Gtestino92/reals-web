@@ -77,9 +77,12 @@ it('pending feedback, keyboard button semantics, timeout and actionable retry', 
   vi.useFakeTimers(); Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: () => new Promise(() => {}) } });
   const m = new TabOwnershipManager(); managers.push(m);
   render(<TabGate manager={m}>{() => <p>Operational</p>}</TabGate>);
-  expect(screen.getByRole('status')).toHaveTextContent('Esperando'); expect(screen.getByRole('button')).toBeDisabled();
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando Reals…');
+  expect(screen.queryByRole('button')).toBeNull();
   act(() => vi.advanceTimersByTime(8000)); expect(screen.getByRole('alert')).toHaveTextContent('volvé a intentar');
-  fireEvent.click(screen.getByRole('button', { name: 'Usar Reals acá' })); expect(screen.getByRole('button')).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Usar Reals acá' }));
+  expect(screen.getByRole('status')).toHaveTextContent('Esperando');
+  expect(screen.getByRole('button')).toBeDisabled();
 });
 it.each(['insecure', 'locks', 'channel'])('fails closed for unsupported %s', kind => {
   if (kind === 'insecure') vi.stubGlobal('isSecureContext', false);

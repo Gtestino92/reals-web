@@ -4,7 +4,7 @@ import { errorCode } from '../auth/errors';
 import { AccountSection } from '../home/AccountSection';
 import { fingerprint, readRequirements } from './requirements';
 import type { LegalDocument } from '../onboarding/contracts';
-import { SessionLoading } from '../SessionLoading';
+import { SessionLoading, useStartupDestination } from '../SessionLoading';
 import { DocumentReader } from './DocumentReader';
 import { PendingLegalSearch } from './searchGate';
 import seal from '../assets/reals-seal.png';
@@ -29,6 +29,7 @@ export function LegalSession({ controller, children }: { controller: SessionCont
   const [documents, setDocuments] = useState<LegalDocument[]>([]);
   const [busy, setBusy] = useState(true), [submitting, setSubmitting] = useState('');
   const [error, setError] = useState('');
+  const starting = useStartupDestination(visible && !entered && !busy);
   const [accountBusy, setAccountBusy] = useState(false);
   const operation = useRef<AbortController | null>(null);
   const quietRead = useRef<AbortController | null>(null);
@@ -132,7 +133,7 @@ export function LegalSession({ controller, children }: { controller: SessionCont
     };
   }, [controller, load, historyOwner]);
   useLayoutEffect(() => {
-    if (visible && !busy && !accountBusy && focusOnOpen.current && heading.current) {
+    if (!starting && visible && !busy && !accountBusy && focusOnOpen.current && heading.current) {
       heading.current.focus({ preventScroll: true }); focusOnOpen.current = false;
     }
     if (!visible) focusOnOpen.current = true;
@@ -142,7 +143,7 @@ export function LegalSession({ controller, children }: { controller: SessionCont
       if (window.scrollY !== scroll) window.scrollTo(0, scroll);
       returnTo.current = null;
     }
-  }, [visible, busy, accountBusy]);
+  }, [visible, busy, accountBusy, starting]);
   useLayoutEffect(() => {
     if (!visible || !entered) return;
     const back = (event: PopStateEvent) => {
@@ -191,6 +192,7 @@ export function LegalSession({ controller, children }: { controller: SessionCont
     if (documents.some(doc => !doc.satisfied)) deferred.current = fingerprint(documents);
     resume();
   };
+  if (starting && !entered && busy) return null;
   const content = visible && <main className="login-page"><section className="login-panel" aria-label="Documentos legales">
       <header className="login-header"><div className="login-brand"><img src={seal} className="login-seal" alt="" width="54" height="54"/><h1>Reals</h1></div></header>
       {busy && !documents.length ? <SessionLoading/> : <div className="legal-requirements">

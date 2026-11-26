@@ -1,5 +1,6 @@
 import { useChatDraftHeight, useChatViewport } from './useChatViewport';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useStartupDestination } from '../SessionLoading';
 import type { SessionController } from '../auth/session';
 import { ChatSession } from './ChatSession';
 import { plainText, policy } from './contracts';
@@ -21,19 +22,21 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
   const [terminalNotice,setTerminalNotice] = useState(''), [audioDirty,setAudioDirty] = useState(false), [audioEpoch,setAudioEpoch] = useState(0);
   const [session] = useState(() => new ChatSession(controller,matchId,chatId,controller.snapshot.account?.id ?? '',(message, closed) => { knownClosed.current = closed; terminalMessage.current = message; if (dirty.current) setTerminalNotice(message + ' Conservamos tu borrador hasta que vuelvas a Inicio.'); else onHome(message,closed); }));
   const state = useSyncExternalStore(session.subscribe,session.getSnapshot);
+  const starting = useStartupDestination(!!state.chat || !!state.error);
   const [draft,setDraft] = useState(''), [reply,setReply] = useState<NonNullable<Message['replyTo']> | null>(null), [dialog,setDialog] = useState<DialogAction | null>(null), [now,setNow] = useState(Date.now()), [unseen,setUnseen] = useState(false);
   const root = useRef<HTMLElement>(null), timeline = useRef<HTMLOListElement>(null), nearBottom = useRef(true), text = useRef<HTMLTextAreaElement>(null), heading = useRef<HTMLHeadingElement>(null);
   const composing = useRef(false), observedHeight = useRef(0);
   const { attach: setText, resize: resizeInput } = useChatDraftHeight(text, draft);
   useChatViewport(root, timeline, nearBottom, observedHeight, true, resizeInput);
   useEffect(() => {
-    session.start(); void session.refresh(); heading.current?.focus();
+    session.start(); void session.refresh();
     const timer = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.refresh(false,true); },5000);
     const tick = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.checkExitTimeout(); },1000);
     const resume = () => { if (document.visibilityState === 'visible') void session.resume(); };
     document.addEventListener('visibilitychange',resume); window.addEventListener('online',resume);
     return () => { session.dispose(); clearInterval(timer); clearInterval(tick); document.removeEventListener('visibilitychange',resume); window.removeEventListener('online',resume); };
   }, [session]);
+  useLayoutEffect(() => { if (!starting) heading.current?.focus(); }, [starting]);
   useEffect(() => {
     if (state.audioAccess === 'RESTRICTED' && !state.outgoing && reply?.type === 'MESSAGE' && reply.messageType === 'AUDIO' && reply.senderId !== session.me) setReply(null);
   }, [state.audioAccess, state.outgoing, reply, session]);

@@ -12,10 +12,12 @@ import { configureFirebase } from './auth/firebase';
 import type { FirebaseSetup } from './auth/firebase';
 import { ApiClient } from './auth/api';
 import { SessionController } from './auth/session';
+import type { SessionSnapshot } from './auth/session';
 import { Onboarding } from './onboarding/Onboarding';
 import seal from './assets/reals-seal.png';
 import { Home, AdminEntry } from './home/Home';
 import { ActivityNotifications, useActivityNotifications } from './notifications/useActivityNotifications';
+import { StartupBoundary, useStartupDestination } from './SessionLoading';
 
 const AdminGate = lazy(() => import('./admin/AdminGate'));
 
@@ -37,14 +39,22 @@ export function OperationalApp({ firebase, api, ownership }: AppProps) {
 }
 function SessionApp({ controller }: { controller: SessionController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  return <StartupBoundary actions={state.phase === 'ready' && <SignOutButton onConfirm={controller.signOut} />}>
+    <SessionDestination state={state} controller={controller} />
+  </StartupBoundary>;
+}
+function SessionDestination({ controller, state }: { controller: SessionController; state: SessionSnapshot }) {
+  const restoring = state.phase === 'checking' || (state.phase === 'loading' && state.operation === null);
+  const starting = useStartupDestination(!restoring && state.phase !== 'ready');
   useLayoutEffect(() => {
     // An explicit login always starts in ordinary Reals, even after a direct /admin URL.
     if (state.phase === 'login' || state.phase === 'authenticating') window.history.replaceState(null, '', '/');
   }, [state.phase]);
   if (state.phase === 'ready') return <LegalSession key={state.account?.id} controller={controller}><ReadySession key={`${state.account?.id}/${state.profile?.id}`} controller={controller} /></LegalSession>;
+  if (starting) return null;
   // Manual authentication keeps its operation through backend bootstrap.
   // Restoration has no operation and must not expose an intermediate login form.
-  if (state.phase === 'checking' || (state.phase === 'loading' && state.operation === null)) return <AuthenticationLoading />;
+  if (restoring) return <AuthenticationLoading />;
   if (['loading', 'login', 'authenticating'].includes(state.phase)) return <LoginScreen
     sessionLoading={state.phase === 'loading'}
     loading={state.operation === 'signIn' || state.operation === 'signUp'}
@@ -85,6 +95,7 @@ function ReadySession({ controller }: { controller: SessionController }) {
   // it does not navigate away from its forms, chats or pending reads.
   const navigation = useHomeNavigation(target => (target === 'home' && challengeActive.current) || (!blocked.current && (target !== 'admin' || !adminBlocked.current)));
   const administrative = navigation.destination === 'admin';
+  useStartupDestination(administrative);
   const [intent, setIntent] = useState(false), [entryBusy, setEntryBusy] = useState(false), [viewReady, setViewReady] = useState(false);
   const [AdminScreen, setAdminScreen] = useState<typeof import('./admin/Admin').default | null>(null);
   const [adminLoadError, setAdminLoadError] = useState('');
@@ -126,6 +137,9 @@ function ReadySession({ controller }: { controller: SessionController }) {
   useLayoutEffect(() => {
     if (navigation.destination !== 'home' && !administrative && (intent || entryBusy)) cancel();
   }, [navigation.destination]);
+  useLayoutEffect(() => {
+    if ((guarded && (intent || entryBusy)) || (chatActive && administrative && !displayingAdmin)) cancel();
+  }, [guarded, intent, entryBusy, chatActive, administrative, displayingAdmin]);
   const requestAdmin = () => {
     if (blocked.current || adminBlocked.current || entryBusy || !state.adminEligible) return;
     const epoch = ++entryEpoch.current, context = state.authContextVersion;

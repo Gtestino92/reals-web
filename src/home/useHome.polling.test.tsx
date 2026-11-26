@@ -7,22 +7,26 @@ import { emptyHome } from './fixtures';
 
 const available = Date.parse('2026-11-16T12:00:10Z');
 const iso = (time: number) => new Date(time).toISOString();
-function fixture(initialMarker: string | null = iso(available)) {
+function fixture(initialMarker: string | null = iso(available), withConnection = true) {
   const controller = controllerFixture();
   let serverTime = available - 10000, version = 1, dirty = false;
   let marker = initialMarker, fail = '', hold = '';
+  let displayName = 'Synthetic', profileStatus: 'ACTIVE' | 'DRAFT' = 'ACTIVE';
   const releases: (() => void)[] = [];
   const request = vi.spyOn(controller, 'request').mockImplementation(async path => {
     // Capture at request time; delayed replies deliberately ignore abort.
     let value: unknown;
     if (path === '/me/home/status') value = { version, dirty, nextRefreshAt: marker, serverTime: iso(serverTime) };
-    else if (path === '/me/profile') value = { id: 'p', userId: 'me', status: 'ACTIVE', displayName: 'Synthetic' };
+    else if (path === '/me/profile') value = { id: 'p', userId: 'me', status: profileStatus, displayName };
     else if (path === '/me/home') {
       const home = emptyHome();
       // A real, unrelated connection keeps Activity reachable before the review
       // appears. Initial-action counts must still equal advertised actions.
-      home.nextSteps = [{ type: 'SCHEDULING', connectionId: 'existing', matchId: 'existing', requiresAction: false }];
-      home.activeInteractionsSummary.activeConnectionCount = 1;
+      home.profileStatus = profileStatus;
+      if (withConnection) {
+        home.nextSteps = [{ type: 'SCHEDULING', connectionId: 'existing', matchId: 'existing', requiresAction: false }];
+        home.activeInteractionsSummary.activeConnectionCount = 1;
+      }
       if (serverTime >= available) {
         home.pendingActions = [{ type: 'VISUAL_REVIEW', matchId: 'synthetic', visualStartedAt: iso(available), visualExpiresAt: iso(available + 3600000) }];
         marker = null;
@@ -39,7 +43,8 @@ function fixture(initialMarker: string | null = iso(available)) {
   });
   return { controller, request, releases, count: (path: string) => request.mock.calls.filter(c => c[0] === path).length,
     time: (time: number) => { serverTime = time; }, invalidate: () => { version++; dirty = true; },
-    marker: (value: string | null) => { marker = value; }, fail: (path = '') => { fail = path; }, hold: (path = '') => { hold = path; } };
+    marker: (value: string | null) => { marker = value; }, fail: (path = '') => { fail = path; }, hold: (path = '') => { hold = path; },
+    dirty: () => { dirty = true; }, rename: (value: string) => { displayName = value; }, moveToDraft: () => { profileStatus = 'DRAFT'; } };
 }
 const settle = async () => { await act(async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); }); };
 const tick = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); };
@@ -143,4 +148,53 @@ it('rejects responses belonging to a replaced controller', async () => {
   next.time(available + 1); rerender({ controller: next.controller }); await settle();
   await act(async () => old.releases.shift()?.()); await settle();
   expect(result.current.model?.home.pendingActions).toHaveLength(1);
+});
+
+it.each(['clean', 'name edit', 'dirty', 'version', 'due', 'profile status', 'interaction', 'uncertain'] as const)(
+  'revalidates a retained Home on a %s return', async mode => {
+    const f = fixture(iso(available), mode === 'interaction');
+    const { result, rerender } = renderHook(({ active }) => useHome(f.controller, active, null, !active), { initialProps: { active: true } });
+    await settle();
+    const retained = result.current.model?.home;
+    rerender({ active: false });
+    if (mode === 'name edit') f.rename('Actualizado');
+    if (mode === 'dirty') f.dirty();
+    if (mode === 'version') f.invalidate();
+    if (mode === 'due') f.time(available);
+    if (mode === 'profile status') f.moveToDraft();
+    rerender({ active: true });
+    act(() => { result.current.refreshOnReturn(mode === 'uncertain'); }); await settle();
+    const reusable = mode === 'clean' || mode === 'name edit';
+    expect(f.count('/me/home/status')).toBe(2);
+    expect(f.count('/me/profile')).toBe(2);
+    expect(f.count('/me/home')).toBe(reusable ? 1 : 2);
+    expect(result.current.model?.home === retained).toBe(reusable);
+    expect(result.current.model?.name).toBe(mode === 'name edit' ? 'Actualizado' : 'Synthetic');
+    expect(result.current.model?.home.profileStatus).toBe(mode === 'profile status' ? 'DRAFT' : 'ACTIVE');
+    expect(result.current.returning).toBe(false);
+  },
+);
+
+it('discards an obsolete return read after leaving again and fails closed on a fresh return failure', async () => {
+  const f = fixture(null, false);
+  const { result, rerender } = renderHook(({ active }) => useHome(f.controller, active, null, !active), { initialProps: { active: true } });
+  await settle();
+  rerender({ active: false }); rerender({ active: true });
+  f.rename('Obsoleto'); f.hold('/me/profile');
+  act(() => { result.current.refreshOnReturn(); }); await settle();
+  expect(result.current.returning).toBe('ordinary');
+  const oldSignal = f.request.mock.calls.filter(call => call[0] === '/me/profile').at(-1)?.[1];
+  rerender({ active: false });
+  expect(oldSignal?.aborted).toBe(true);
+  f.rename('Vigente'); f.hold(); f.fail('/me/home/status');
+  rerender({ active: true });
+  act(() => { result.current.refreshOnReturn(); }); await settle();
+  expect(result.current.model?.name).toBe('Synthetic');
+  expect(result.current.blocked).toBe(true);
+  expect(result.current.error).toMatch(/Reintentar/);
+  await act(async () => f.releases.shift()?.()); await settle();
+  expect(result.current.model?.name).toBe('Synthetic');
+  f.fail(); act(() => { result.current.refresh(); }); await settle();
+  expect(result.current.model?.name).toBe('Vigente');
+  expect(result.current.blocked).toBe(false);
 });

@@ -33,6 +33,7 @@ import type { HomeNavigation } from './useHomeNavigation';
 import { isProfileQuestions } from '../profile/questions/ProfileQuestions';
 import { updateFor } from '../notifications/activityPolicy';
 import { useActivityNotificationContext } from '../notifications/useActivityNotifications';
+import { useStartupDestination } from '../SessionLoading';
 
 const labels: Record<string, string> = {
   FIRST_CHAT: 'Primer chat', VISUAL_REVIEW: 'Perfil por descubrir', SCHEDULING: 'Coordinar horarios',
@@ -96,6 +97,7 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
   const secondEntry = useRef<SecondChatEntryIntent | undefined>(undefined);
   const [restoringSecond, setRestoringSecond] = useState(false);
   const [chat, setChat] = useState<Activity | null>(null), [notice, setNotice] = useState('');
+  const homeInvalidated = useRef(false);
   const homeReconciler = useRef<(() => Promise<HomeData | null>) | null>(null);
   const returnEpoch=useRef(0), returnAlive=useRef(true), visualDestinations=useRef(new Map<string,'home'|'activity'>());
   const [visualReturn,setVisualReturn]=useState<{matchId:string;reason:VisualOutcome;phase:'loading'|'error'}|null>(null);
@@ -182,19 +184,19 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
     document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
   }, [focusSurface, active]);
-  return <><div hidden={!!surface || !!chat}><HomeOverview offerInstallation={offerInstallation} onRestorationLoadingChange={setRestoringSecond} schedulingReturn={schedulingReturn} onSummaryVisible={setSummaryVisible} setSearchBack={navigation.setSearchBack} onRestoreSecond={(item,session) => { restoredSecond.current=session; secondEntry.current=undefined; navigation.restoreSecondChat(session.connectionId,session.matchId); setChat(item); }} homeReconciler={homeReconciler} returnScroll={homePosition} adminPending={adminPending} onAdmin={onAdmin} onNavigationBlockedChange={reportOverviewLock} affinities={affinities} notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={(item, automatic) => { if (item.type === 'VISUAL_REVIEW') { if (!automatic) { homePosition.current = window.scrollY; navigation.openVisualReview(item.matchId); } } else if ((item.type === 'SCHEDULING' || item.type === 'SCHEDULING_PROFILE') && item.connectionId) { if (!automatic) { homePosition.current = window.scrollY; navigation.openScheduling(item.connectionId,item.matchId,item.partnerName,item.type === 'SCHEDULING_PROFILE'); } } else openChat(item, automatic); }} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current} actedVisuals={actedVisuals.current} active={active && !surface && !chat} chatOpen={!!chat} activityOpen={navigation.destination === 'activity'} onActivity={() => { homePosition.current = window.scrollY; navigation.open('activity'); }} onReturnHome={returnHome}/> </div>{chat?.type.startsWith('SECOND_CHAT_') && chat.connectionId ? <SecondChat key={chat.connectionId} controller={controller} connectionId={chat.connectionId} matchId={chat.matchId} entryIntent={secondEntry.current} partnerName={chat.partnerName} restoredSession={restoredSecond.current} onHome={closeChat} navigation={navigation}/> : chat?.chatId && <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>}<div hidden={!surface} className="home home-management-page" ref={root}>
+  return <><div hidden={!!surface || !!chat}><HomeOverview retainOnReturn={managementActive || questionnaireVisible} invalidated={homeInvalidated} offerInstallation={offerInstallation} onRestorationLoadingChange={setRestoringSecond} schedulingReturn={schedulingReturn} onSummaryVisible={setSummaryVisible} setSearchBack={navigation.setSearchBack} onRestoreSecond={(item,session) => { restoredSecond.current=session; secondEntry.current=undefined; navigation.restoreSecondChat(session.connectionId,session.matchId); setChat(item); }} homeReconciler={homeReconciler} returnScroll={homePosition} adminPending={adminPending} onAdmin={onAdmin} onNavigationBlockedChange={reportOverviewLock} affinities={affinities} notice={notice} retireNotice={retireNotice} controller={controller} onCompleteProfile={onCompleteProfile} onManage={open} onOpenChat={(item, automatic) => { if (item.type === 'VISUAL_REVIEW') { if (!automatic) { homePosition.current = window.scrollY; navigation.openVisualReview(item.matchId); } } else if ((item.type === 'SCHEDULING' || item.type === 'SCHEDULING_PROFILE') && item.connectionId) { if (!automatic) { homePosition.current = window.scrollY; navigation.openScheduling(item.connectionId,item.matchId,item.partnerName,item.type === 'SCHEDULING_PROFILE'); } } else openChat(item, automatic); }} suppressed={suppressed.current} hidden={hidden.current} knownClosed={knownClosed.current} actedVisuals={actedVisuals.current} active={active && !surface && !chat} chatOpen={!!chat} activityOpen={navigation.destination === 'activity'} onActivity={() => { homePosition.current = window.scrollY; navigation.open('activity'); }} onReturnHome={returnHome}/> </div>{chat?.type.startsWith('SECOND_CHAT_') && chat.connectionId ? <SecondChat key={chat.connectionId} controller={controller} connectionId={chat.connectionId} matchId={chat.matchId} entryIntent={secondEntry.current} partnerName={chat.partnerName} restoredSession={restoredSecond.current} onHome={closeChat} navigation={navigation}/> : chat?.chatId && <FirstChat key={chat.chatId} controller={controller} matchId={chat.matchId} chatId={chat.chatId} onHome={closeChat}/>}<div hidden={!surface} className="home home-management-page" ref={root}>
     {(surface === 'scheduling' || surface === 'partner-profile') && navigation.connectionId && navigation.matchId && active && <Scheduling onLeave={recordSchedulingReturn} key={navigation.connectionId} controller={controller} connectionId={navigation.connectionId} matchId={navigation.matchId} partnerName={navigation.partnerName ?? null} browse={surface === 'partner-profile'} onBrowse={navigation.openPartnerProfile} onCloseBrowse={() => navigation.backTo(navigation.trailIncludesScheduling ? 'scheduling' : navigation.trailIncludesActivity ? 'activity' : 'home')} onBlocked={reportVisualLock} backToActivity={navigation.trailIncludesActivity} onActivity={() => navigation.backTo('activity')} onHome={() => navigation.backTo('home')} onFinished={() => {visualLocked.current=false; reportNavigationLock(); navigation.backTo(navigation.trailIncludesActivity ? 'activity' : 'home');}}/>}
     {surface==='visual-review'&&visualReturn&&<section className="home-card" aria-busy={visualReturn.phase==='loading'}><h2 tabIndex={-1} ref={node=>node?.focus({preventScroll:true})}>Actualizando tus actividades</h2>{visualReturn.phase==='loading'?<p role="status">Consultando el estado de Inicio…</p>:<><p role="alert">No pudimos actualizar tus actividades. Podés reintentar o ir a Inicio para consultar el estado.</p><button className="login-button login-outlined" onClick={()=>void finishVisual(visualReturn.matchId,visualReturn.reason)}>Reintentar actualización</button><button className="login-button login-outlined" onClick={safeVisualHome}>Ir a Inicio</button></>}</section>}
     {surface === 'visual-review' && !visualReturn && navigation.matchId && !actedVisuals.current.has(navigation.matchId) && active && <VisualReview key={navigation.matchId} controller={controller} matchId={navigation.matchId} navigation={navigation} onBlocked={reportVisualLock} onFinished={reason=>void finishVisual(navigation.matchId!,reason)} onBack={() => navigation.backTo(navigation.trailIncludesActivity ? 'activity' : 'home')} />}
 
     <div hidden={surface !== 'account' && surface !== 'notifications'}><AccountSection controller={controller} disabled={false} onBack={() => navigation.backTo(surface === 'notifications' ? 'account' : 'home')} notificationsOpen={surface === 'notifications'} onNotificationsOpen={() => navigation.open('notifications')} onNavigationBlockedChange={value => { accountLocked.current = value; reportNavigationLock(); }} /></div>
-    {retainedManagement.current && <div hidden={!managementActive}><Onboarding Home={Home} active={active && managementActive} onAdminNavigationBlockedChange={onAdminNavigationBlockedChange} controller={controller} management={retainedManagement.current} navigation={navigation} onBack={returnHome} onPreferencesSaved={preferencesSaved} onNavigationBlockedChange={value => { locked.current = value; reportNavigationLock(); }} /></div>}
+    {retainedManagement.current && <div hidden={!managementActive}><Onboarding Home={Home} active={active && managementActive} onAdminNavigationBlockedChange={onAdminNavigationBlockedChange} controller={controller} management={retainedManagement.current} navigation={navigation} onBack={returnHome} onPreferencesSaved={preferencesSaved} onHomeInvalidated={() => { homeInvalidated.current = true; }} onNavigationBlockedChange={value => { locked.current = value; reportNavigationLock(); }} /></div>}
 
     <AffinityQuestionnaire model={affinities} navigation={navigation}/>
   </div></>;
 }
 
-function HomeOverview({ offerInstallation, onRestorationLoadingChange, schedulingReturn, onSummaryVisible, setSearchBack, onRestoreSecond, homeReconciler, returnScroll, actedVisuals, affinities, notice, retireNotice, controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed, active, chatOpen, activityOpen, onActivity, onReturnHome, onNavigationBlockedChange, onAdmin, adminPending }: { offerInstallation: boolean; onRestorationLoadingChange: (loading: boolean) => void; schedulingReturn: {current: {connectionId: string; matchId: string} | null}; onSummaryVisible: (visible: boolean) => void; setSearchBack: HomeNavigation['setSearchBack']; onRestoreSecond: (item: Activity, session: SecondChatSession) => void; homeReconciler: {current:(()=>Promise<HomeData|null>)|null}; actedVisuals: Set<string>; returnScroll: { current: number }; adminPending: boolean; onAdmin?: (() => void) | undefined; onNavigationBlockedChange: (blocked: boolean) => void; affinities: AffinityModel; activityOpen: boolean; chatOpen: boolean; onActivity: () => void; onReturnHome: () => void; active: boolean; notice: string; retireNotice: () => void; controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
+function HomeOverview({ retainOnReturn, invalidated, offerInstallation, onRestorationLoadingChange, schedulingReturn, onSummaryVisible, setSearchBack, onRestoreSecond, homeReconciler, returnScroll, actedVisuals, affinities, notice, retireNotice, controller, onCompleteProfile, onManage, onOpenChat, suppressed, hidden, knownClosed, active, chatOpen, activityOpen, onActivity, onReturnHome, onNavigationBlockedChange, onAdmin, adminPending }: { retainOnReturn: boolean; invalidated: { current: boolean }; offerInstallation: boolean; onRestorationLoadingChange: (loading: boolean) => void; schedulingReturn: {current: {connectionId: string; matchId: string} | null}; onSummaryVisible: (visible: boolean) => void; setSearchBack: HomeNavigation['setSearchBack']; onRestoreSecond: (item: Activity, session: SecondChatSession) => void; homeReconciler: {current:(()=>Promise<HomeData|null>)|null}; actedVisuals: Set<string>; returnScroll: { current: number }; adminPending: boolean; onAdmin?: (() => void) | undefined; onNavigationBlockedChange: (blocked: boolean) => void; affinities: AffinityModel; activityOpen: boolean; chatOpen: boolean; onActivity: () => void; onReturnHome: () => void; active: boolean; notice: string; retireNotice: () => void; controller: SessionController; onCompleteProfile?: (() => void) | undefined; onManage: (surface: ManagementSurface) => void; onOpenChat: (item: Activity, automatic?: boolean) => void; suppressed: Set<string>; hidden: Set<string>; knownClosed: Set<string> }) {
   const notifications = useActivityNotificationContext();
   const setHomeMode = notifications?.setHomeMode;
   useLayoutEffect(() => {
@@ -203,11 +205,11 @@ function HomeOverview({ offerInstallation, onRestorationLoadingChange, schedulin
   }, [active, chatOpen, setHomeMode]);
   const unread = notifications?.unread.size ?? 0;
   const unreadDescription = useId();
-  const { model, busy, blocked, error, canAutoOpen, refresh, refreshOnReturn, returning: returnRead, reconcileHome, dismissSecondChat, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller, active, notifications);
+  const { model, busy, blocked, error, canAutoOpen, refresh, refreshOnReturn, returning: returnMode, reconcileHome, dismissSecondChat, search, cancel, searchPhase, backFromSearch, canRetryLocation, retryLocation } = useHome(controller, active, notifications, retainOnReturn);
+  const returnRead = !!returnMode;
   const restoration = useSecondChatRestoration(controller,model?.home ?? null,!busy && !blocked,active && !returnRead,onRestoreSecond);
   const restoringChat = !restoration.ready && !!model && !restoration.error && !error;
   useLayoutEffect(() => { onRestorationLoadingChange(active && restoringChat); }, [active, restoringChat, onRestorationLoadingChange]);
-  useLayoutEffect(() => { onNavigationBlockedChange(active && (!restoration.ready || busy || searchPhase !== 'idle')); return () => onNavigationBlockedChange(false); }, [active, busy, searchPhase, restoration.ready, onNavigationBlockedChange]);
   const reconciledReturn=useRef(false);
   useLayoutEffect(()=>{
     const reconcile=async()=>{const data=await reconcileHome();if(data)reconciledReturn.current=true;return data;};
@@ -216,14 +218,24 @@ function HomeOverview({ offerInstallation, onRestorationLoadingChange, schedulin
   const surface = activityOpen ? 'activity' : 'overview';
   const wasActive = useRef(active);
   const returning = active && !wasActive.current;
-  useLayoutEffect(() => { if (active && !wasActive.current) {if(!reconciledReturn.current)refreshOnReturn();reconciledReturn.current=false;} wasActive.current = active; }, [active, refreshOnReturn]);
+  useLayoutEffect(() => { if (active && !wasActive.current) {if (!reconciledReturn.current || invalidated.current) refreshOnReturn(invalidated.current); invalidated.current = false; reconciledReturn.current = false;} wasActive.current = active; }, [active, refreshOnReturn]);
   const root = useRef<HTMLDivElement>(null);
   const home = model ? visualHomeProjection(model.home,actedVisuals,knownClosed) : undefined, m = home?.matchmaking;
   useEffect(() => { if (model && !busy && !blocked) reconcileHiddenFirstChats(model.home, hidden, knownClosed); }, [model, busy, blocked, hidden, knownClosed]);
+  const pendingFirst = home?.pendingActions.find(item =>
+    item.type === 'FIRST_CHAT' && item.chatId && !suppressed.has(item.chatId) && !knownClosed.has(item.matchId));
+  const automaticFirst = !returning && !returnRead && !busy && !blocked && restoration.ready &&
+    document.visibilityState === 'visible' && canAutoOpen() ? pendingFirst : undefined;
+  const starting = useStartupDestination(active && !busy && !returning && !returnRead &&
+    (!model || restoration.ready || !!restoration.error || !!error) &&
+    (!pendingFirst || blocked || !!restoration.error || !!error));
+  useLayoutEffect(() => {
+    onNavigationBlockedChange(active && (!restoration.ready || busy || (!!pendingFirst && !blocked) || searchPhase !== 'idle'));
+    return () => onNavigationBlockedChange(false);
+  }, [active, blocked, busy, pendingFirst, searchPhase, restoration.ready, onNavigationBlockedChange]);
   useEffect(() => {
-    const item = home?.pendingActions.find(i => i.type === 'FIRST_CHAT' && i.chatId && !suppressed.has(i.chatId));
-    if (document.visibilityState === 'visible' && canAutoOpen() && active && restoration.ready && !returning && !returnRead && item && !busy && !blocked) onOpenChat(item, true);
-  }, [active, canAutoOpen, restoration.ready, returning, returnRead, home, busy, blocked, onOpenChat, suppressed]);
+    if (active && automaticFirst) onOpenChat(automaticFirst, true);
+  }, [active, automaticFirst, onOpenChat]);
   const waiting = !!m?.inQueue || searchPhase !== 'idle';
   useLayoutEffect(() => {
     return setSearchBack(active && waiting ? () => {
@@ -235,15 +247,16 @@ function HomeOverview({ offerInstallation, onRestorationLoadingChange, schedulin
   useEffect(() => { if (screen !== 'overview') retireNotice(); }, [screen, retireNotice]);
   const previouslyVisible = useRef(false);
   useLayoutEffect(() => {
+    if (starting) return;
     const restoring = active && !previouslyVisible.current;
     previouslyVisible.current = active;
     const heading = root.current?.querySelector('h2');
     if (active && heading) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; heading.tabIndex = -1; heading.focus({ preventScroll: true }); if (restoring && returnScroll.current) window.scrollTo(0, returnScroll.current); }
-  }, [active, screen, returnScroll]);
+  }, [active, screen, returnScroll, starting]);
   const affinity = affinities.catalog ? affinityPresentation(affinities.catalog, affinities.answers) : null;
   const now = useHomeTime(active);
   const presentation = home ? activityPresentation(home,now) : null;
-  const showsSummary = active && restoration.ready && !waiting && !activityOpen && home?.profileStatus === 'ACTIVE';
+  const showsSummary = !starting && active && restoration.ready && !waiting && !activityOpen && home?.profileStatus === 'ACTIVE';
   useLayoutEffect(() => { onSummaryVisible(showsSummary); }, [showsSummary, onSummaryVisible]);
   const allowSchedulingReturn = returnRead && !home?.pendingActions.some(item =>
     item.type === 'FIRST_CHAT' && item.chatId && !suppressed.has(item.chatId));
@@ -261,7 +274,7 @@ function HomeOverview({ offerInstallation, onRestorationLoadingChange, schedulin
     {presentation.notices.map((notice, index) => <aside className="home-notice" key={`${notice}-${index}`}>Hay novedades sobre tus interacciones. Revisá las opciones disponibles en Actividad.</aside>)}
   </div>;
   return <div ref={root} className={`home ${busy && model ? 'home-reconciling' : ''}`} aria-busy={busy}>
-    <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><div className="home-header-actions">{onAdmin && <AdminEntry pending={adminPending} disabled={busy || returnRead || searchPhase !== 'idle'} onClick={onAdmin} />}</div></header>
+    <header className="home-heading"><div><h2>Inicio</h2><p>{model ? `Hola, ${model.name}` : 'Bienvenido a Reals'}</p></div><div className="home-header-actions">{onAdmin && <AdminEntry pending={adminPending} disabled={busy || blocked || returnMode === 'mandatory' || !!pendingFirst || searchPhase !== 'idle'} onClick={onAdmin} />}</div></header>
     {notice && <p className="home-notice home-terminal-notice" role="status"><span>{notice}</span><button type="button" onClick={retireNotice} aria-label={notice === 'Preferencias guardadas' ? 'Ocultar aviso' : 'Ocultar aviso del chat'}><ChatIcon name="close"/></button></p>}
     {busy && !model && <p className="home-loading-status" role="status">Actualizando Inicio…</p>}
     {busy && !model && <div className="home-placeholder" aria-hidden="true"><div className="home-card home-placeholder-search"><span /><span /><span /></div><div className="home-grid">{managementEntries.map(([target]) => <div className="home-card home-placeholder-card" key={target}><span /><span /><span /></div>)}</div></div>}
@@ -273,7 +286,7 @@ function HomeOverview({ offerInstallation, onRestorationLoadingChange, schedulin
       <section className="home-card home-search" aria-labelledby="search-title"><h3 id="search-title">Buscar chat</h3>
         <p>Una conversación es el comienzo de algo real.</p>
           {!m?.canSearch && <p>{blockedLabels[m?.blockedReason?.code ?? ''] ?? 'La búsqueda no está disponible por ahora. Actualizá el estado o revisá tus interacciones.'}</p>}
-          <button className={`login-button login-primary ${m?.canSearch && home.profileStatus === 'ACTIVE' ? 'home-search-ready' : ''}`} disabled={busy || returnRead || blocked || !m?.canSearch || home.profileStatus !== 'ACTIVE'} onClick={search}>Buscar chat</button>
+          <button className={`login-button login-primary ${m?.canSearch && home.profileStatus === 'ACTIVE' ? 'home-search-ready' : ''}`} disabled={busy || returnRead || blocked || !!pendingFirst || !m?.canSearch || home.profileStatus !== 'ACTIVE'} onClick={search}>Buscar chat</button>
       </section>
       {presentation?.hasActivity && <button className="home-card home-activity-entry" onClick={onActivity} aria-label="Ver Actividad" aria-describedby={unread ? unreadDescription : undefined}><span className="home-entry-title">Actividad{unread > 0 && <span className="activity-unread" id={unreadDescription}>{unread} {unread === 1 ? 'novedad' : 'novedades'}</span>}</span><span>{presentation?.required ? `${presentation.required} requieren tu acción` : 'Tus conversaciones y próximos pasos'}</span><span aria-hidden="true">Ver actividad →</span></button>}
       {offerInstallation && showsSummary && <InstallGuidance onDismiss={() => root.current?.querySelector('h2')?.focus({ preventScroll: true })} />}

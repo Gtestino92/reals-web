@@ -188,15 +188,39 @@ it('verifies eligibility immediately after bootstrap, independently of a delayed
   const h = setup(), base = h.fetcher.getMockImplementation()!;
   let finish!: (response: Response) => void;
   h.fetcher.mockImplementation((path, options) => path === '/api/me/home' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
-  const entry = await screen.findByRole('button', { name: 'Admin' });
-  expect(entry.closest('header')).toHaveClass('home-heading');
-  expect(entry).toBeDisabled(); // The existing pending-operation guard still applies.
+  await waitFor(() => expect(h.status).toHaveBeenCalledOnce());
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando Reals…');
+  expect(screen.queryByRole('button', { name: 'Admin' })).toBeNull();
   expect(h.status).toHaveBeenCalledOnce();
   await waitFor(() => expect(finish).toBeDefined());
   await act(async () => finish(json(emptyHome())));
-  await waitFor(() => expect(entry).toBeEnabled());
-  expect(screen.getByRole('button', { name: 'Admin' })).toBe(entry);
+  const entry = await screen.findByRole('button', { name: 'Admin' });
+  expect(entry.closest('header')).toHaveClass('home-heading');
+  expect(entry).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Actualizar' })).toBeNull();
+});
+
+it('starts independent Admin verification on a healthy profile return while Search waits for Home', async () => {
+  const h = setup();
+  const search = await screen.findByRole('button', { name: 'Buscar chat' });
+  const admin = await screen.findByRole('button', { name: 'Admin' });
+  fireEvent.click(screen.getByRole('button', { name: 'Tu perfil' }));
+  await screen.findByRole('form', { name: 'Datos del perfil' });
+  const base = h.fetcher.getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  h.fetcher.mockImplementation((path, options) => path === '/api/me/home/status' ? new Promise(resolve => { finish = resolve; }) : base(path, options));
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a Inicio' }));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(screen.getByRole('button', { name: 'Admin' })).toBe(admin);
+  expect(admin).toBeEnabled();
+  expect(search).toBeDisabled();
+  expect(screen.queryByText('Preparando Reals…')).toBeNull();
+  fireEvent.click(admin);
+  await screen.findByLabelText('Código de seis dígitos');
+  expect(h.status).toHaveBeenCalledTimes(2);
+  expect(h.events.some(path => path.startsWith('/api/admin/'))).toBe(false);
+  await act(async () => finish(json(homeStatus())));
+  expect(search).toBeEnabled();
 });
 
 it('does not flash an unverified entry and rejects late eligibility after identity replacement', async () => {

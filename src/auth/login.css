@@ -50,6 +50,20 @@
 }
 .login-header p { margin: 8px 0 26px; color: var(--color-on-surface-variant); }
 .session-loading { margin: 24px 0; text-align: center; color: var(--color-on-surface-variant); }
+.startup-loading .login-panel { position: relative; }
+.startup-actions { position: absolute; inset: 100% 0 auto; margin-top: 16px; text-align: center; }
+.startup-indicator {
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
+  border: 2px solid var(--color-outline-variant);
+  border-top-color: var(--color-secondary);
+  border-radius: 50%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .startup-indicator { animation: startup-spin 900ms linear infinite; }
+}
+@keyframes startup-spin { to { transform: rotate(1turn); } }
 .session-actions { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--color-outline-variant); }
 .session-actions .login-button { width: 100%; }
 .login-form { display: flex; flex-direction: column; gap: 10px; }

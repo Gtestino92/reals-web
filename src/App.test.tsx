@@ -8,8 +8,12 @@ import { ApiClient, ApiError } from './auth/api';
 import type { AuthService, Identity } from './auth/firebase';
 import { configureFirebase, localVerificationEnabled } from './auth/firebase';
 import { SessionController } from './auth/session';
+import { useStartupDestination } from './SessionLoading';
 // Stage B tests isolate authentication; Stage C exercises the real surface separately.
-vi.mock('./onboarding/Onboarding', () => ({ Onboarding: ({ controller }: { controller: SessionController }) => <p>{controller.snapshot.profile ? `Perfil existente: ${controller.snapshot.profile.status}` : 'Sin perfil: falta completar el registro.'}</p> }));
+vi.mock('./onboarding/Onboarding', () => ({ Onboarding: ({ controller }: { controller: SessionController }) => {
+  useStartupDestination(true);
+  return <p>{controller.snapshot.profile ? `Perfil existente: ${controller.snapshot.profile.status}` : 'Sin perfil: falta completar el registro.'}</p>;
+} }));
 let observer: (user: Identity | null) => void;
 let user: Identity;
 let auth: AuthService;
@@ -45,7 +49,7 @@ it('restores an existing session without rendering an intermediate login form', 
   let finish!: (response: Response) => void;
   fetcher.mockImplementation(path => path === '/api/me' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(json({ code: 'PROFILE_NOT_FOUND' }, 404)));
   mount(true);
-  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando Reals…');
   expect(screen.queryByRole('form')).toBeNull();
   expect(screen.getByRole('heading', { name: 'Reals' })).toBeVisible();
   act(() => observer(user)); await waitFor(() => expect(finish).toBeDefined());
@@ -91,11 +95,12 @@ it('keeps the restored-session shell until bootstrap resolves and shows an actio
   let fail!: (reason: Error) => void;
   fetcher.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
   mount(true);
-  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  const loading = screen.getByRole('status');
+  expect(loading).toHaveTextContent('Preparando Reals…');
   expect(screen.queryByRole('form')).toBeNull();
   act(() => observer(user)); await waitFor(() => expect(fail).toBeDefined());
   expect(screen.queryByRole('form')).toBeNull();
-  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  expect(screen.getByRole('status')).toBe(loading);
   expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
   await act(async () => fail(new TypeError('offline')));
   expect(screen.getByRole('alert')).toBeVisible(); expect(screen.getByRole('button', { name: 'Reintentar' })).toBeEnabled();
