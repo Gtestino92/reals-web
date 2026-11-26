@@ -45,15 +45,101 @@ try {
   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
   return {call,evaluate,target};
  };
- const page=async(kind,uid)=>{
-  const target=await(await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();const p=await connect(target); await p.call('Emulation.setDeviceMetricsOverride',{width:uid==='identity-a'?390:1280,height:850,deviceScaleFactor:1,mobile:uid==='identity-a'});
-  await p.call('Page.navigate',{url:`http://127.0.0.1:5174/tools/tab-ownership-fixture.html?kind=${kind}&uid=${uid}&backend=${encodeURIComponent(origin)}`});return p;
+ const page=async(kind,uid,{width=uid==='identity-a'?390:1280,mobile=uid==='identity-a',theme,userAgent,standalone=false}={})=>{
+  const target=await(await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
+  const p=await connect(target);
+  await p.call('Emulation.setDeviceMetricsOverride',{width,height:850,deviceScaleFactor:1,mobile});
+  if (theme) await p.call('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
+  if (userAgent) {
+    await p.call('Page.enable');
+    await p.call('Emulation.setUserAgentOverride',{userAgent,platform:'MacIntel'});
+    await p.call('Emulation.setTouchEmulationEnabled',{enabled:mobile,maxTouchPoints:5});
+    await p.call('Page.addScriptToEvaluateOnNewDocument',{source:`Object.defineProperties(navigator,{vendor:{value:'Apple Computer, Inc.'},standalone:{value:${standalone}}})`});
+  }
+  const fixtureUrl=`http://127.0.0.1:5174/tools/tab-ownership-fixture.html?kind=${kind}&uid=${uid}&backend=${encodeURIComponent(origin)}${userAgent ? '&geo' : ''}`;
+  await p.call('Page.navigate',{url:fixtureUrl});
+  return {...p, fixtureUrl};
  };
  const wait=async(p,expression)=>{for(let i=0;i<150;i++){if(await p.evaluate(expression))return;await new Promise(r=>setTimeout(r,100));}throw Error('Timeout '+expression+' '+await p.evaluate('document.body.innerText'));};
  const active=p=>wait(p,"window.ownership?.getSnapshot()==='active' && !!document.querySelector('.home, .onboarding, .login-form')");
  const blocked=p=>wait(p,"document.body.innerText.includes('Reals está activo en otra pestaña.') && !document.querySelector('.home, .onboarding, .first-chat, .login-form')");
  const takeover=async(p)=>{await p.evaluate("document.querySelector('button').click()");await active(p);};
  const close=async p=>{await p.call('Page.close');};
+ const restoreFixtureUrl = p => p.evaluate(`history.replaceState(history.state, "", ${JSON.stringify(p.fixtureUrl)})`);
+ if (process.argv.includes('--install-guidance')) {
+  const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1';
+  const ipad = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15';
+  const notice = 'document.querySelector(".home-install")';
+  const homeReady = p => wait(p, '!!document.querySelector(".home-management")');
+  for (const [width, theme, userAgent] of [[320,'light',iphone],[390,'dark',iphone],[820,'light',ipad]]) {
+   const p = await page('home','fixture',{width,mobile:true,theme,userAgent});
+   await homeReady(p);
+   if (!await p.evaluate(`!!${notice}`)) {
+    throw Error('Missing guidance with emulated signals: ' + JSON.stringify(await p.evaluate('({ua:navigator.userAgent, vendor:navigator.vendor, platform:navigator.platform, touch:navigator.maxTouchPoints, standalone:navigator.standalone, display:matchMedia("(display-mode: standalone)").matches})')));
+   }
+   if (!await p.evaluate('document.documentElement.scrollWidth <= innerWidth && !!document.querySelector(".home-search button:enabled")')) throw Error('Home layout or search action blocked');
+   await p.evaluate(`${notice}.scrollIntoView({block:'center'});`);
+   const screenshot = await p.call('Page.captureScreenshot');
+   await writeFile(join(dir,`install-${width}-${theme}.png`), Buffer.from(screenshot.data,'base64'));
+   if (width === 320) {
+    await p.evaluate('document.querySelector(".home-search button").click()');
+    await wait(p, `!!document.querySelector(".search-screen") && !${notice}`);
+    await wait(p, 'Array.from(document.querySelectorAll("button")).some(button => button.textContent === "Cancelar búsqueda" && !button.disabled)');
+    await p.evaluate('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Cancelar búsqueda").click()');
+    await wait(p, `!!${notice}`);
+   }
+   await p.evaluate(`${notice}.querySelectorAll('button')[${width === 390 ? 1 : 0}].click()`);
+   if (await p.evaluate(`!!${notice} || document.activeElement.textContent !== "Inicio"`)) throw Error('Dismissal or focus restoration failed');
+   const loadedAt = await p.evaluate('performance.timeOrigin');
+   await restoreFixtureUrl(p);
+   await p.call('Page.reload');
+   await wait(p, `performance.timeOrigin !== ${loadedAt}`);
+   await homeReady(p);
+   if (await p.evaluate(`!!${notice}`)) throw Error('Dismissal did not survive reload');
+   await p.evaluate('localStorage.removeItem("reals:ios-install-guidance:v1")');
+   await close(p);
+  }
+  for (const [kind, options] of [
+   ['home', {width:390,mobile:true,userAgent:iphone,standalone:true}],
+   ['home', {userAgent:ipad}],
+   ['home', {width:390,mobile:true,userAgent:iphone.replace(' Mobile/', ' CriOS/140.0 Mobile/')}],
+   ['login', {width:390,mobile:true,userAgent:iphone}],
+   ['onboarding', {width:390,mobile:true,userAgent:iphone}],
+  ]) {
+   const p = await page(kind, 'fixture', options);
+   await (kind === 'home' ? homeReady(p) : active(p));
+   if (await p.evaluate(`!!${notice}`)) throw Error('Ineligible installation surface');
+   await close(p);
+  }
+  console.log('Installation guidance checks passed in Chromium with emulated Safari signals. Screenshots:', dir);
+ }
+ else {
+ const lifecycle = [];
+ const hide = p => p.evaluate('window.oldOwnershipSignal = ownership.signal; window.dispatchEvent(new PageTransitionEvent("pagehide", {persisted:true}))');
+ const show = p => p.evaluate('window.dispatchEvent(new PageTransitionEvent("pageshow", {persisted:true}))');
+ reset();
+ const returning = await page('home','identity-a'); await active(returning);
+ await hide(returning); await blocked(returning); await show(returning); await active(returning);
+ if (!await returning.evaluate('oldOwnershipSignal.aborted && !ownership.signal.aborted && oldOwnershipSignal !== ownership.signal && signouts === 0')) throw Error('Restoration reused a revoked grant or signed out');
+ lifecycle.push('Synthetic persisted lifecycle with real Web Locks reacquired a vacant lock');
+ await hide(returning); await blocked(returning);
+ const current = await page('home','identity-b'); await active(current);
+ await show(returning); await blocked(returning); await active(current);
+ await close(current);
+ await returning.call('Page.bringToFront');
+ await returning.evaluate('window.dispatchEvent(new Event("focus")); document.dispatchEvent(new Event("visibilitychange"))');
+ await new Promise(r=>setTimeout(r,250)); await blocked(returning);
+ await takeover(returning);
+ lifecycle.push('Synthetic persisted lifecycle with a real competing owner stayed blocked until explicit activation');
+ await restoreFixtureUrl(returning);
+ await returning.evaluate('window.addEventListener("pageshow", event => { window.restoredFromCache = event.persisted; })');
+ const loadedAt = await returning.evaluate('performance.timeOrigin');
+ await returning.call('Page.navigate',{url:'data:text/html,browser-back-fixture'});
+ await wait(returning,'document.body.innerText === "browser-back-fixture"');
+ await returning.evaluate('history.back()'); await active(returning);
+ const restored = await returning.evaluate(`performance.timeOrigin === ${loadedAt} && window.restoredFromCache === true`);
+ lifecycle.push(restored ? 'Actual Back restored the cached document and reacquired ownership' : 'Actual Back recreated the document and acquired ownership through startup');
+ await close(returning);
  const results=[];
  for(const [first,second] of [['login','login'],['login','home'],['home','home'],['chat','home'],['onboarding','home']]) {
   reset(first==='chat'?'chat':'home');
@@ -69,7 +155,7 @@ try {
   await takeover(a);await blocked(b);
   if(first==='home'){for(const [p,label] of [[a,'mobile-active'],[b,'desktop-blocked']]){const shot=await p.call('Page.captureScreenshot');await writeFile(join(dir,label+'.png'),Buffer.from(shot.data,'base64'));}console.log('Screenshots:',dir);}
   for(let i=0;i<4;i++){await takeover(i%2? a:b);await blocked(i%2? b:a);}
-  await a.call('Page.reload');await active(a);await blocked(b);
+  await restoreFixtureUrl(a);await a.call('Page.reload');await active(a);await blocked(b);
   await close(a);await takeover(b);
   if(requests.some(r=>r.method!=='GET'))throw Error('Unexpected domain write');
   results.push({first,second,identities:'synthetic per-document Firebase identities',takeover:true,focus:true,inactiveMutationRejected:true,reload:true,close:true,rapid:true});
@@ -84,7 +170,8 @@ try {
  if(requests.filter(r=>r.method==='POST').length!==1 || requests.some(r=>r.method==='DELETE'))throw Error('Uncertain write replayed or canceled');
  results.push({pendingMutation:'aborted locally, persisted queue recovered without replay',inactivePollingStopped:true});
  await close(a);await close(b);
- console.log(JSON.stringify({sameBrowserContext:true,results,requests:requests.length,writes:requests.filter(r=>r.method!=='GET')},null,2));
+ console.log(JSON.stringify({sameBrowserContext:true,lifecycle,results,requests:requests.length,writes:requests.filter(r=>r.method!=='GET')},null,2));
+ }
 } finally {
  server.closeAllConnections();server.close();for(const ws of sockets)ws.close();chrome.kill();
 }

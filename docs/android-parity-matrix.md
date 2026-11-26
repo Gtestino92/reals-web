@@ -1,5 +1,19 @@
 # Android-first migration and First Chat parity
 
+## iOS Safari installation guidance
+
+Android revision `83e4ef7` was audited through
+`RealsApp.kt`, `MatchmakingHomeScreen.kt`, `HomeCoordinator.kt`,
+`HomeScreenModel.kt` and the Home routing, card and accessibility tests.
+The launcher assets and existing editorial surfaces are the visual reference.
+Android's native app installation has no equivalent in-app Home step.
+
+| Area | Parity and scope |
+| --- | --- |
+| Ordinary Home layout and surface routing | COMPLETE for this addition. `App.tsx` and `Home.tsx` reuse the active profile, restored Home and administrative boundaries. Search stays above the card. Existing Back, scroll, and protected destinations are reused. |
+| iOS installation and storage | PLATFORM-LIMITED. `InstallGuidance.tsx` adds a Web-only, nonmodal editorial card with native Share instructions. Safari owns installation and isolated Web Storage. |
+| Input and lifecycle | COMPLETE in focused tests for native buttons, focus return, delayed/failing foreground reads, account replacement and protected navigation. The Chromium fixture exercised 320, 390 and 820 px widths. Physical Safari and VoiceOver remain unverified. See [Browser identity](browser-identity.md#instalar-reals-web). |
+
 ## First and Second Chat counterpart audio access (2026-11-24)
 
 | Area | Android reference at `97827fbb` | Web behavior and evidence |

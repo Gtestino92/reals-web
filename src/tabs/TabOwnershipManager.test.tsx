@@ -19,8 +19,12 @@ class FakeChannel {
 }
 function locks() {
   let tail = Promise.resolve();
-  return { request: vi.fn((_name: string, options: LockOptions, callback: () => Promise<void>) => {
-    const result = tail.then(() => { options.signal?.throwIfAborted(); return callback(); });
+  let requested = 0;
+  return { request: vi.fn((_name: string, options: LockOptions, callback: (lock: Lock | null) => Promise<void>) => {
+    if (options.ifAvailable && requested) return Promise.resolve().then(() => callback(null));
+    requested++;
+    const result = tail.then(() => { options.signal?.throwIfAborted(); return callback({ name: _name, mode: 'exclusive' }); })
+      .finally(() => { requested--; });
     tail = result.catch(() => {}); return result;
   }) };
 }
@@ -47,6 +51,20 @@ it('ignores obsolete grant messages and releases on pagehide; blocked BFCache re
   channels[0]!.postMessage({ type: 'release', grant: 'obsolete' }); await flush(); expect(b.getSnapshot()).toBe('active');
   window.dispatchEvent(new Event('pagehide')); await flush(); expect(a.getSnapshot()).toBe('blocked'); expect(b.getSnapshot()).toBe('blocked');
   window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); await flush(); expect(a.getSnapshot()).toBe('blocked'); expect(b.getSnapshot()).toBe('active');
+});
+it('leaves the current owner in control when the previous owner returns from BFCache', async () => {
+  const previous = create(); await flush();
+  const previousSignal = previous.signal;
+  window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+  expect(previousSignal.aborted).toBe(true);
+  await flush();
+  const current = create(); await flush();
+  const currentSignal = current.signal;
+  window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  await flush();
+  expect(previous.getSnapshot()).toBe('blocked');
+  expect(current.getSnapshot()).toBe('active');
+  expect(currentSignal.aborted).toBe(false);
 });
 it('StrictMode cleans listeners, channels and locks', async () => {
   const manager = new TabOwnershipManager(); managers.push(manager);

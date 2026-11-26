@@ -5,7 +5,7 @@ export class TabOwnershipManager {
   private state: OwnershipState = 'initializing';
   private listeners = new Set<() => void>();
   private channel: BroadcastChannel | null = null;
-  private pending: AbortController | null = null;
+  private pending: { controller: AbortController; transfer: boolean } | null = null;
   private lease = new AbortController();
   private release: (() => void) | null = null;
   private grant: string | null = null;
@@ -27,7 +27,7 @@ export class TabOwnershipManager {
       this.channel.onmessage = ({ data }: MessageEvent<unknown>) => {
         if (typeof data !== 'object' || !data) return;
         if ('type' in data && data.type === 'ask' && this.grant) this.send({ type: 'owner', grant: this.grant });
-        if ('type' in data && data.type === 'owner' && 'grant' in data && typeof data.grant === 'string' && this.pending) this.send({ type: 'release', grant: data.grant });
+        if ('type' in data && data.type === 'owner' && 'grant' in data && typeof data.grant === 'string' && this.pending?.transfer) this.send({ type: 'release', grant: data.grant });
         if ('type' in data && data.type === 'release' && 'grant' in data && data.grant === this.grant && this.grant) this.revoke();
       };
       this.channel.onmessageerror = () => this.fail();
@@ -37,7 +37,7 @@ export class TabOwnershipManager {
     } catch { this.fail(); }
   };
   private send(message: { type: string; grant?: string }) { try { this.channel?.postMessage(message); } catch { this.fail(); } }
-  private clearPending() { clearInterval(this.timer); clearTimeout(this.deadline); this.pending?.abort(); this.pending = null; }
+  private clearPending() { clearInterval(this.timer); clearTimeout(this.deadline); this.pending?.controller.abort(); this.pending = null; }
   private revoke() {
     // Revoke requests synchronously BEFORE releasing the authoritative lock.
     this.state = 'blocked';
@@ -46,28 +46,39 @@ export class TabOwnershipManager {
     this.release?.(); this.release = null;
   }
   private fail() { this.clearPending(); this.revoke(); this.channel?.close(); this.channel = null; this.install('error'); }
-  request = () => {
+  request = () => this.acquire(true);
+  private acquire(transfer: boolean) {
     if (!this.running || this.pending || this.state === 'active') return;
-    if (!this.channel) { this.running = false; this.start(); return; }
-    const pending = new AbortController(); this.pending = pending;
+    if (!this.channel) {
+      if (transfer) { this.running = false; this.start(); }
+      return;
+    }
+    const pending = { controller: new AbortController(), transfer };
+    this.pending = pending;
     this.install('requesting-transfer');
-    this.timer = setInterval(() => this.send({ type: 'ask' }), 250);
-    this.deadline = setTimeout(() => { if (this.pending === pending) this.fail(); }, 8000);
-    // Queue before asking for release: the browser serializes all contenders.
-    try { void navigator.locks.request(LOCK_NAME, { mode: 'exclusive', signal: pending.signal }, async () => {
-      if (!this.running || this.pending !== pending || pending.signal.aborted) return;
+    if (transfer) {
+      this.timer = setInterval(() => this.send({ type: 'ask' }), 250);
+      this.deadline = setTimeout(() => { if (this.pending === pending) this.fail(); }, 8000);
+    }
+    // A returning document can only acquire a vacant lock. Web Locks requires
+    // that ifAvailable requests omit signal, so discard obsolete callbacks.
+    const options: LockOptions = transfer ?
+      { mode: 'exclusive', signal: pending.controller.signal } : { mode: 'exclusive', ifAvailable: true };
+    try { void navigator.locks.request(LOCK_NAME, options, async lock => {
+      if (!this.running || this.pending !== pending) return;
+      if (lock === null) { this.clearPending(); this.install('blocked'); return; }
       const grant = crypto.randomUUID();
       clearInterval(this.timer); clearTimeout(this.deadline); this.pending = null;
       this.lease = new AbortController(); this.grant = grant;
       await new Promise<void>(resolve => { this.release = resolve; this.install('active'); this.send({ type: 'owner', grant }); });
     }).catch(() => { if (this.pending === pending) this.fail(); });
     } catch { this.fail(); }
-    this.send({ type: 'ask' });
-  };
+    if (transfer && this.pending === pending) this.send({ type: 'ask' });
+  }
   private hide = () => { this.resume = this.state === 'active' || !!this.pending; this.clearPending(); this.revoke(); };
-  private show = (event: PageTransitionEvent) => { if (event.persisted && this.resume) { this.resume = false; this.request(); } };
+  private show = (event: PageTransitionEvent) => { if (event.persisted && this.resume) { this.resume = false; this.acquire(false); } };
   stop = () => {
-    this.running = false; this.clearPending(); this.revoke();
+    this.running = false; this.resume = false; this.clearPending(); this.revoke();
     this.channel?.close(); this.channel = null;
     window.removeEventListener('pagehide', this.hide); window.removeEventListener('pageshow', this.show);
   };
