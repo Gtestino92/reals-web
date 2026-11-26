@@ -73,6 +73,20 @@ that status sample, so a marker-triggered reconciliation adds no status GET.
 | Otherwise eligible within five minutes of a known second chat or during its entry window | One status GET per 10 seconds. |
 | Active chat, Administration, all Web categories disabled, restricted/signed-out session, non-owning tab, or setup with no Home | Zero. |
 
+## Initial presentation
+
+`OperationalApp` scopes `StartupBoundary` to a single operational mount. The
+boundary owns visibility only. Firebase and the session controller select the
+session state, the legal gate authorizes entry, and Home, Onboarding and the chat
+sessions report when their destination or actionable error can be shown. The
+boundary releases once, before paint, with no new request or deadline. The
+authenticated sign-out control remains available while the startup view is
+visible. Tab ownership uses the same presentation for acquisition before the
+operational tree exists, with explicit contention and failure feedback.
+
+See [startup and Home return](navigation-flicker.md#startup-and-home-return)
+for the backend read ordering, mutation review and measurements.
+
 On eligible ticks, pending costs at most one additional GET when a version
 changes, an advertised or known activity boundary is crossed, recovery is due,
 or the last projection is about two minutes old. Pending has an independent

@@ -79,3 +79,10 @@ The full regression command `npm test -- --maxWorkers=2 --reporter=json --output
 | Affinity summary or questionnaire entry and visible-tab return | The mounted account owner reads the catalog and answers once per refresh. Home requests them when its summary is displayed. Questionnaire subpages share the same read. Leaving both surfaces aborts an outstanding read and invalidates its serial. Answer mutations and uncertain-write recovery retain their account owner. |
 | Scheduling Back to Activity | During a healthy Home return read, only the matching scheduling entry can reopen early. Scheduling must have verified that the same session and connection were still coordinating. The profile shortcut and other cards wait for Home. A pending automatic first-chat entry, restoration gate, failed verification, terminal state or uncertain mutation prevents early entry. |
 | Immediate re-entry | Leaving Activity aborts the Home read and retires its serial. An ignored-abort response cannot install Home or open a chat. The new Scheduling session reads its own snapshot before offering mutations. |
+
+The [startup and Home return review](navigation-flicker.md#startup-and-home-return)
+distinguishes cold operational initialization from same-identity returns.
+An interrupted return remains invalidated. The next foreground verification
+reconciles before Search can act, while the mounted Home document and usable
+snapshot survive. Ordinary visibility revalidation keeps its existing status
+polling policy and never reopens the startup presentation.
