@@ -16,7 +16,7 @@ Branch `feature/*` and `fix/*` from `development` and open PRs targeting `develo
 
 When automatic deployments are enabled, Cloudflare Pages builds as its configured integration branch advances. GitHub Actions runs validation only. A push can trigger Pages while the push checks are still running, so GitHub branch protection must enforce passing PR checks **before** a change reaches the branch.
 
-The **Dependency audit** workflow checks lockfile changes on pull requests to either integration branch and can run on demand. The weekly schedule scans both integration lockfiles once the workflow is on the default branch. The PR check is path-filtered. See the policy, review date and upstream remediation trigger in the [security register](security-technical-debt.md#8-dependency-vulnerability-scanning). [GitHub Actions schedule behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+The **Dependency audit** workflow checks lockfile changes on pull requests to either integration branch and can run on demand. The weekly schedule scans `development`, the default branch. Enable scheduled scans of `main` once the audit workflow and runner are promoted to production. The PR check is path-filtered. See the policy, review date and upstream remediation trigger in the [security register](security-technical-debt.md#8-dependency-vulnerability-scanning). [GitHub Actions schedule behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
 ## Cloudflare Pages settings
 
