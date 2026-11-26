@@ -2199,3 +2199,10 @@ Android references are `SchedulingCoordinator.refresh`, `SchedulingScreen`, `Sch
 | Submit, accept, reject, block | Preflight preempts the background read. Generation, identity and abort checks protect the result. Reconcile after a write, including an uncertain outcome, without replay. Session and component tests cover obsolete reads, retirement and gallery withdrawal. | COMPLETE within focused tests |
 | Confirmed Calendar and activity | An unchanged confirmed connection costs one connection GET. Full reconciliation uses the snapshot and the authoritative Home read when required. | COMPLETE within focused tests |
 | Deployment and performance | Deploy backend first. The endpoint has no legacy fallback. The backend PostgreSQL integration fixture previously measured 22 SQL statements across six authenticated requests and six statements for one consolidated request. Visible-tab polling, mutation reconciliation and Home reads still incur work. Hosted deployment, latency and database load await verification. | PARTIAL operational evidence |
+
+### Home affinity visibility and Scheduling Back
+
+| Android reference and expected behavior | Web evidence | Status |
+| --- | --- | --- |
+| `RealsApp` and `AffinityQuestionnaireOperationHandler` display an affinity summary on Home and own edits in the questionnaire. | `Home` identifies the displayed summary or questionnaire. Focused tests count the two affinity GETs on entry and resume and zero on unrelated surfaces. | COMPLETE in simulated navigation |
+| `RealsRootViewModel.openScheduling`, `closeScheduling` and system Back open coordination from its connection and return to its caller. | A delayed Home projection permits re-entry into the same verified, ongoing coordination. Scheduling verifies authority again. Focused tests cover delayed, failed, denied and obsolete responses. | COMPLETE in simulated navigation |

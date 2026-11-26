@@ -7,7 +7,8 @@ import { answerable, validAnswer } from './presentation';
 interface State { catalog: Catalog | null; answers: Answer[]; busy: boolean; uncertain: boolean; error: string }
 interface Owner { identity: string; lifetime: AbortController; read: AbortController | null; serial: number; mutation: boolean; uncertain: boolean; background: boolean }
 const empty: State = { catalog: null, answers: [], busy: false, uncertain: false, error: '' };
-export function useAffinityQuestionnaire(controller: SessionController, active = true) {
+export function useAffinityQuestionnaire(controller: SessionController, surface: 'home' | 'questionnaire' | null = 'questionnaire') {
+  const active = surface !== null;
   const foreground = useRef(active); foreground.current = active;
   const session = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const identity = session.phase === 'ready' ? `${session.account?.id}/${session.profile?.id}` : '';
@@ -34,11 +35,21 @@ export function useAffinityQuestionnaire(controller: SessionController, active =
     install(empty);
     if (!identity || !controller.snapshot.profile) return;
     const r: Owner = { identity, lifetime: new AbortController(), read: null, serial: 0, mutation: false, uncertain: false, background: false };
-    owner.current = r; void refresh();
+    owner.current = r;
     const resume = () => { if (foreground.current && document.visibilityState === 'visible') void refresh(true); };
     document.addEventListener('visibilitychange', resume);
     return () => { document.removeEventListener('visibilitychange', resume); r.lifetime.abort(); r.read?.abort(); if (owner.current === r) owner.current = null; };
   }, [controller, identity]); // Each identity owns all reads and writes; no polling.
+  useEffect(() => {
+    const r = owner.current;
+    if (!active && r?.read) {
+      r.serial++;
+      r.read.abort();
+      r.read = null;
+      r.background = false;
+    }
+    if (active && document.visibilityState === 'visible') void refresh(true);
+  }, [controller, identity, surface]);
   const mutate = async (questionId: string, answerCode: string | null): Promise<Answer[] | null> => {
     const r = owner.current, snapshot = latest.current;
     if (!r || r.mutation || (r.read && !r.background) || r.uncertain || !snapshot.catalog || !valid(r, r.serial)) return null;
