@@ -62,6 +62,28 @@
 .first-chat dialog label { display:block; margin:12px 0; }
 .first-chat dialog textarea { display:block; width:100%; box-sizing:border-box; }
 .first-chat dialog::backdrop { background:rgb(0 0 0 / 50%); }
+.first-chat .chat-confirm-dialog { box-sizing:border-box; width:min(32rem, calc(100% - 32px)); padding:clamp(16px, 5vw, 24px); }
+.chat-confirm-dialog h3 { margin:0 0 12px; }
+.chat-confirm-dialog p { margin:0 0 16px; }
+.chat-confirm-fields { display:grid; gap:16px; margin:20px 0; }
+.first-chat .chat-confirm-fields label { display:grid; gap:8px; margin:0; }
+.first-chat .chat-confirm-fields select { width:100%; min-width:0; }
+.first-chat .chat-confirm-fields textarea { min-height:100px; resize:vertical; }
+.first-chat .chat-confirm-fields .chat-confirm-checkbox { grid-template-columns:auto 1fr; align-items:center; min-height:44px; }
+.chat-confirm-checkbox input { width:20px; height:20px; margin:0; }
+.chat-confirm-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:12px; margin-top:20px; }
+.chat-confirm-actions button { flex:1 1 8rem; }
+.first-chat .chat-confirm-primary { background:var(--color-primary); color:var(--color-on-primary); border-color:var(--color-primary); }
+.chat-confirm-actions + [role="status"] { margin:12px 0 0; }
+.second-chat .chat-timeline.chat-timeline-retained {
+  background:color-mix(in srgb, var(--color-surface) 50%, transparent);
+  border-color:color-mix(in srgb, var(--color-outline) 58%, transparent);
+}
+.second-chat-skeleton .chat-heading > .placeholder-line { flex:0 1 12rem; height:2rem; margin:0; }
+.second-chat-skeleton .chat-timeline { flex:1; min-height:0; gap:12px; }
+.second-chat-skeleton .chat-timeline .placeholder-line { width:min(56%, 22rem); height:2.5rem; margin:0; }
+.second-chat-skeleton .chat-timeline .placeholder-line:nth-child(2) { align-self:end; width:min(41%, 16rem); }
+.second-chat-skeleton > .placeholder-control { margin:0; }
 
 .chat-page { height:100dvh; padding:0; display:flex; overflow:clip; }
 .chat-shell { width:100%; min-width:0; }

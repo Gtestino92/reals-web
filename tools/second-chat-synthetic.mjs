@@ -31,6 +31,10 @@ export async function fixtureServer() {
     if(path.startsWith('/audio-')) { s.audioReads++; if(path.includes('expired')){s.audioVersion=2;res.writeHead(403);res.end();}else{res.writeHead(200,{'Content-Type':'audio/mp4','Accept-Ranges':'bytes'});res.end(audio);}return; }
     let bytes=[];for await(const chunk of req)bytes.push(chunk);const raw=Buffer.concat(bytes).toString('utf8'),data=req.headers['content-type']?.includes('application/json')&&raw?JSON.parse(raw):{};
     s.reads??=[];if(req.method==='GET')s.reads.push({me,path});
+    if(req.method==='GET' && path.includes('/messages?') && s.historyGate?.me===me){
+      const gate=s.historyGate;s.historyGate=null;
+      await gate.promise;
+    }
     if(req.method!=='GET')s.writes.push({me,path,body:data,raw});
     if(s.gate?.path===path&&req.method==='POST'){const gate=s.gate;s.gate=null;gate.started=true;await new Promise(r=>gate.release=r);}
     if(path==='/me/home/status')return json({version:s.writes.length+1,dirty:true,nextRefreshAt:null,serverTime:iso(s.now)});

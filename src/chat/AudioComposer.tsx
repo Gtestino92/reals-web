@@ -7,10 +7,9 @@ import { preserveTextDraftFocus } from './ChatControls';
 
 type Phase = 'idle' | 'permission' | 'recording' | 'checking';
 type Draft = { file: Blob; url: string; duration: number };
-export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payloadLocked = false, confirmedFile, delivery, onRetry, children, textDraft, textConfirmationVersion = 0 }: {
+export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payloadLocked = false, confirmedFile, children, textDraft, textConfirmationVersion = 0 }: {
   policy: AudioPolicy | null; disabled: boolean; onSend: (file: Blob) => Promise<void> | void;
   onDirtyChange: (dirty: boolean) => void; payloadLocked?: boolean; confirmedFile?: Blob | null;
-  delivery?: 'pending' | 'failed' | 'uncertain' | null; onRetry?: () => Promise<void>;
   children?: (microphone: ReactNode) => ReactNode;
   textDraft?: RefObject<HTMLTextAreaElement | null>;
   textConfirmationVersion?: number;
@@ -58,18 +57,13 @@ export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payload
   }, []);
   useEffect(() => { if (disabled || payloadLocked || !policy?.enabled || policy.remainingMessages === 0) { cancel(); preview.current?.pause(); } }, [disabled, payloadLocked, policy?.enabled, policy?.remainingMessages]);
   useEffect(() => { if (draft && confirmedFile === draft.file) discard(); }, [confirmedFile, draft]);
-  const performUpload = async (operation: () => Promise<void> | void) => {
-    const r = owner.current;
-    if (r.sending) return;
+  const send = async (file: Blob, submission = callbacks.current.onSend) => {
+    const r = owner.current, current = settings.current;
+    if (r.sending || current.disabled || current.payloadLocked || !current.policy?.enabled || current.policy.remainingMessages === 0) return;
     r.sending = true; setSending(true); const life = r.life;
-    try { await operation(); }
+    try { await submission(file); }
     catch { if (r.alive && r.life === life) setError('No pudimos enviar el audio. Revisá el estado antes de reintentar.'); }
     finally { if (r.alive && r.life === life) { r.sending = false; setSending(false); } }
-  };
-  const send = (file: Blob, submission = callbacks.current.onSend) => {
-    const current = settings.current;
-    if (current.disabled || current.payloadLocked || !current.policy?.enabled || current.policy.remainingMessages === 0) return;
-    return performUpload(() => submission(file));
   };
   const stop = (sendAfter = false) => {
     const r = owner.current;
@@ -133,8 +127,6 @@ export function AudioComposer({ policy, disabled, onSend, onDirtyChange, payload
     {phase === 'recording' ? <div className="chat-recording"><span role="timer">Grabando: {seconds} s / {Math.ceil((policy?.maxDurationMillis ?? 0) / 1000)} s</span><progress aria-label="Duración de la grabación" value={seconds} max={(policy?.maxDurationMillis ?? 1000) / 1000} /><div className="chat-composer-row"><button type="button" className="chat-icon-button" aria-label="Cancelar grabación" onClick={cancel}><ChatIcon name="close" /></button><button type="button" className="chat-icon-button" aria-label="Detener" title="Detener y revisar" onClick={() => stop()}><ChatIcon name="stop" /></button><button type="button" className="chat-icon-button chat-send" aria-label="Enviar audio" onClick={() => stop(true)}><ChatIcon name="send" /></button></div></div>
       : phase === 'checking' ? <div className="chat-composer-row"><p role="status">Comprobando formato…</p><button type="button" className="chat-icon-button" aria-label="Cancelar grabación" onClick={cancel}><ChatIcon name="close"/></button></div>
       : draft ? <div className="chat-audio-draft"><span>Audio listo para enviar · {Math.ceil(draft.duration / 1000)} s</span><div className="chat-composer-row"><audio ref={preview} controls preload="metadata" src={draft.url} aria-label="Vista previa del audio" onError={event => { if (event.currentTarget === preview.current && owner.current.url === draft.url) setError('No pudimos reproducir la vista previa. Podés eliminar la grabación y volver a intentar.'); }} onPlay={event => document.querySelectorAll('audio').forEach(audio => { if (audio !== event.currentTarget) audio.pause(); })}/><button type="button" className="chat-icon-button" aria-label="Eliminar grabación" disabled={payloadLocked || sending} onClick={discard}><ChatIcon name="close" /></button><button type="button" className="chat-icon-button chat-send" aria-label="Enviar audio" disabled={disabled || !policy?.enabled || policy.remainingMessages === 0 || locked} onClick={() => void send(draft.file)}><ChatIcon name="send" /></button></div>
-        {(delivery === 'pending' || sending) && <div role="status">Enviando audio…<progress aria-label="Envío de audio" /></div>}
-        {delivery && delivery !== 'pending' && <p role="status">{delivery === 'uncertain' ? 'Envío sin confirmar.' : 'No se pudo enviar el audio.'} {onRetry && <button type="button" disabled={sending} onClick={() => void performUpload(onRetry)}>Reconciliar y reintentar audio</button>}</p>}
       </div> : children ? children(microphone) : microphone}
     {phase==='permission' && <div className={`chat-permission-notice ${children?'chat-permission-inline':''}`}><span role="status">Esperando permiso de micrófono…</span><button type="button" className="chat-text-action" onClick={cancel}>Cancelar solicitud</button></div>}
     <span id={explanationId} className="chat-visually-hidden">{explanation}</span>

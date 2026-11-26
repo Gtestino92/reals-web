@@ -1,7 +1,17 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { plainText } from './contracts';
 import { ChatIcon } from './ChatIcon';
 type DialogAction = 'mutual' | 'cancel' | 'safety' | 'block';
+
+export function submitChatOnEnter(event: KeyboardEvent<HTMLTextAreaElement>, composing: boolean, canSend: boolean) {
+  // Use desktop input capabilities and a concrete key code as a conservative
+  // proxy for a physical keyboard.
+  if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey ||
+    composing || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 ||
+    !['Enter','NumpadEnter'].includes(event.code) || !window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) return;
+  event.preventDefault();
+  if (!event.repeat && canSend) event.currentTarget.form?.requestSubmit();
+}
 
 export function preserveTextDraftFocus(event: MouseEvent<HTMLButtonElement>, draft?: HTMLTextAreaElement | null) {
   // A tap can dispatch a compatibility mousedown. Cancel only its focus
@@ -15,16 +25,31 @@ export function TextSendButton({ draft, disabled, className, children }: {
   return <button type="submit" className={className} aria-label="Enviar mensaje" disabled={disabled} onMouseDown={event => preserveTextDraftFocus(event, draft.current)}>{children}</button>;
 }
 
-export function ConfirmDialog({ kind, busy, close, confirm }: { kind: DialogAction; busy: boolean; close: () => void; confirm: (body?: unknown) => void }) {
+export function ConfirmDialog({ kind, busy, pending = busy, disabled = false, feedback, close, confirm }: {
+  kind: DialogAction; busy: boolean; pending?: boolean; disabled?: boolean; feedback?: ReactNode; close: () => void; confirm: (body?: unknown) => void;
+}) {
   const ref = useRef<HTMLDialogElement>(null), [details,setDetails] = useState(''), [reason,setReason] = useState('INAPPROPRIATE_BEHAVIOR'), [block,setBlock] = useState(false);
   useEffect(() => { const d = ref.current; d?.showModal(); return () => d?.close(); }, []);
   const safety = kind === 'safety';
-  return <dialog ref={ref} aria-labelledby="chat-dialog-title" onCancel={e => { if (busy) e.preventDefault(); else close(); }}>
+  return <dialog className="chat-confirm-dialog" ref={ref} aria-labelledby="chat-dialog-title" onCancel={e => { e.preventDefault(); if (!busy) close(); }}>
     <h3 id="chat-dialog-title">{safety ? 'Reportar y cerrar chat' : kind === 'block' ? 'Bloquear a esta persona' : kind === 'mutual' ? 'Solicitar salida consensuada' : 'Cerrar chat'}</h3>
     <p>{safety ? 'Describí qué pasó. Este reporte cerrará el chat por seguridad y será revisado.' : kind === 'block' ? 'Se cerrará la interacción y esta persona quedará bloqueada.' : kind === 'mutual' ? 'La conversación se pausa hasta resolver la solicitud. Tanto aceptar como rechazar la salida cierran el chat.' : 'Esta decisión cierra el chat. Una salida unilateral puede afectar tu confiabilidad según las reglas del servidor.'}</p>
-    {safety && <><label>Motivo<select value={reason} onChange={e => setReason(e.target.value)} disabled={busy}><option value="INAPPROPRIATE_BEHAVIOR">Comportamiento inapropiado</option><option value="HARASSMENT">Acoso</option><option value="CHILD_SAFETY_CONCERN">Seguridad de menores</option><option value="OTHER">Otro</option></select></label><label>Detalle<textarea value={details} maxLength={1000} onChange={e => setDetails(e.target.value)} disabled={busy}/></label><label><input type="checkbox" checked={block} onChange={e => setBlock(e.target.checked)} disabled={busy}/>Bloquear también a esta persona</label></>}
-    <button disabled={busy} onClick={close}>Volver</button><button disabled={busy || (safety && !plainText(details.trim()))} onClick={() => confirm(safety ? { reason, details: details.trim(), blockUser: block } : undefined)}>Confirmar</button>
+    {safety && <div className="chat-confirm-fields"><label>Motivo<select value={reason} onChange={e => setReason(e.target.value)} disabled={busy}><option value="INAPPROPRIATE_BEHAVIOR">Comportamiento inapropiado</option><option value="HARASSMENT">Acoso</option><option value="CHILD_SAFETY_CONCERN">Seguridad de menores</option><option value="OTHER">Otro</option></select></label><label>Detalle<textarea value={details} maxLength={1000} onChange={e => setDetails(e.target.value)} disabled={busy}/></label><label className="chat-confirm-checkbox"><input type="checkbox" checked={block} onChange={e => setBlock(e.target.checked)} disabled={busy}/>Bloquear también a esta persona</label></div>}
+    <ConfirmDialogActions busy={busy} disabled={disabled || (safety && !plainText(details.trim()))} feedback={feedback} close={close} confirm={() => confirm(safety ? { reason, details: details.trim(), blockUser: block } : undefined)} label="Confirmar" pendingLabel={pending ? safety ? 'Enviando reporte…' : kind === 'block' ? 'Bloqueando…' : 'Confirmando…' : undefined}/>
   </dialog>;
+}
+
+export function ConfirmDialogActions({ busy, disabled, feedback, close, confirm, label, pendingLabel, backLabel = 'Volver' }: {
+  busy: boolean; disabled?: boolean; feedback?: ReactNode; close: () => void; confirm: () => void; label: string; pendingLabel?: string | undefined; backLabel?: string;
+}) {
+  return <>
+    {feedback}
+    <div className="chat-confirm-actions">
+      <button type="button" disabled={busy} onClick={close}>{backLabel}</button>
+      <button type="button" className="chat-confirm-primary" disabled={busy || disabled} onClick={confirm}>{label}</button>
+    </div>
+    {pendingLabel && <p role="status">{pendingLabel}</p>}
+  </>;
 }
 export function ChatMenu({ actions, decisionOnly }: { decisionOnly: boolean; actions: { label: string; disabled: boolean; run: () => void }[] }) {
   const [open, setOpen] = useState(false);

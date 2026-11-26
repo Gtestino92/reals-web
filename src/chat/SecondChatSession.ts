@@ -19,12 +19,17 @@ export class SecondChatEntryIntent {
     return true;
   }
 }
+type ResolutionAction = 'no-show' | 'completion' | 'inactivity' | 'ACCEPTED' | 'REJECTED';
+type ChatAction = ResolutionAction | 'safety' | 'block';
 interface State {
   audioAccess: CounterpartAudioAccess;
   returnHome: string | null; status: SecondStatus | null; receivedAt: number; messages: Message[]; partnerId: string; partnerName: string;
   retryBlocked: boolean; busy: boolean; blocked: boolean; error: string; outgoing: Outgoing | null; confirmed: Outgoing | null; confirmationVersion: number; historyLimited: boolean;
   diagnostic: ReadDiagnostic | null;
   notice: string;
+  historyReady: boolean;
+  entryPending: boolean;
+  pendingAction: ChatAction | 'prepare-safety' | null;
 }
 type ReadStage = 'match' | 'status' | 'chat' | 'messages' | 'action';
 interface ReadDiagnostic { stage: ReadStage; kind: ApiError['kind'] | 'unexpected'; httpStatus: number }
@@ -41,7 +46,7 @@ const terminal = (status: SecondStatus | null) => !!status && ['FINISHED','ABAND
 const audioConflictCodes = new Set(['CHAT_AUDIO_FEATURE_DISABLED','CHAT_AUDIO_GUIDANCE_REQUIRED','CHAT_AUDIO_GUIDANCE_NOT_AVAILABLE','CHAT_AUDIO_LIMIT_REACHED','CHAT_AUDIO_WAITING_FOR_BOTH','CHAT_AUDIO_NOT_AVAILABLE_YET','CHAT_NOT_AVAILABLE','SECOND_CHAT_EXPIRED','SECOND_CHAT_ALREADY_RESOLVED','SECOND_CHAT_CONVERSATION_ALREADY_RESOLVED','SECOND_CHAT_JOIN_REQUIRED','CHAT_MUTUAL_CANCELLATION_PENDING']);
 /** Owns one connection and one authenticated lifetime. Reads never release mutation ownership. */
 export class SecondChatSession {
-  private state: State = { audioAccess: 'UNKNOWN', returnHome: null, status: null, receivedAt: 0, messages: [], partnerId: '', partnerName: '', retryBlocked: false, busy: false, blocked: true, error: '', diagnostic: null, notice: '', outgoing: null, confirmed: null, confirmationVersion: 0, historyLimited: false };
+  private state: State = { audioAccess: 'UNKNOWN', returnHome: null, status: null, receivedAt: 0, messages: [], partnerId: '', partnerName: '', retryBlocked: false, busy: false, blocked: true, error: '', diagnostic: null, notice: '', outgoing: null, confirmed: null, confirmationVersion: 0, historyLimited: false, historyReady: false, entryPending: false, pendingAction: null };
   private readonly history: ParticipantHistory;
   get eligible() { return this.history.eligible; }
   private observeAccess = (access: CounterpartAudioAccess) =>
@@ -65,7 +70,7 @@ export class SecondChatSession {
   getSnapshot = () => this.state;
   private install(p: Partial<State>) { if (!this.lifetime.signal.aborted) { this.state = { ...this.state, ...p }; this.listeners.forEach(f => f()); } }
   start() { if (this.retired || !this.identityCurrent()) return; if (this.lifetime.signal.aborted) { this.lifetime = new AbortController(); this.generation++; this.read = null; this.writing = false; this.entering = false; this.install({ partnerName: this.homePartnerName }); } }
-  dispose() { this.history.clear(); this.lifetime.abort(); this.read?.abort(); this.generation++; this.state = { ...this.state, returnHome: null, status: null, partnerId: '', partnerName: '', outgoing: null, confirmed: null, messages: [], busy: false, blocked: true }; this.listeners.forEach(f => f()); }
+  dispose() { this.history.clear(); this.lifetime.abort(); this.read?.abort(); this.generation++; this.state = { ...this.state, returnHome: null, status: null, partnerId: '', partnerName: '', outgoing: null, confirmed: null, messages: [], busy: false, blocked: true, historyReady: false, entryPending: false, pendingAction: null }; this.listeners.forEach(f => f()); }
   get now() { return this.state.status ? Date.parse(this.state.status.serverTime) + Math.max(0, Date.now() - this.state.receivedAt) : Date.now(); }
   get rules() { return secondPolicy(this.state.status,this.now); }
   get canReturnHome() { return !this.state.busy && !this.attendanceUncertain && (this.state.status ? this.rules.canReturn : !!this.state.diagnostic && [403,404].includes(this.state.diagnostic.httpStatus)); }
@@ -75,7 +80,7 @@ export class SecondChatSession {
     const readable = secondPolicy(status, Date.parse(status.serverTime)).readable;
     const replaced = this.state.status?.chatId !== status.chatId;
     if (!readable || replaced) this.history.clear();
-    this.install({ status, receivedAt, partnerId, ...(!readable || replaced ? { messages: [] } : {}) });
+    this.install({ status, receivedAt, partnerId, ...(!readable || replaced ? { messages: [], historyReady: false, historyLimited: false, blocked: true } : {}) });
     return readable;
   }
   private async load(signal: AbortSignal, g: number, full = false) {
@@ -128,10 +133,10 @@ export class SecondChatSession {
         if (page === 19) throw new ApiError('invalid');
       }
       if (!this.current(g,signal)) return;
-      if (!this.rules.readable) { this.history.clear(); this.install({ messages: [], blocked: false }); return; }
+      if (!this.rules.readable) { this.history.clear(); this.install({ messages: [], historyReady: false, historyLimited: false, blocked: false }); return; }
       const messages = this.history.finishRead(incoming, bounded), outgoing = this.state.outgoing;
       const confirmed = outgoing && messages.some(m => m.senderId === this.me && m.clientMessageId === outgoing.clientMessageId);
-      this.install({ messages, blocked: false, historyLimited: limited,
+      this.install({ messages, historyReady: true, blocked: false, historyLimited: limited,
         ...(confirmed ? { outgoing: null, confirmed: outgoing, confirmationVersion: this.state.confirmationVersion + 1 } : {}),
         ...(terminalAudio ? { error: '', diagnostic: null,
           notice: confirmed || this.state.confirmed?.file ? 'El segundo chat terminó. Tu audio quedó guardado en la conversación.' : limited ? 'El segundo chat terminó. No pudimos verificar todo el historial del audio pendiente.' : this.audioLifecycleConflict ? 'El segundo chat terminó y ya no admite audios. El audio pendiente no se envió.' : 'El segundo chat terminó. El audio pendiente no se envió.',
@@ -156,7 +161,7 @@ export class SecondChatSession {
     const signal = AbortSignal.any([read.signal,this.lifetime.signal]), g = ++this.generation;
     const task = this.load(signal,g,full); this.readTask = task;
     try { await task; if (this.current(g,signal) && !silent) this.install({ error: '', diagnostic: null }); }
-    catch (error) { if (this.current(g,signal)) this.install({ blocked: true, diagnostic: diagnostic(error), error: 'No pudimos actualizar el chat. Revisá tu conexión y reintentá.' }); }
+    catch (error) { if (this.current(g,signal) && !this.withdrawDeniedHistory(error)) this.install({ blocked: true, diagnostic: diagnostic(error), error: 'No pudimos actualizar el chat. Revisá tu conexión y reintentá.' }); }
     finally { if (g === this.generation) { this.read = null; this.readTask = null; } }
   };
   renewAudio = async (id: string) => {
@@ -176,12 +181,12 @@ export class SecondChatSession {
     return fresh !== previous ? fresh?.audio?.url ?? null : null;
   };
   resume = () => { if (this.writing || this.entering) return; this.read?.abort(); this.read = null; return this.refresh(); };
-  private async write(path: string, method: string, body?: unknown, outgoing?: Outgoing) {
+  private async write(path: string, method: string, body?: unknown, outgoing?: Outgoing, pendingAction: ChatAction | null = null) {
     if (this.writing || this.lifetime.signal.aborted) return;
     this.writing = true; this.read?.abort(); this.read = null;
     if (path.endsWith('/join')) this.attendanceUncertain = true;
     const g = ++this.generation, signal = this.lifetime.signal;
-    this.install({ busy: true, error: '', diagnostic: null, notice: '', ...(outgoing ? { confirmed: null, outgoing: { ...outgoing, phase: 'pending' } } : {}) });
+    this.install({ busy: true, pendingAction, error: '', diagnostic: null, notice: '', ...(outgoing ? { confirmed: null, outgoing: { ...outgoing, phase: 'pending' } } : {}) });
     let errorText = '';
     const safety = path.endsWith('/safety-cancellations') || path.endsWith('/block');
     try {
@@ -220,12 +225,17 @@ export class SecondChatSession {
       await this.load(signal,g,!!outgoing);
       if (safety && this.current(g,signal) && ['CANCELLED','CLOSED'].includes(this.state.status?.chatStatus ?? '')) this.returnToHome('La interacci\u00f3n ya no est\u00e1 disponible. Actualizamos Inicio.');
     }
-    catch (error) { const failure = diagnostic(error); if (safety && this.current(g,signal) && [403,404].includes(failure.httpStatus)) { this.returnToHome('La interacci\u00f3n no est\u00e1 accesible. Consult\u00e1 Inicio para actualizar el estado.'); return; } if (this.current(g,signal)) this.install({ blocked: true, diagnostic: failure }); errorText = 'No pudimos reconciliar la acción. Reintentá la conexión antes de continuar.'; }
-    finally { if (this.current(g,signal)) { this.writing = false; this.install({ busy: false, error: terminal(this.state.status) && this.state.notice ? '' : errorText }); } }
+    catch (error) { if (this.current(g,signal) && !this.withdrawDeniedHistory(error,safety)) this.install({ blocked: true, diagnostic: diagnostic(error) }); errorText = 'No pudimos reconciliar la acción. Reintentá la conexión antes de continuar.'; }
+    finally { if (this.current(g,signal)) { this.writing = false; this.install({ busy: false, pendingAction: null, error: terminal(this.state.status) && this.state.notice ? '' : errorText }); } }
+  }
+  private withdrawDeniedHistory(error: unknown, safety = false) {
+    if (!(safety || this.state.status?.chatId) || ![403,404].includes(diagnostic(error).httpStatus)) return false;
+    this.returnToHome('La interacción no está accesible. Consultá Inicio para actualizar el estado.');
+    return true;
   }
   private returnToHome(message: string) {
     this.history.clear();
-    this.install({ returnHome: message, busy: false, blocked: true, messages: [], outgoing: null, confirmed: null });
+    this.install({ returnHome: message, busy: false, blocked: true, messages: [], historyReady: false, entryPending: false, pendingAction: null, outgoing: null, confirmed: null });
     this.retired = true; this.read?.abort();
   }
   checkAbsoluteExpiry = () => {
@@ -236,9 +246,9 @@ export class SecondChatSession {
   prepareSafety = async () => {
     if (this.retired || this.writing || this.entering || this.lifetime.signal.aborted || !this.identityCurrent()) return false;
     // Reconciliation only: a safety request never retries or replaces the retained UUID.
-    this.entering = true; this.install({ busy: true }); this.read?.abort(); this.read = null;
+    this.entering = true; this.install({ busy: true, pendingAction: 'prepare-safety' }); this.read?.abort(); this.read = null;
     try { await this.refresh(true); }
-    finally { this.entering = false; if (!this.retired) this.install({ busy: false }); }
+    finally { this.entering = false; if (!this.retired) this.install({ busy: false, pendingAction: null }); }
     return this.allowed && this.rules.active && !this.rules.expired;
   };
   private get allowed() { return !this.retired && this.identityCurrent() && !this.entering && !this.writing && !this.state.blocked && !this.lifetime.signal.aborted; }
@@ -251,14 +261,14 @@ export class SecondChatSession {
   private async enter(initial: boolean) {
     if (this.entering || this.writing || this.retired || !this.identityCurrent() || this.lifetime.signal.aborted || (!initial && !this.allowed) || this.state.outgoing) return;
     const lifetime = this.lifetime, ownershipVersion = this.controller.getSnapshot?.().authContextVersion;
-    this.entering = true; this.read?.abort(); this.read = null; this.install({ busy: true });
+    this.entering = true; this.read?.abort(); this.read = null; this.install({ busy: true, entryPending: true });
     try {
       await this.refresh();
       if (lifetime !== this.lifetime || lifetime.signal.aborted || ownershipVersion !== this.controller.getSnapshot?.().authContextVersion) return;
       this.entering = false;
       if (this.allowed && this.rules.canJoin && this.state.status?.myAttendanceStatus === 'PENDING') await this.write(`/connections/${this.connectionId}/second-chat/join`,'POST');
     } finally {
-      if (lifetime === this.lifetime && !lifetime.signal.aborted && this.identityCurrent()) { this.entering = false; if (!this.writing) this.install({ busy: false }); }
+      if (lifetime === this.lifetime && !lifetime.signal.aborted && this.identityCurrent()) { this.entering = false; if (!this.writing) this.install({ busy: false, entryPending: false }); }
     }
   }
   send(content: string, replyTo: Reply | null, file: Blob | null = null) {
@@ -281,7 +291,7 @@ export class SecondChatSession {
     if (!this.allowed || !this.rules.writable || this.state.outgoing || !this.eligible.has(id)) return;
     return this.write(`/chats/${this.state.status?.chatId}/messages/${encodeURIComponent(id)}/reaction`,'PUT',{ type: 'HEART' });
   };
-  action = (kind: 'no-show' | 'completion' | 'inactivity' | 'ACCEPTED' | 'REJECTED' | 'safety' | 'block', body?: unknown) => {
+  action = (kind: ChatAction, body?: unknown) => {
     if (!this.allowed || (this.state.outgoing && kind !== 'safety' && kind !== 'block')) return;
     const p = this.rules, s = this.state.status;
     if (!s || !p.active || p.expired) return;
@@ -290,6 +300,6 @@ export class SecondChatSession {
     if (kind === 'safety' && (!object(body) || !['INAPPROPRIATE_BEHAVIOR','HARASSMENT','CHILD_SAFETY_CONCERN','OTHER'].includes(str(body.reason)) || typeof body.details !== 'string' || !plainText(body.details) || typeof body.blockUser !== 'boolean')) return;
     const base = `/connections/${this.connectionId}/second-chat`;
     const path = kind === 'block' ? `/matches/${this.matchId}/block` : kind === 'safety' ? `/chats/${s.chatId}/safety-cancellations` : kind === 'no-show' ? `${base}/no-show-claims` : kind === 'completion' ? `${base}/completion-requests` : kind === 'inactivity' ? `${base}/inactivity-claims` : `${base}/completion-requests/${p.pending?.id}/decision`;
-    return this.write(path,'POST',['ACCEPTED','REJECTED'].includes(kind) ? { decision: kind } : body);
+    return this.write(path,'POST',['ACCEPTED','REJECTED'].includes(kind) ? { decision: kind } : body,undefined,kind);
   };
 }

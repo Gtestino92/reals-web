@@ -9,10 +9,72 @@ import { homeSecondFixture } from '../home/secondHome.fixtures';
 import { ActivityNotifications, useActivityNotifications } from '../notifications/useActivityNotifications';
 import { freshPreferences, loadPreferences, savePreferences } from '../notifications/activityStorage';
 import { activityId } from '../notifications/activityPolicy';
-function view(f=setup()) {const back=vi.fn(),browse=vi.fn(),blocked=vi.fn();const props={controller:f.controller,connectionId:'c',matchId:'m',partnerName:'María',onBack:back,onFinished:back,onBlocked:blocked,browse:false,onBrowse:browse,onCloseBrowse:back};const v=render(<Scheduling {...props}/>);return {...f,...v,props,back,browse,blocked};}
+function view(f=setup()) {const back=vi.fn(),browse=vi.fn(),blocked=vi.fn();const props={controller:f.controller,connectionId:'c',matchId:'m',partnerName:'María',backToActivity:true,onActivity:back,onHome:vi.fn(),onFinished:back,onBlocked:blocked,browse:false,onBrowse:browse,onCloseBrowse:back};const v=render(<Scheduling {...props}/>);return {...f,...v,props,back,browse,blocked};}
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();localStorage.clear();});
 const calendarLink = () => screen.queryByRole('link', { name: /^(Agregar a Google Calendar|Volver a agregar al calendario)$/ });
 const openedStatus = 'Evento abierto en Google Calendar';
+
+it.each([true,false])('shows one caller-specific return before confirmation and distinct destinations after confirmation (Activity caller: %s)', async activity => {
+  const f = view();
+  f.rerender(<Scheduling {...f.props} backToActivity={activity}/>);
+  await screen.findByRole('heading',{name:'Proponé tus horarios'});
+  const backLabel = activity ? 'Volver a Actividad' : 'Volver a Inicio';
+  expect(screen.getAllByRole('button',{name:backLabel})).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button',{name:backLabel}));
+  expect(activity ? f.props.onActivity : f.props.onHome).toHaveBeenCalledOnce();
+  f.props.onActivity.mockClear();
+  f.props.onHome.mockClear();
+  f.state.n = negotiation({status:'CONFIRMED',confirmedDateTime:proposal().proposedDateTime});
+  f.state.c = {...f.state.c,state:'SECOND_CHAT_SCHEDULED'};
+  await act(async () => window.dispatchEvent(new Event('online')));
+  expect(screen.getByRole('heading',{name:'Horario confirmado'})).toBeVisible();
+  fireEvent.click(screen.getByRole('button',{name:'Volver a Actividad'}));
+  expect(f.props.onActivity).toHaveBeenCalledOnce();
+  expect(f.props.onHome).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'Volver a Inicio'}));
+  expect(f.props.onHome).toHaveBeenCalledOnce();
+});
+
+it('opens the icon menu by keyboard, dismisses it outside and preserves the pending block safeguards', async () => {
+  const f = view(), read = f.request.getMockImplementation()!;
+  let finish!: () => void;
+  const held = new Promise<void>(resolve => { finish = resolve; });
+  f.request.mockImplementation(async (path,...args) => {
+    if (path.endsWith('/block')) {
+      await held;
+      throw new ApiError('network');
+    }
+    return read(path,...args);
+  });
+  await screen.findByRole('heading',{name:'Proponé tus horarios'});
+  const trigger = screen.getByRole('button',{name:'Más acciones'});
+  expect(trigger.querySelector('svg')).toHaveAttribute('width','24');
+  trigger.focus();
+  fireEvent.keyDown(trigger,{key:'ArrowDown'});
+  const item = screen.getByRole('menuitem');
+  expect(item).toHaveFocus();
+  fireEvent.keyDown(item,{key:'Escape'});
+  expect(trigger).toHaveFocus();
+  fireEvent.click(trigger);
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByRole('menu')).toBeNull();
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole('menuitem'));
+  fireEvent.click(screen.getByRole('button',{name:'Cancelar'}));
+  expect(trigger).toHaveFocus();
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole('menuitem'));
+  const block = screen.getByRole('button',{name:'Bloquear definitivamente'});
+  fireEvent.click(block);
+  fireEvent.click(block);
+  expect(trigger).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Volver a Actividad'})).toBeDisabled();
+  const dialog = screen.getByRole('dialog');
+  expect(fireEvent(dialog,new Event('cancel',{cancelable:true}))).toBe(false);
+  expect(dialog).toBeVisible();
+  await act(async () => finish());
+  expect(f.request.mock.calls.filter(([, , method]) => method === 'POST')).toHaveLength(1);
+});
 
 it('replaces proposal feedback with the confirmed time from polling and rejects older pending snapshots', async () => {
   const f=view(), read=f.request.getMockImplementation()!;
@@ -97,7 +159,7 @@ it('observes a locally accepted appointment after its presentation without gener
   function View() {
     const notifications = useActivityNotifications(f.controller, 'me', false);
     return <ActivityNotifications.Provider value={notifications}><Scheduling controller={f.controller} connectionId="c" matchId="m"
-      partnerName="María" onBack={vi.fn()} onFinished={vi.fn()} onBlocked={vi.fn()} browse={false} onBrowse={vi.fn()} onCloseBrowse={vi.fn()}/></ActivityNotifications.Provider>;
+      partnerName="María" backToActivity onActivity={vi.fn()} onHome={vi.fn()} onFinished={vi.fn()} onBlocked={vi.fn()} browse={false} onBrowse={vi.fn()} onCloseBrowse={vi.fn()}/></ActivityNotifications.Provider>;
   }
   render(<View/>);
   fireEvent.click(await screen.findByRole('button', { name: 'Aceptar opción 1' }));
@@ -166,7 +228,7 @@ it.each(['CLOSED', 'denied'])('withdraws the Calendar link on remote %s while co
   await act(async()=>{await vi.advanceTimersByTimeAsync(7_000);});
   expect(calendarLink()).toBeNull();
   expect(screen.queryByText(openedStatus)).toBeNull();
-  expect(screen.getByText('La conexión ya no está disponible. Volvé a Actividad.')).toBeVisible();
+  expect(screen.getByText('La conexión ya no está disponible.')).toBeVisible();
   expect(f.request.mock.calls.map(([path])=>path)).toEqual(['/connections/c','/connections/c']);
   await act(async()=>{await vi.advanceTimersByTimeAsync(14_000);});
   expect(f.request).toHaveBeenCalledTimes(2);

@@ -11,10 +11,11 @@ import { GoogleCalendarAction } from '../shared/GoogleCalendarAction';
 import { activityId } from '../notifications/activityPolicy';
 import { usePresentedActivity } from '../notifications/usePresentedActivity';
 import { useActivityNotificationContext } from '../notifications/useActivityNotifications';
+import { ChatIcon } from '../chat/ChatIcon';
 import './scheduling.css';
 
 export const formatSlot=(v: string)=>new Date(v).toLocaleString('es-AR',{dateStyle:'full',timeStyle:'short'});
-export function Scheduling({controller,connectionId,matchId,partnerName,onLeave,onBack,onFinished,onBlocked,browse,onBrowse,onCloseBrowse}: {controller: SessionController;connectionId: string;matchId: string;partnerName: string|null;onLeave?: (connectionId: string, matchId: string, eligible: boolean) => void;onBack:()=>void;onFinished:()=>void;onBlocked:(value:boolean)=>void;browse:boolean;onBrowse:()=>void;onCloseBrowse:()=>void}) {
+export function Scheduling({controller,connectionId,matchId,partnerName,onLeave,backToActivity,onActivity,onHome,onFinished,onBlocked,browse,onBrowse,onCloseBrowse}: {controller: SessionController;connectionId: string;matchId: string;partnerName: string|null;onLeave?: (connectionId: string, matchId: string, eligible: boolean) => void;backToActivity:boolean;onActivity:()=>void;onHome:()=>void;onFinished:()=>void;onBlocked:(value:boolean)=>void;browse:boolean;onBrowse:()=>void;onCloseBrowse:()=>void}) {
   const session=useSyncExternalStore(controller.subscribe,controller.getSnapshot);
   const context=sessionContext(controller), finish=useRef(onFinished), lock=useRef(onBlocked);finish.current=onFinished;lock.current=onBlocked;
   const notifications = useActivityNotificationContext();
@@ -34,9 +35,19 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onLeave,
   }, [controller, context, model, connectionId, matchId, onLeave]);
   const r=roundState(s.busy&&!s.negotiation,s.negotiation,s.proposals,controller.getSnapshot().account?.id??'');
   const [menu,setMenu]=useState(false),[dialog,setDialog]=useState(false);
-  const dialogRef=useRef<HTMLDialogElement>(null),menuButton=useRef<HTMLButtonElement>(null),menuItem=useRef<HTMLButtonElement>(null);
+  const dialogRef=useRef<HTMLDialogElement>(null),menuButton=useRef<HTMLButtonElement>(null),menuItem=useRef<HTMLButtonElement>(null),menuBoundary=useRef<HTMLDivElement>(null);
   useEffect(()=>{onBlocked(s.pending);return()=>onBlocked(false);},[s.pending,onBlocked]);
-  useEffect(()=>{if(menu)menuItem.current?.focus();},[menu]);
+  useEffect(() => {
+    if (!menu) return;
+    menuItem.current?.focus();
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !menuBoundary.current?.contains(event.target)) setMenu(false);
+    };
+    document.addEventListener('pointerdown',outside);
+    return () => document.removeEventListener('pointerdown',outside);
+  },[menu]);
+  const back = backToActivity ? onActivity : onHome;
+  const backLabel = backToActivity ? 'Volver a Actividad' : 'Volver a Inicio';
   useEffect(()=>{if(dialog){const d=dialogRef.current;d?.showModal();return()=>{d?.close();menuButton.current?.focus();};}},[dialog]);
   useEffect(()=>{
     model.start();void model.refresh();
@@ -75,17 +86,17 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onLeave,
   useEffect(()=>{if(expired&&expiryRequested.current!==expires){expiryRequested.current=expires??'';void model.refresh();}},[expired,expires,model]);
   const disabled=s.busy||!s.verified||s.uncertain||s.terminal||expired||s.negotiation?.status!=='PENDING';
   const error=<>{s.error&&<p role="alert" className="home-error">{s.error}</p>}</>;
-  const blockMenu=<div className="chat-overflow" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))setMenu(false);}} onKeyDown={e=>{if(e.key==='Escape'){setMenu(false);menuButton.current?.focus();}}}><button ref={menuButton} className="login-button login-outlined" aria-label="Más acciones" aria-haspopup="menu" aria-expanded={menu} disabled={s.busy||s.terminal} onClick={()=>setMenu(v=>!v)} onKeyDown={e=>{if(e.key==='ArrowDown'){e.preventDefault();setMenu(true);}}}>⋮</button>{menu&&<div className="chat-menu" role="menu"><button ref={menuItem} role="menuitem" onClick={()=>{setMenu(false);setDialog(true);}}>Bloquear a esta persona</button></div>}</div>;
+  const blockMenu=<div ref={menuBoundary} className="chat-overflow scheduling-overflow" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))setMenu(false);}} onKeyDown={e=>{if(e.key==='Escape'&&menu){e.preventDefault();setMenu(false);menuButton.current?.focus();}}}><button ref={menuButton} className="login-button login-outlined scheduling-overflow-trigger" aria-label="Más acciones" aria-haspopup="menu" aria-expanded={menu} disabled={s.busy||s.terminal} onClick={()=>setMenu(v=>!v)} onKeyDown={e=>{if(e.key==='ArrowDown'){e.preventDefault();setMenu(true);}}}><ChatIcon name="more"/></button>{menu&&<div className="chat-menu" role="menu"><button ref={menuItem} role="menuitem" disabled={s.busy||s.terminal} onClick={()=>{setMenu(false);setDialog(true);}}>Bloquear a esta persona</button></div>}</div>;
   return <section className="scheduling" aria-busy={s.busy&&!s.connection}>
-    {browse&&(s.terminal||s.connection?.state==='CLOSED'||session.phase!=='ready')?<><p>La conexión ya no está disponible.</p><button className="login-button login-outlined" onClick={onBack}>Volver a Actividad</button></>:browse?<PartnerProfile key={JSON.stringify([context,matchId,connectionId])} partnerName={partnerName} controller={controller} matchId={matchId} onBack={onCloseBrowse} disabled={s.pending} menu={blockMenu}/>:<>
-      <header className="home-heading"><h2 ref={negotiationHeading}>Coordinar horarios</h2><button className="login-button login-outlined" disabled={s.pending} onClick={onBack}>Volver a Actividad</button>{blockMenu}</header>
+    {browse&&(s.terminal||s.connection?.state==='CLOSED'||session.phase!=='ready')?<><p>La conexión ya no está disponible.</p><button className="login-button login-outlined" disabled={s.pending} onClick={back}>{backLabel}</button></>:browse?<PartnerProfile key={JSON.stringify([context,matchId,connectionId])} partnerName={partnerName} controller={controller} matchId={matchId} onBack={onCloseBrowse} disabled={s.pending} menu={blockMenu}/>:<>
+      <header className="home-heading"><h2 ref={negotiationHeading}>Coordinar horarios</h2>{blockMenu}{r.stage==='Scheduled'&&<button className="login-button login-outlined scheduling-activity-back" disabled={s.pending} onClick={onActivity}>Volver a Actividad</button>}</header>
       <div className="scheduling-meta"><p>{partner?`Con ${partner}`:'Con la otra persona'}</p>
       {s.negotiation&&<p>Ronda {s.negotiation.roundNumber}{s.busy?' · Actualizando…':''}</p>}
       {s.negotiation?.status==='PENDING'&&<VisualDeadline start={s.negotiation.createdAt} end={expires??null} now={now}/>}</div>
       {(s.errorContext==='screen'||r.stage==='Scheduled')&&error}{s.message&&<p role="status">{s.message}</p>}
       {s.error&&<button className="login-button login-outlined" disabled={s.busy} onClick={()=>void model.refresh()}>Reintentar</button>}
       {s.negotiation?.status==='PENDING'&&(expired?<aside className="home-notice">La coordinación venció. Actualizando estado…</aside>:expires&&Date.parse(expires)-now<=3600000&&<aside className="home-notice">Coordinación por vencer. Confirmá o enviá opciones para no perder la conexión.</aside>)}
-      {s.terminal?<p>La conexión ya no está disponible. Volvé a Actividad.</p>:s.connection?.state==='SCHEDULING_PENDING'?<p role="status">Estamos preparando la coordinación de horarios.</p>:<>
+      {s.terminal?<p>La conexión ya no está disponible.</p>:s.connection?.state==='SCHEDULING_PENDING'?<p role="status">Estamos preparando la coordinación de horarios.</p>:<>
       {r.stage==='Loading'&&<div className="home-card scheduling-placeholder" role="status"><span className="loading-label">Cargando coordinación…</span><div aria-hidden="true"><div className="placeholder-line placeholder-title"/><div className="placeholder-control"/><div className="placeholder-control"/><div className="placeholder-control"/></div></div>}
       {r.stage==='Unknown'&&<p>No pudimos interpretar el estado actual. Reintentá para consultar el estado.</p>}
       {r.stage==='WaitingForMyProposals'&&<section className="home-card"><h3>Proponé tus horarios</h3><p>Elegí entre 1 y 3 opciones, en orden de preferencia.</p><SlotPicker key={`${connectionId}/${s.negotiation?.roundNumber}`} now={now} availability={s.availability} selected={s.draft} disabled={disabled} onChange={model.setDraft}/>{s.errorContext==='submit'&&error}<button className="login-button login-primary" disabled={disabled||!!validateSlots(s.draft,now,s.availability)} onClick={()=>void model.act('submit')}>Enviar horarios</button></section>}
@@ -98,7 +109,7 @@ export function Scheduling({controller,connectionId,matchId,partnerName,onLeave,
       {r.stage==='Failed'&&<section className="home-card"><p>No hubo acuerdo. La coordinación ya no está disponible.</p></section>}
       </>}
       <button className="login-button login-outlined" disabled={s.busy||s.terminal} onClick={onBrowse}>Ver perfil</button>
-      <button className="login-button login-primary" disabled={s.pending} onClick={onBack}>Volver a Actividad</button>
+      <button className="login-button login-primary" disabled={s.pending} onClick={r.stage==='Scheduled'?onHome:back}>{r.stage==='Scheduled'?'Volver a Inicio':backLabel}</button>
     </>}
     {dialog&&<dialog ref={dialogRef} aria-labelledby="scheduling-block-title" onCancel={e=>{if(s.pending)e.preventDefault();else setDialog(false);}}><h3 id="scheduling-block-title">¿Bloquear a esta persona?</h3><p>Esta acción es definitiva y no se puede deshacer. Se cerrará la interacción actual y no volverán a ser emparejados. Bloquear no envía un reporte.</p>{error}<button className="login-button login-outlined" disabled={s.pending} onClick={()=>setDialog(false)}>Cancelar</button><button className="login-button login-primary" disabled={s.busy||!s.verified||s.uncertain||s.terminal} onClick={()=>void model.act('block')}>Bloquear definitivamente</button></dialog>}
   </section>;

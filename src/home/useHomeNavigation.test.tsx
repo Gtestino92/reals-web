@@ -88,6 +88,27 @@ it('returns directly from an Activity profile card without a phantom scheduling 
  act(()=>result.current.backTo('activity'));await waitFor(()=>expect(result.current.destination).toBe('activity'));act(()=>history.forward());await waitFor(()=>expect(result.current.destination).toBe('partner-profile'));
 });
 
+it.each([true,false])('resolves explicit Scheduling destinations from either trail (Activity caller: %s)',async fromActivity=>{
+ let blocked=false;
+ const {result}=renderHook(()=>useHomeNavigation(()=>!blocked));
+ if(fromActivity)act(()=>result.current.open('activity'));
+ act(()=>result.current.openScheduling('c','m','María'));
+ const before=history.length;
+ blocked=true;
+ act(()=>result.current.backTo('activity'));
+ act(()=>result.current.backTo('home'));
+ expect(result.current.destination).toBe('scheduling');
+ blocked=false;
+ act(()=>result.current.backTo('activity'));
+ await waitFor(()=>expect(result.current.destination).toBe('activity'));
+ expect(history.state.trail).toEqual(['home','activity']);
+ expect(history.length).toBe(before);
+ act(()=>result.current.openScheduling('c','m','María'));
+ act(()=>result.current.backTo('home'));
+ await waitFor(()=>expect(result.current.destination).toBe('home'));
+ expect(history.state.trail).toEqual(['home']);
+});
+
 it('gives Second Chat one history owner and retires stale Forward entries', async () => {
  let rootLocked=false,canReturn=false;const leave=vi.fn();
  const {result}=renderHook(()=>useHomeNavigation(()=>!rootLocked));

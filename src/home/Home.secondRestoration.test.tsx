@@ -65,6 +65,24 @@ it('does not install obsolete restoration after account replacement or unmount',
   h.controller.snapshot={...h.controller.snapshot,account:{id:'other',status:'ACTIVE'}};view.unmount();
   await act(async()=>release());expect(postCount(h)).toBe(0);expect(history.state.trail).not.toContain('second-chat');
 });
+it('uses the same chat shell through delayed passive history and the ready conversation',async()=>{
+  const h=harness(),base=h.request.getMockImplementation()!,onChatActiveChange=vi.fn();
+  let release!:()=>void;
+  const historyReady=new Promise<void>(resolve=>{release=resolve;});
+  h.request.mockImplementation(async(...args)=>{
+    if(args[0].includes('/messages?'))await historyReady;
+    return base(...args);
+  });
+  render(<Home controller={h.controller} onChatActiveChange={onChatActiveChange}/>);
+  expect(await screen.findByText('Cargando el segundo chat…')).toBeInTheDocument();
+  expect(onChatActiveChange).toHaveBeenLastCalledWith(true);
+  expect(screen.queryByRole('button',{name:'Buscar chat'})).toBeNull();
+  onChatActiveChange.mockClear();
+  await act(async()=>release());
+  expect(screen.getByRole('textbox',{name:'Mensaje'})).toBeEnabled();
+  expect(onChatActiveChange).not.toHaveBeenCalledWith(false);
+  expect(postCount(h)).toBe(0);
+});
 it('allows Home when a stale active Home item is authoritatively inaccessible',async()=>{
  const h=harness(),base=h.request.getMockImplementation()!;
  h.request.mockImplementation(async(...args)=>{if(args[0].endsWith('/second-chat/status'))throw new ApiError('backend',404);return base(...args);});

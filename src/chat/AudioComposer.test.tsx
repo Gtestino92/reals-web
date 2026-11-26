@@ -47,8 +47,9 @@ it('keeps a failed audio draft and locks deletion while delivery is uncertain',a
   Recorder.output=admittedAudioFixture();send.mockImplementation(()=>{throw new Error('Synthetic failure');});const view=mount();
   fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await screen.findByRole('timer');fireEvent.click(screen.getByRole('button',{name:'Detener'}));await screen.findByLabelText('Vista previa del audio');
   fireEvent.click(screen.getByRole('button',{name:'Enviar audio'}));expect(await screen.findByRole('alert')).toHaveTextContent('No pudimos enviar');expect(screen.getByLabelText('Vista previa del audio')).toBeVisible();
-  view.rerender(<AudioComposer policy={chatFixture().audioPolicy} disabled={false} onSend={send} onDirtyChange={()=>{}} payloadLocked delivery="uncertain"/>);
+  view.rerender(<AudioComposer policy={chatFixture().audioPolicy} disabled={false} onSend={send} onDirtyChange={()=>{}} payloadLocked/>);
   expect(screen.getByRole('button',{name:'Eliminar grabación'})).toBeDisabled();expect(screen.getByRole('button',{name:'Enviar audio'})).toBeDisabled();
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
 });
 it('cancels recording and stops tracks on background transition',async()=>{
   mount();fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await screen.findByRole('timer');
@@ -61,11 +62,13 @@ it('cancels a pending permission request and releases the late stream without re
   expect(screen.queryByRole('button',{name:'Cancelar grabación'})).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Cancelar solicitud'}));await act(async()=>resolve?.({getTracks:()=>[{stop}]}));
   expect(stop).toHaveBeenCalled();expect(screen.queryByRole('timer')).toBeNull();expect(send).not.toHaveBeenCalled();
 });
-it('shows upload progress and rejects rapid repeated sends until completion',async()=>{
+it('keeps the preview stable without upload animation and rejects rapid repeated sends',async()=>{
   Recorder.output=admittedAudioFixture();let finish:(()=>void)|undefined;send.mockImplementation(()=>new Promise<void>(r=>{finish=r;}));
   mount();fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await screen.findByRole('timer');fireEvent.click(screen.getByRole('button',{name:'Detener'}));await screen.findByLabelText('Vista previa del audio');
   const button=screen.getByRole('button',{name:'Enviar audio'});fireEvent.click(button);fireEvent.click(button);
-  expect(send).toHaveBeenCalledTimes(1);expect(button).toBeDisabled();expect(screen.getByRole('progressbar',{name:'Envío de audio'})).not.toHaveAttribute('value');
+  expect(send).toHaveBeenCalledTimes(1);expect(button).toBeDisabled();expect(screen.queryByRole('progressbar')).toBeNull();
+  expect(screen.getByRole('button',{name:'Eliminar grabación'})).toBeDisabled();
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
   await act(async()=>finish?.());expect(screen.getByLabelText('Vista previa del audio')).toBeVisible();
 });
 it('disables recording when the server quota is exhausted',()=>{

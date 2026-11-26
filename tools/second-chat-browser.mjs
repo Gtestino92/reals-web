@@ -3,7 +3,7 @@ import { runReloadCases } from './second-chat-reload-browser-cases.mjs';
 import { runHomeCases } from './home-parity-browser-cases.mjs';
 // Real Home + useHomeNavigation + SecondChat, driven by two synthetic participants.
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fixtureServer, scenario, advance, iso } from './second-chat-synthetic.mjs';
@@ -49,6 +49,16 @@ async function history(p,delta){
  await wait(p,"document.readyState==='complete' && !!window.fixture");
 }
 async function assert(p,expr){await wait(p,expr);}
+async function captureThemes(p, width, name, condition) {
+ const directory='artifacts/second-chat-refinements';
+ await mkdir(directory,{recursive:true});
+ for(const theme of ['light','dark']){
+  await p.call('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
+  await assert(p,condition);
+  const screenshot=await p.call('Page.captureScreenshot',{format:'png'});
+  await writeFile(join(directory,`${width}-${theme}-${name}.png`),Buffer.from(screenshot.data,'base64'));
+ }
+}
 async function run(name,width,initial,body){const filter=process.argv.find(arg=>arg.startsWith('--case='))?.slice(7);if(filter&&!new RegExp(filter).test(name))return;const key=`${width}-${name}`,s=scenario(initial);scenarios.set(key,s);const a=await page(key,'a',width,!!initial.ownership),b=await page(key,'b',width===390?1280:390,!!initial.ownership);try{await body({a,b,s});results.push({name,width,result:'PASS'});console.log(`${width} ${name}: PASS`);}catch(error){console.log(JSON.stringify({name,width,audioReads:s.audioReads,audioVersion:s.audioVersion}));throw error;}finally{await a.close();await b.close();}}
 try{
  for(let i=0;i<60;i++){try{port=(await readFile(join(directory,'DevToolsActivePort'),'utf8')).split('\n')[0].trim();break;}catch{}await new Promise(r=>setTimeout(r,100));}
@@ -56,6 +66,67 @@ try{
   await runHomeCases(width,{run,click,assert,refresh,history,reload,pageTime:async(p,time)=>p.evaluate(`window.fixture.setTime(${time})`)});
   if(process.argv.includes('--home-only'))continue;
   await runReloadCases(width,{run,open,click,assert,refresh,history,reload});
+  const activeHistory={me:'a',...Promise.withResolvers()};
+  const audioMessage={id:'1',chatSessionId:'c',senderId:'b',clientMessageId:null,messageType:'AUDIO',content:null,sentAt:iso(Date.now()),replyTo:null,reactionType:null,audio:{durationMillis:1000,sizeBytes:2000,contentType:'audio/mp4'}};
+  await run('refinements-active',width,{audioVersion:2,writableAudio:true,historyGate:activeHistory,messages:[audioMessage]},async({a,b,s})=>{
+   try{
+    await assert(a,"!!document.querySelector('.second-chat-skeleton') && !document.querySelector('#second-draft')");
+    await captureThemes(a,width,'loading',"document.querySelector('.second-chat-skeleton [role]')===null && !document.querySelector('.second-chat-skeleton button')");
+    if(s.historyGate)throw Error('Expected a pending history request');
+   }finally{activeHistory.resolve();}
+   await assert(a,"!!document.querySelector('#second-draft') && !document.querySelector('.second-chat-skeleton')");
+   await setText(a,'#second-draft','Un borrador\ncon dos líneas');
+   await captureThemes(a,width,'composer',`(()=>{
+    const send=document.querySelector('.chat-send'), mic=document.querySelector('[aria-label="Grabar audio"]'), draft=document.querySelector('#second-draft');
+    return [send,mic].every(button=>button?.getBoundingClientRect().width===44 && button.getBoundingClientRect().bottom===draft.getBoundingClientRect().bottom)
+      && !!send.querySelector('svg') && draft.offsetHeight>44 && !document.body.innerText.includes('SEGUNDO CHAT');
+   })()`);
+   await click(a,'Opciones del chat');
+   await click(a,'Reportar por seguridad');
+   await assert(a,"!!document.querySelector('dialog[open]')");
+   await captureThemes(a,width,'dialog',`(()=>{
+    const dialog=document.querySelector('dialog[open]'), fields=dialog.querySelectorAll('label'), actions=dialog.querySelector('.chat-confirm-actions');
+    return dialog.getBoundingClientRect().width<=innerWidth-30 && [...fields].slice(1).every((field,i)=>field.getBoundingClientRect().top-fields[i].getBoundingClientRect().bottom>=16)
+      && actions.getBoundingClientRect().top-fields[2].getBoundingClientRect().bottom>=16
+      && parseFloat(getComputedStyle(actions).gap)>=12 && [...actions.children].every(button=>button.offsetHeight>=44)
+      && !document.body.innerText.includes('Procesando');
+   })()`);
+   await click(a,'Volver');
+   await click(a,'Opciones del chat');
+   await click(a,'Finalizar de común acuerdo');
+   await captureThemes(a,width,'resolution',`(()=>{
+    const dialog=document.querySelector('dialog[open]'), actions=dialog?.querySelector('.chat-confirm-actions');
+    return !!actions && parseFloat(getComputedStyle(actions).gap)>=12 && [...actions.children].every(button=>button.offsetHeight>=44);
+   })()`);
+   await click(a,'Cancelar');
+   await click(a,'Reproducir audio');
+   await assert(a,`document.querySelector('.chat-playback').dataset.phase==='ended' && (()=>{const [elapsed,total]=document.querySelector('.chat-playback output').textContent.split(' / ');return elapsed===total&&total!=='0:00';})()`);
+   await open(b);
+   await assert(b,'document.visibilityState==="visible"');
+   if(!await a.evaluate("document.visibilityState==='hidden' && !document.querySelector('.chat-playback audio')"))throw Error('Background player did not release its media');
+   await assert(a,"document.querySelector('.chat-playback').dataset.phase==='ended' && !document.querySelector('.chat-playback audio')");
+   await click(a,'Reproducir audio de nuevo');
+   await assert(a,"document.querySelector('.chat-playback').dataset.phase==='playing' && document.querySelector('audio').currentTime<document.querySelector('audio').duration");
+   await assert(a,"document.querySelector('#second-draft').value.startsWith('Un borrador') && !document.querySelector('.second-chat-skeleton')");
+  });
+  await run('refinements-retained',width,{status:'FINISHED',endedReason:'SECOND_CHAT_MUTUAL_COMPLETION'},async({a,s})=>{
+   const gate={me:'a',...Promise.withResolvers()};
+   s.historyGate=gate;
+   s.messages.push({id:'1',chatSessionId:'c',senderId:'b',clientMessageId:null,messageType:'TEXT',content:'Mensaje conservado',sentAt:iso(s.now),replyTo:null,reactionType:null,audio:null});
+   try{
+    await click(a,'Ver Actividad');
+    await click(a,'Ver segundo chat');
+    await assert(a,"!!document.querySelector('.second-chat-skeleton') && !document.querySelector('.chat-history')");
+   }finally{gate.resolve();}
+   await captureThemes(a,width,'retained',`(()=>{
+    const list=document.querySelector('.chat-timeline-retained');
+    if(!list)return false;
+    const style=getComputedStyle(list);
+    return style.borderTopWidth==='1px' && style.borderTopColor!=='rgba(0, 0, 0, 0)' && style.backgroundColor!=='rgba(0, 0, 0, 0)'
+      && list.textContent.includes('Mensaje conservado') && document.body.innerText.includes('Podés leerlo hasta')
+      && !document.querySelector('#second-draft,.chat-heart');
+   })()`);
+  });
   await run('available-and-scheduled',width,{joined:new Set(),status:'AVAILABLE'},async({a,b,s})=>{
    await open(a);await open(b);await assert(a,"!document.querySelector('.second-chat').innerText.match(/ya no está activo|no está disponible para lectura/)");
    await wait(a,"!!document.querySelector('#second-draft')");await wait(b,"!!document.querySelector('#second-draft')");await send(a,'Mensaje de contrato');await refresh(b);await assert(b,"document.querySelector('.second-chat').innerText.includes('Mensaje de contrato')");await refresh(a);await assert(a,"!document.querySelector('.second-chat [role=alert]')");await assert(b,"!document.querySelector('.second-chat [role=alert]')");if(s.writes.filter(w=>w.path.endsWith('/join')).length!==2)throw Error('Explicit entries must JOIN once each');checks++;
