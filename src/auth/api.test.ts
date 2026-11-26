@@ -21,7 +21,17 @@ it('delivers only history access on success after token refresh and keeps the JS
   expect(user.getIdToken).toHaveBeenLastCalledWith(true);
   expect(fetcher.mock.calls.map(([,init]) => init?.cache)).toEqual(['no-store','no-store']);
   await expect(client.request('/me',signal,user)).resolves.toEqual(account);
-  expect(fetcher.mock.lastCall?.[1]?.cache).toBeUndefined();
+  expect(fetcher.mock.lastCall?.[1]?.cache).toBe('no-store');
+});
+it('bypasses the HTTP cache for the same private resource across accounts while preserving public requests', async () => {
+  const { api, user, fetcher, signal } = harness(response([]), response([]), response({}));
+  const next = { ...user, uid: 'firebase-2', getIdToken: vi.fn().mockResolvedValue('next-token') };
+  await api.request('/me/profile/photos', signal, user);
+  await api.request('/me/profile/photos', signal, next);
+  await api.request('/ping', signal);
+  expect(fetcher.mock.calls.map(([, init]) => [init?.cache, new Headers(init?.headers).get('Authorization')])).toEqual([
+    ['no-store', 'Bearer fake-token'], ['no-store', 'Bearer next-token'], [undefined, null],
+  ]);
 });
 it('fetches the scheduling snapshot once with private caching disabled', async () => {
   const { api, user, fetcher, signal } = harness(response({}));

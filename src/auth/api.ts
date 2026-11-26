@@ -43,6 +43,9 @@ export class ApiClient {
     const route = path.split('?', 1)[0];
     const history = method === 'GET' && /^\/chats\/[^/]+\/messages$/.test(route ?? '');
     const administrative = route === '/admin' || route === '/admin-auth' || path.startsWith('/admin/') || path.startsWith('/admin-auth/');
+    const privateRead = method === 'GET' && (history ||
+      /^\/connections\/[^/]+\/scheduling-snapshot$/.test(path) ||
+      /^\/matches\/[^/]+(?:\/visual-profile|\/personal-messages\/partner)?$/.test(path));
     for (let attempt = 0; attempt < 2; attempt++) {
       signal.throwIfAborted();
       const headers: Record<string, string> = {};
@@ -61,7 +64,15 @@ export class ApiClient {
       const multipart = body instanceof FormData;
       if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
       let response: Response;
-      try { response = await this.fetcher(`${this.environment.apiOrigin}/api${path}`, { method, signal, headers, ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }), credentials: 'omit', ...(history || method === 'GET' && (/^\/connections\/[^/]+\/scheduling-snapshot$/.test(path) || /^\/matches\/[^/]+(?:\/visual-profile|\/personal-messages\/partner)?$/.test(path)) ? { cache: 'no-store' as const } : {}), ...(administrative ? { cache: 'no-store' as const, redirect: 'error' as const } : {}) }); }
+      try {
+        response = await this.fetcher(`${this.environment.apiOrigin}/api${path}`, {
+          method, signal, headers, credentials: 'omit',
+          ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }),
+          // Private responses can carry account data and signed media URLs.
+          ...(user || administrative || privateRead ? { cache: 'no-store' } : {}),
+          ...(administrative ? { redirect: 'error' } : {}),
+        });
+      }
       catch { signal.throwIfAborted(); throw new ApiError('network'); }
       signal.throwIfAborted();
       if (!response.ok) {
