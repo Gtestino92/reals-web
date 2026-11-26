@@ -52,12 +52,12 @@ incomplete. Completed source controls do not establish deployed protection.
 ## 4. External URL and media origin validation
 
 - Priority: P1.
-- Status: PARTIAL (shared scheme/credential validation implemented; deployment origin policy pending).
+- Status: Scheme and credential validation implemented. The legal reader and standalone link share the publication origin and path check. Hosted media origin policy remains pending.
 - Implemented: `src/shared/browserUrl.ts` validates backend profile-photo and legal-document URLs through onboarding contracts, chat audio through chat contracts, and admin photo/audio through `mediaUrl`. Production requires absolute HTTPS. Only Vite development (`DEV && !PROD`) permits HTTP on exactly `localhost` or `127.0.0.1`, with optional ports for the [local MinIO / ADB workflow](local-development.md#existing-backend). LAN hosts, emulator addresses and loopback aliases are not exceptions.
 - Rejected: Unsupported schemes, relative/protocol-relative URLs, missing authority, invalid hosts/ports/percent escapes, whitespace/control characters, backslashes and embedded credentials (including empty userinfo). Valid strings are returned unchanged; the parsed URL is never serialized, preserving signed paths and query bytes/order/duplicates.
 - Compatibility: Existing onboarding/chat invalid-response errors and admin null/hidden-media behavior remain intact. Existing `no-referrer` media protections and legal-link `noopener noreferrer` remain unchanged. `.env.local`, Firebase, hosting and sibling repositories are untouched. This is targeted defensive hardening, not a complete URL-sink or redirect audit.
 - Validation: `src/shared/browserUrl.test.ts` covers all four consumer boundaries in production/development, HTTPS, local MinIO signed URLs, forbidden HTTP, dangerous/malformed URLs and credentials, with exact complex-query preservation. These are simulated contract tests, not deployed storage/browser verification.
-- Risk: Potential navigation or resource loading from unintended schemes/origins; no unsafe exploit path confirmed.
+- Confirmed low-severity navigation gap in `src/legal/DocumentReader.tsx`: a catalog URL could remain clickable after the reader rejected it as outside the configured publication. Both paths now require the shared URL check, exact configured origin, normalized `/legal/` path and no fragment. Regression cases cover other origins, wrong paths, encoded dot segments, credentials, fragments and unsupported schemes. Valid navigation keeps its original URL and no-referrer policy. The embedded reader rejects redirects. The standalone browser link relies on the trusted publisher for subsequent redirects.
 - Pending mitigation: Establish actual storage/CDN/legal-document origins before defining a production origin allowlist; inventory remaining sinks and redirect behavior. No fixed production-domain allowlist is introduced.
 - Deployment dependency: Actual production origins, TLS, redirects, storage CORS and HTTP response headers (CSP, Referrer-Policy, cache policy and other controls in sections 1–3 and 7) still require deployment verification.
 - Remaining acceptance criteria: Deployed origin/redirect/header checks and real signed-media/legal navigation succeed with approved origins and unchanged signatures. Unit tests do not establish these controls.
@@ -65,12 +65,9 @@ incomplete. Completed source controls do not establish deployed protection.
 ## 5. XSS and untrusted-content audit
 
 - Priority: P1.
-- Status: PARTIAL.
-- Current evidence: Reviewed React surfaces render text; LoginScreen tests verify error text is not HTML. No raw-HTML sink was found by source search, but no comprehensive data-flow audit was performed.
-- Risk: Potential future unsafe rendering or URL sinks; no XSS vulnerability established.
-- Recommended mitigation: Trace backend/user text through rendering and navigation; retain React escaping; separately review any future raw HTML/sanitization need.
-- Deployment dependency: None for source review; final browser policies for end-to-end verification.
-- Acceptance criteria: Reviewed sink inventory and hostile text/URL regression tests cover profile, legal, errors and media without executing markup.
+- Status: Source trace complete for the reviewed surfaces. No executable-markup sink found.
+- Profile display names, locations, biography and question/answer strings render as React text. Chat text, reply excerpts and admin evidence follow the same boundary. Notification projections use validated activity types, account-scoped IDs and counts for title/favicon presentation. The favicon's data URL is drawn locally.
+- Legal HTML is parsed off-DOM with parse5 and rebuilt as React text and allowlisted formatting. Links inside content become text. Scripts, forms, frames and embedded resources are rejected in the body. Focused tests cover hostile chat/profile/admin text and legal content. Calendar navigation builds a fixed Google Calendar endpoint with encoded parameters. The development Cafecito link is static.
 
 ## 6. Firebase App Check for Web
 
@@ -83,9 +80,8 @@ incomplete. Completed source controls do not establish deployed protection.
 
 - Priority: P1.
 - Status: PARTIAL.
-- Current evidence: Local development docs already prohibit rewriting presigned URLs and describe fetching fresh URLs. Production caching, referrers, analytics and browser persistence were not audited.
-- Risk: Potential disclosure/reuse of bearer media URLs through logs, caches, referrers or analytics; no leak confirmed.
-- Recommended mitigation: Audit media lifetime, cache/referrer rules and telemetry; avoid durable URL storage; request fresh URLs after expiry using existing contracts.
+- Source review found signed media URLs held in owned in-memory models and native media elements, with no application-controlled durable store. Image sinks set `no-referrer`. Native audio uses the page referrer policy. The API transport now explicitly bypasses the browser HTTP cache for authenticated responses carrying signed URLs.
+- Remaining risk: Signed URLs are bearer capabilities until expiry. Media-element requests use the storage response's HTTP cache directives. Verify deployed cache directives, redirects, TTL and telemetry before production.
 - Deployment dependency: Storage/CDN headers, backend URL TTLs and telemetry configuration.
 - Acceptance criteria: Expired access fails as intended; URLs absent from logs/analytics/durable caches; sign-out/account-switch behavior reviewed; valid media works unchanged.
 
@@ -107,17 +103,16 @@ Local regression evidence includes both chat sessions, real response headers, au
 ## 8. Dependency vulnerability scanning
 
 - Priority: P1.
-- Status: Read-only baseline complete. Remediation and recurring scans pending.
-- Both `npm audit --package-lock-only --omit=dev --json` and `npm audit --package-lock-only --include=dev --json` returned registry reports on 2026-11-25. Each counted four high-severity package entries from two underlying advisories. Including development dependencies added zero findings.
+- Status: Recurring scanning implemented. Upstream remediation remains open.
+- The `7d933ae` / PR #65 baseline was reproduced on 2026-11-26. Production and full scans each counted four high-severity package entries from two underlying advisories. Including development dependencies added zero findings.
 - The production tree contains `firebase@13.2.0` → `@firebase/firestore@4.19.1` → `@grpc/grpc-js@1.9.16`, also via `@firebase/firestore-compat@0.4.17`. The four entries include inherited findings. The static Web app imports modular Auth and App Check and has no identified Node gRPC server execution path.
 - High, CVE-2026-101916. Certain server configurations can treat unauthorized client certificates as authorized. [GHSA-m9gg-hp2v-232j](https://github.com/advisories/GHSA-m9gg-hp2v-232j)
 - Low, CVE-2026-101915. A server can disclose handler error details to clients. [GHSA-f596-whhp-79r4](https://github.com/advisories/GHSA-f596-whhp-79r4)
-- Both affect versions below 1.13.6 and 1.14.0 through 1.14.4. First prioritize a supported Firebase/Firestore release resolving gRPC to a patched version (1.13.6 or 1.14.5 on the affected lines). Firestore currently pins the minor line with `~1.9.0`. npm proposes a breaking Firebase downgrade to 9.14.0. Review compatibility before changing dependencies, then rerun both scans and verify Auth/App Check.
-- CodeQL Advanced scans Actions and JavaScript/TypeScript on integration pushes, PRs and weekly, excluding root tools from source analysis. CI has no dependency audit gate. No checked-in Dependabot or Renovate update schedule was found. Repository-level alert settings are unverified.
-- Risk: Potential vulnerable dependencies or compromised upstream artifacts.
-- Recommended mitigation: Add reviewed audit/dependency gates, automated updates, severity/exception ownership and assess action pinning/provenance.
-- Deployment dependency: CI permissions, vulnerability advisory availability and release policy.
-- Acceptance criteria: Repeatable scans cover runtime/dev dependencies; high-risk findings gate releases with time-bounded reviewed exceptions and patch ownership.
+- Both affect versions below 1.13.6 and 1.14.0 through 1.14.4. Current registry release Firebase 13.4.0 brings Firestore 4.20.0, which still requires `~1.9.0`. npm proposes Firebase 9.14.0. Keep the reviewed lockfile pending a supported release that admits a patched gRPC version. Direct dependencies are in use, including the public Firebase SDK entry points.
+- Reachability evidence: The source imports Firebase App, Auth and App Check. Source maps across all emitted DEV and PROD JavaScript chunks show Auth and App Check and contain no Firestore or gRPC modules. The Pages app serves static assets. Both advisories concern Node server behavior.
+- The [audit runner](../tools/dependency-audit.mjs) reports every npm package finding and fails on unexcepted moderate or higher production findings and high or critical findings in the full tree. Registry or scanner failure returns exit 2. A blocked finding returns exit 1. CodeQL continues to scan source and Actions independently.
+- The two advisory URLs, severities, affected lockfile nodes and exact versions qualify for the exception through 2027-02-25 UTC. Only inherited entries whose entire reported cause chain qualifies can inherit that exception. Web maintainers should reassess on any Firebase or dependency-tree change, any Firestore or Node server adoption, or by 2027-02-26. When a compatible patched release ships, update the lockfile, remove the exception, rerun both scans and verify Auth, persistence, App Check and token refresh.
+- Dependabot version updates were considered. Scan-first keeps the maintenance change small while the blocker is an upstream pin. A later weekly npm configuration targeting `development` can propose updates through the existing review flow. Repository alert settings remain unverified.
 
 ## 9. PWA Service Worker and offline cache security
 
@@ -132,12 +127,18 @@ Local regression evidence includes both chat sessions, real response headers, au
 ## 10. Browser storage/privacy review
 
 - Priority: P1.
-- Status: PARTIAL.
-- Current evidence: Hardening #1 now passes the email checkbox choice to SDK persistence, defaults new logins/Google to session and preserves legacy sessions. Tests cover SDK restoration; no application token/password storage was introduced. This is not a full browser privacy audit.
-- Risk: Confirmed prior mismatch between checkbox and fixed local persistence is addressed here. Residual potential risks include shared devices, browser recovery, copied tabs and retained non-auth data.
-- Recommended mitigation: Audit all durable/temporary browser data, retention and account boundaries; review shared-device UX and legacy migration policy without custom Firebase storage.
-- Deployment dependency: Browser recovery/privacy policy and product retention decisions.
-- Acceptance criteria: Documented data inventory and retention; desktop/Android restart/recovery/multiple-tab checks pass; no token/password values in application storage or telemetry.
+- Status: Application-controlled storage reviewed. Real browser restart and provider checks remain release verification.
+- Calendar stores a bounded opened flag keyed by date, account and connection, with a bounded in-memory fallback. Notifications store switches, seen IDs and presentation metadata under the account ID. These flags intentionally survive reload; they contain no message text or signed media URLs. Calendar and notification tests cover account isolation.
+- The app has no custom sessionStorage, IndexedDB, Cache Storage or service worker. Firebase owns authentication and App Check persistence. The email remember-me choice, Google session default and legacy restoration remain supported.
+- Private snapshots live under session and tab ownership. Ownership transfer, sign-out and account replacement retire the mounted session and abort its work. Chat teardown releases playback and recorder tracks and revokes preview blob URLs. Existing same-owner resume behavior preserves mounted content and drafts.
+- Low-severity defense in depth in `src/auth/api.ts`: some authenticated endpoints, such as profile photo metadata, previously used the browser's default HTTP cache mode. The transport now requests `no-store` for authenticated API traffic so account data and signed URLs bypass cache even if response directives are absent. The backend already applies cache protections. No hosted cross-account cache disclosure was observed or reproduced.
+
+| Request path | Reviewed invariant |
+| --- | --- |
+| Initial, resume, concurrent reads and mutations | Each request retains its signal, bearer and App Check ownership. Changing cache mode adds no response installer, refresh trigger, retry or state reset. |
+| Token refresh | The one allowed retry acquires current tokens and applies the same cache policy. Multipart bodies, admin redirect rules and history access metadata follow existing paths. |
+| Sign-out, identity or tab replacement | The controller and tab gate still abort old requests and reject obsolete results. Consecutive identities fetching the same private route bypass the shared browser HTTP cache. |
+| Legal open, retry and close | Both sinks require the same validated destination. Loading and retry retain cancellation under the dialog owner. Only a successfully rendered document enables its explicit action. |
 
 ## 11. Security regression and E2E tests
 

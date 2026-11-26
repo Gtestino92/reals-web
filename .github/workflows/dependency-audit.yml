@@ -1,0 +1,35 @@
+name: Dependency audit
+
+on:
+  pull_request:
+    branches: [development, main]
+    paths:
+      - package.json
+      - package-lock.json
+      - tools/dependency-audit*
+      - .github/workflows/dependency-audit.yml
+  schedule:
+    - cron: '37 15 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit dependencies (${{ matrix.ref }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJSON(github.event_name == 'schedule' && '["development","main"]' || '["current"]') }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.ref == 'current' && github.sha || format('refs/heads/{0}', matrix.ref) }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: node tools/dependency-audit.mjs

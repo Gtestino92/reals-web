@@ -1,6 +1,7 @@
 import { createElement, Fragment, type ReactNode } from 'react';
 import type { DefaultTreeAdapterTypes } from 'parse5';
 import { resolveEnvironment } from '../config/environment';
+import { browserUrl } from '../shared/browserUrl';
 
 const maxBytes = 512 * 1024;
 const formatting = new Set('h1 h2 h3 h4 h5 h6 p br hr ol ul li strong b em i u s del ins sup sub blockquote pre code dl dt dd table caption thead tbody tfoot tr td th'.split(' '));
@@ -35,10 +36,18 @@ function renderContent(document: DefaultTreeAdapterTypes.Document) {
   return content;
 }
 
-export async function loadDocument(url: string, owner: AbortSignal) {
+export function publicationUrl(value: string): string | null {
+  const url = browserUrl(value);
+  if (!url) return null;
   const { legalDocumentOrigin } = resolveEnvironment(import.meta.env);
   const target = new URL(url);
-  if (target.origin !== legalDocumentOrigin || !target.pathname.startsWith('/legal/') || target.username || target.password || target.hash) throw Error('Unexpected publication');
+  return target.origin === legalDocumentOrigin && target.pathname.startsWith('/legal/') && !url.includes('#') ? url : null;
+}
+
+export async function loadDocument(url: string, owner: AbortSignal) {
+  const publication = publicationUrl(url);
+  if (!publication) throw Error('Unexpected publication');
+  const target = new URL(publication);
   // Pages publishes document.html at its extensionless canonical route.
   // Derive only that known path, never follow a Location supplied by a response.
   if (target.hostname.endsWith('.pages.dev') && target.pathname.endsWith('/document.html')) target.pathname = target.pathname.slice(0, -5);
