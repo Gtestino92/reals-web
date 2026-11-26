@@ -181,3 +181,31 @@ Passive Second Chat reload was also checked at 390 and 1280 px with
 - `npm run test:focused -- src/App.test.tsx src/App.ownership.test.tsx src/home/Home.test.tsx src/home/Home.secondRestoration.test.tsx src/home/useHome.polling.test.tsx src/tabs/TabOwnershipManager.test.tsx src/onboarding/Onboarding.test.tsx src/admin/modes.test.tsx src/admin/mfa.test.tsx src/auth/AccountSuspension.test.tsx src/auth/AccountDeletionRecovery.test.tsx` passed 530 tests across 11 files. The subsequent targeted `npm run test:focused -- src/home/Home.test.tsx -t "accepts a single Search click"` passed the added overlapping-poll regression.
 - `node tools/tab-ownership-browser.mjs` passed Chromium ownership transfer, rapid re-entry, read/write retirement and BFCache vacancy/occupied cases, including actual browser Back.
 - `npm run typecheck`, `npm run check:architecture` (107 production modules, zero runtime cycles) and `git diff --check` passed. Full regression and deployment builds were left to CI.
+
+### Retained Admin grant and Home return
+
+At `13f8d81`, a delayed profile return reproduced private diagnostics and
+photo-review GETs as soon as retained-grant verification finished. Mounting
+Admin hid Home and retired its read before the app could discover a new queue
+or chat. The same regression passed when Home completed first.
+
+| Path | Entry and response ownership |
+| --- | --- |
+| Eligible return and explicit Admin click | Access verification and MFA preparation may run during the Home read. The pending intent retains its auth context and Home revision. Private entry requires confirmed Home compatibility and a currently valid grant. Whichever check finishes last can complete the same intent. |
+| Mandatory reconciliation or failed result | A version change, dirty status, due boundary or mismatched profile status retires the earlier intent. The revision survives batched renders even when the full read finishes immediately. Failures, queue state and conversation locks also prevent entry. |
+| Cancellation, departure or ownership change | The existing entry epoch and mounted session boundary retire stale callbacks. Ordinary navigation stays available during the read. Grant expiration still requires fresh authorization. Direct Admin and ordinary entry keep their existing verification paths. |
+
+The reproduction and regression use `src/admin/modes.test.tsx`. The Chromium
+command `node tools/runtime-refinements-browser.mjs --admin-race` uses 75 ms
+HTTP responses plus 900 ms on Home status. A retained grant successfully entered
+after a clean return with one click. A changed-version return discovered queue
+admission and retired entry. Both cases observed zero private requests before
+Home verification. This is synthetic Chromium evidence.
+
+Focused validation passed 215 tests across `src/admin/modes.test.tsx`,
+`src/admin/mfa.test.tsx`, `src/home/Home.test.tsx`,
+`src/home/useHome.polling.test.tsx` and
+`src/home/Home.secondRestoration.test.tsx`. The follow-up run with
+`npm run test:focused -- src/admin/modes.test.tsx src/admin/Admin.test.tsx src/admin/lifecycle.test.tsx src/App.ownership.test.tsx --maxWorkers=2`
+passed 83 tests, including direct entry and grant retirement on ownership
+transfer. Typecheck, architecture and diff checks passed.

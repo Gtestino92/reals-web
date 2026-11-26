@@ -11,7 +11,7 @@ interface Model { home: HomeData; name: string }
 interface ProfileSample { status: HomeData['profileStatus']; name: string }
 export type SearchPhase = 'idle' | 'locating' | 'admitting' | 'queued' | 'canceling' | 'reconciling' | 'failed';
 type ReturnRead = false | 'ordinary' | 'mandatory';
-interface State { model: Model | null; busy: boolean; blocked: boolean; error: string; returning: ReturnRead; searchPhase: SearchPhase; locationFailure: LocationFailureKind | null }
+interface State { model: Model | null; busy: boolean; blocked: boolean; error: string; returning: ReturnRead; adminRevision: number; searchPhase: SearchPhase; locationFailure: LocationFailureKind | null }
 interface Owner { lifetime: AbortController; read: AbortController | null; location: AbortController | null; serial: number; mutation: boolean; cancelRequested: boolean; version: number | null; uncertain: boolean; reconcile: boolean; foregroundVerified: boolean; refreshBoundaries: Set<number>; consumedBoundaries: Set<number> }
 type HomeStatus = ReturnType<typeof parseStatus>;
 interface StatusSample { status: HomeStatus; receivedAt: number; serverTime: number }
@@ -23,7 +23,7 @@ export function useHome(controller: SessionController, active = true, observer?:
   const notificationObserver = useRef(observer);
   notificationObserver.current = observer;
   const openPendingLegal = useContext(PendingLegalSearch);
-  const [state, setState] = useState<State>({ model: null, busy: true, blocked: true, returning: false, error: '', searchPhase: 'idle', locationFailure: null });
+  const [state, setState] = useState<State>({ model: null, busy: true, blocked: true, returning: false, adminRevision: 0, error: '', searchPhase: 'idle', locationFailure: null });
   const foreground = useRef(active); foreground.current = active;
   const owner = useRef<Owner | null>(null), latest = useRef<Model | null>(null);
   const valid = (r: Owner, serial: number) => owner.current === r && !r.lifetime.signal.aborted && r.serial === serial;
@@ -90,6 +90,9 @@ export function useHome(controller: SessionController, active = true, observer?:
     const signal = AbortSignal.any([read.signal, r.lifetime.signal]), serial = ++r.serial;
     if (returning) setState(s => ({ ...s, returning }));
     else if (!poll) { r.uncertain = false; r.reconcile = true; setState(s => ({ ...s, busy: true, blocked: true, error: '', locationFailure: null })); }
+    const invalidateAdminReturn = () => setState(s => s.returning === 'ordinary'
+      ? { ...s, returning: 'mandatory', adminRevision: s.adminRevision + 1 }
+      : s);
     const reconcile = async (profileRead?: Promise<ProfileSample>) => {
       const sample = poll || returning ? await readStatus(r, serial, signal) : undefined;
       if (sample) {
@@ -98,9 +101,11 @@ export function useHome(controller: SessionController, active = true, observer?:
         const { status, serverTime } = sample;
         const due = [...r.refreshBoundaries].some(boundary => boundary <= serverTime);
         const retained = latest.current;
+        const statusCurrent = !r.reconcile && !r.uncertain && status.version === r.version && !status.dirty && !due;
+        if (returning === 'ordinary' && !statusCurrent) invalidateAdminReturn();
         // Full Home embeds partner display names, which can change without a Home
         // version bump. Our own display name is covered by the independent read.
-        if (retained && !r.reconcile && !r.uncertain && status.version === r.version && !status.dirty && !due &&
+        if (retained && statusCurrent &&
             (!returning || (!retained.home.pendingActions.length && !retained.home.nextSteps.length))) {
           const profile = profileRead && await profileRead;
           signal.throwIfAborted();
@@ -121,7 +126,12 @@ export function useHome(controller: SessionController, active = true, observer?:
     };
     try {
       if (!returning) return await reconcile();
-      const profileRead = readProfile(signal);
+      const profileRead = readProfile(signal).then(profile => {
+        if (returning === 'ordinary' && valid(r, serial) && !signal.aborted && profile.status !== latest.current?.home.profileStatus) {
+          invalidateAdminReturn();
+        }
+        return profile;
+      });
       const [, result] = await Promise.all([profileRead, reconcile(profileRead)]);
       return result;
     } catch {
@@ -244,7 +254,7 @@ export function useHome(controller: SessionController, active = true, observer?:
   useEffect(() => {
     const r: Owner = { lifetime: new AbortController(), read: null, location: null, serial: 0, mutation: false, cancelRequested: false, version: null, uncertain: false, reconcile: true, foregroundVerified: false, refreshBoundaries: new Set(), consumedBoundaries: new Set() };
     owner.current = r; latest.current = null;
-    setState({ model: null, busy: true, blocked: true, returning: false, error: '', searchPhase: 'idle', locationFailure: null });
+    setState({ model: null, busy: true, blocked: true, returning: false, adminRevision: 0, error: '', searchPhase: 'idle', locationFailure: null });
     queueMicrotask(() => { if (!r.lifetime.signal.aborted) void refresh(); });
     const resume = () => {
       if (foreground.current && document.visibilityState === 'visible') void refresh(latest.current !== null);

@@ -2249,3 +2249,8 @@ See the [Web decision, invariant and timing review](navigation-flicker.md#startu
 | Queue, automatic First Chat and passive Second Chat | PARTIAL → COMPLETE for the covered paths | Android resolves routes from Home projections. Web keeps queue and restoration authority and waits for usable content. Focused tests cover queued startup, delayed First Chat, delayed passive history and no duplicate JOIN. Chromium verified Second Chat reload when alone or with a partner. |
 | Profile Back and eligibility | PARTIAL → COMPLETE for the scoped return | Android `closeProfileManagementWithHomeReload` reloads Home and preserves an error retry. Web returns to mounted Home with current profile and status verification. The full projection still runs when required. No new gesture or history behavior. Chromium checks profile Back with and without a save. Unit coverage includes preferences, version, due boundary, failure, stale replies and queue recovery. |
 | Tab ownership, Admin, viewport and input | PLATFORM-LIMITED | Browser-only ownership and MFA follow Web Locks/BFCache and independent authorization. Responsive light/dark screenshots and keyboard semantics are Web evidence. Current native screenshots were unavailable for these scoped states. Physical Android/iOS, WebKit and live backend performance remain unverified. |
+
+The [retained Admin grant correction](navigation-flicker.md#retained-admin-grant-and-home-return)
+keeps Android's queue and conversation priority during the Web-only Admin
+navigation flow. Focused tests cover both completion orders and Chromium
+verifies clean entry and retirement on queue discovery.
