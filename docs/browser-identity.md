@@ -11,8 +11,34 @@
 - **Android (Chrome).** Abrí Reals en Chrome y usá **Instalar aplicación** o
   **Agregar a la pantalla principal** en el menú del navegador, según la versión.
 
-Reals Web relies on browser-provided installation controls. The instructions
-live here, so the chat and installed app have no installation prompt or banner.
+Eligible iPhone and iPad Safari tabs show **Instalá Reals** below the primary
+actions on authenticated, active-profile Inicio. The card uses the native
+Safari Share menu. It stays outside setup, account and legal interruptions,
+Activity, matchmaking, conversations, review, scheduling and administrative
+flows. Ordinary polling and foreground revalidation preserve the card and
+its focus. [Safari 26 installation options](https://webkit.org/blog/17333/webkit-features-in-safari-26-0/#every-site-can-be-a-web-app-on-ios-and-ipados)
+
+Eligibility uses top-level Safari user-agent and platform signals, including
+the touch-capable Mac-style iPad user agent. It skips other recognizable iOS
+browsers and embedded views. `(display-mode: standalone)` and
+`navigator.standalone` describe the **current window**. A regular Safari tab
+cannot reliably tell whether Reals is installed elsewhere on the device.
+
+**Ya la instalé** and **Ahora no** both store only
+`reals:ios-install-guidance:v1=dismissed` in local storage. That preference
+survives reloads and account changes in that storage context. A failed storage
+write falls back to the current document. The value records dismissal and
+carries no installation or account status. These instructions remain available
+here after dismissal. Safari and installed web apps have separate web storage.
+WebKit 17.2 can copy cookies at installation, while Reals uses Firebase
+Web Storage for authentication. Reals does not copy either its preference
+or its Firebase session between contexts. [WebKit storage behavior](https://webkit.org/blog/14787/webkit-features-in-safari-17-2/#web-apps)
+
+Validation on the iOS experience branch:
+
+- `npm run test:focused -- src/home/InstallGuidance.test.tsx src/home/Home.test.tsx --maxWorkers=2` passed 125 tests.
+- `npm run typecheck` passed. `npm run check:architecture` passed with 107 modules and zero runtime cycles.
+- On the Vite server at `127.0.0.1:5174`, `node tools/tab-ownership-browser.mjs --install-guidance` passed Chromium emulation for iPhone, desktop-UA iPad, desktop, iOS Chrome and standalone signals. It checked synthetic login and setup, search entry and cancellation, keyboard focus after dismissal and preference retention across document reload. Inspected 320 px light, 390 px dark and 820 px light screenshots. Safari’s Share sheet, Home Screen installation, VoiceOver and physical layouts remain device checks.
 
 ## Sources and reproduction
 

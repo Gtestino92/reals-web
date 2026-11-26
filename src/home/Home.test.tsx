@@ -24,6 +24,83 @@ const confirmed = async () => { await waitFor(() => { expect(document.querySelec
 const search = () => screen.getByRole('button', { name: 'Buscar chat' });
 const ready = async () => { await waitFor(() => { expect(document.querySelector('.home')).toHaveAttribute('aria-busy', 'false'); expect(screen.queryByText('Hola, Lucía') ?? screen.queryByRole('heading', { name: 'Buscando chat' })).toBeTruthy(); }); };
 const writes = () => fetcher.mock.calls.filter(([url, o]) => String(url).endsWith('/queue') && o?.method !== 'GET');
+const installationNotice = () => screen.queryByRole('region', { name: 'Instalá Reals' });
+function emulateIPhoneSafari() {
+  vi.stubGlobal('navigator', {
+    ...navigator,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1',
+    vendor: 'Apple Computer, Inc.',
+  });
+}
+
+it('preserves the installation notice, DOM and focus during polling and a delayed or failing foreground read', async () => {
+  emulateIPhoneSafari();
+  mount(); await ready();
+  const card = installationNotice();
+  const dismiss = screen.getByRole('button', { name: 'Ahora no' });
+  dismiss.focus();
+  vi.useFakeTimers();
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  const original = fetcher.getMockImplementation()!;
+  let finish: ((response: Response) => void) | undefined;
+  fetcher.mockImplementation((url, options) => url === '/api/me/home/status' ?
+    new Promise(resolve => { finish = resolve; }) : original(url, options));
+  const visibility = vi.mocked(Object.getOwnPropertyDescriptor(document, 'visibilityState')!.get!);
+  visibility.mockReturnValue('hidden');
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  visibility.mockReturnValue('visible');
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  expect(finish).toBeDefined();
+  expect(installationNotice()).toBe(card);
+  await act(async () => finish?.(json({}, 503)));
+  expect(screen.getByRole('alert')).toHaveTextContent('No pudimos actualizar Inicio');
+  expect(installationNotice()).toBe(card);
+  expect(dismiss).toHaveFocus();
+});
+
+it('shows the notice only after authentication and preserves dismissal across account replacement', async () => {
+  emulateIPhoneSafari();
+  const key = 'reals:ios-install-guidance:v1';
+  try {
+    vi.mocked(auth.observe).mockImplementation(next => { observer = next; next(null); return vi.fn(); });
+    mount();
+    await screen.findByRole('button', { name: 'Ingresar' });
+    expect(installationNotice()).toBeNull();
+    act(() => observer(user));
+    await screen.findByRole('region', { name: 'Instalá Reals' });
+    fireEvent.click(screen.getByRole('button', { name: 'Ya la instalé' }));
+    expect(screen.getByRole('heading', { name: 'Inicio' })).toHaveFocus();
+    act(() => observer(null));
+    await screen.findByRole('button', { name: 'Ingresar' });
+    act(() => observer({ ...user, uid: 'replacement' }));
+    await ready();
+    expect(installationNotice()).toBeNull();
+    expect(localStorage.getItem(key)).toBe('dismissed');
+  } finally {
+    localStorage.removeItem(key);
+  }
+});
+
+it('removes the notice during matchmaking preparation and queue membership', async () => {
+  emulateIPhoneSafari();
+  let locate: PositionCallback | undefined;
+  geo.mockImplementation(ok => { locate = ok; });
+  mount(); await ready();
+  expect(installationNotice()).toBeVisible();
+  fireEvent.click(search());
+  await screen.findByRole('heading', { name: 'Buscando chat' });
+  expect(installationNotice()).toBeNull();
+  await act(async () => locate?.(position()));
+  await confirmed();
+  expect(installationNotice()).toBeNull();
+});
+
+it('removes the installation notice on entering Activity and Visual Review', async () => {
+  emulateIPhoneSafari();
+  await openVisualReturnFixture(() => expect(installationNotice()).toBeVisible());
+  expect(screen.queryByText('Instalá Reals')).toBeNull();
+});
+
 it('disables the first chat Activity action after failed reconciliation and restores it on retry', async () => {
   home.nextSteps = [{ type:'FIRST_CHAT', matchId:'m', chatId:'c', connectionId:'connection', requiresAction:true }];
   mount(); await ready(); fireEvent.click(screen.getByRole('button',{ name:'Ver Actividad' }));
@@ -37,7 +114,7 @@ it('disables the first chat Activity action after failed reconciliation and rest
   fetcher.mockImplementation(original); fireEvent.click(screen.getByRole('button',{ name:'Reintentar' }));
   await waitFor(() => expect(open).toBeEnabled());
 });
-async function openVisualReturnFixture() {
+async function openVisualReturnFixture(onHome?: () => void) {
  home.pendingActions=[{type:'VISUAL_REVIEW',matchId:'visual'}];home.activeInteractionsSummary.activeInitialCount=1;
  const base=fetcher.getMockImplementation()!;
  fetcher.mockImplementation(async(path,options)=>{
@@ -46,7 +123,7 @@ async function openVisualReturnFixture() {
   if(path==='/api/matches/visual/visual-decision')return json({id:'visual',state:'VISUAL_PHASE'});
   return base(path,options);
  });
- mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));fireEvent.click(screen.getByText('Descubrí el perfil'));await screen.findByRole('heading',{name:'María'});
+ mount();await ready();onHome?.();fireEvent.click(screen.getByRole('button',{name:'Ver Actividad'}));fireEvent.click(screen.getByText('Descubrí el perfil'));await screen.findByRole('heading',{name:'María'});
 }
 it.each(['Aprobar','Rechazar'])('returns directly Home after %s and suppresses an obsolete completed visual snapshot',async action=>{
  await openVisualReturnFixture();fireEvent.click(screen.getByRole('button',{name:action}));await screen.findByRole('heading',{name:'Inicio'});expect(screen.queryByRole('button',{name:'Ver Actividad'})).toBeNull();expect(screen.queryByText('No tenés pendientes por ahora.')).toBeNull();act(()=>history.back());await screen.findByRole('heading',{name:'Inicio'});act(()=>history.forward());await screen.findByRole('heading',{name:'Inicio'});expect(screen.queryByRole('heading',{name:'María'})).toBeNull();
@@ -136,7 +213,8 @@ beforeEach(() => {
   user = { uid: 'f', emailVerified: true, getIdToken: vi.fn().mockResolvedValue('test'), reload: vi.fn() };
   auth = { observe: vi.fn(next => { observer = next; next(user); return vi.fn(); }), signIn: vi.fn(), signUp: vi.fn(), google: vi.fn(), verify: vi.fn(), signOut: vi.fn().mockResolvedValue(undefined) };
   geo = vi.fn<Geolocation['getCurrentPosition']>().mockImplementation(success => success(position()));
-  vi.stubGlobal('isSecureContext', true); vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { geolocation: { getCurrentPosition: geo } }));
+  vi.stubGlobal('isSecureContext', true);
+  vi.stubGlobal('navigator', { userAgent: navigator.userAgent, platform: navigator.platform, vendor: navigator.vendor, geolocation: { getCurrentPosition: geo } });
   fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, o) => {
     switch (String(url)) {
       case '/api/reference/affinity-questions': return json({ catalogVersion: 'empty', categories: [], questions: [] });

@@ -50,6 +50,11 @@ html:has(.home) { scrollbar-gutter: stable; }
 .home-activity-entry { display: grid; gap: 8px; text-align: left; color: inherit; font: inherit; cursor: pointer; }
 .home-entry-title { font-family: var(--font-display); font-size: var(--type-section-title-size); }
 .home-priority { border-inline-start: 3px solid var(--color-secondary); padding-inline-start: 16px; }
+.home-install { border-inline-start: 3px solid var(--color-secondary); }
+.home-install p { margin-block: 8px; }
+.home-install ol { margin-block: 8px 16px; padding-inline-start: 24px; }
+.home-install-actions { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.home-install-actions > .login-button { width: auto; margin: 0; padding-inline: 16px; }
 .login-panel:has(.search-screen) { max-width: 520px; }
 .login-panel:has(.search-screen) > .login-header,
 .onboarding:has(.search-screen) > :not(:has(.search-screen)) { display: none; }
