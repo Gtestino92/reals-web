@@ -235,3 +235,12 @@ validation. Full-suite validation is left to PR CI for this follow-up. The
 comprehensive HTTP cache/storage browser audit, hosted checks and Android Coil
 account-isolation release gate remain as documented above. No tooling changes,
 credentials, backend contracts, deployment or media TTL changes are included.
+
+
+## Release gate for address-book processing
+
+Keep real providers and shared Backend processing disabled in hosted environments pending a recorded decision for each source. Privacy and legal owners must review third-party contact rights, the lawful basis for processing non-users, consent and withdrawal, the published privacy notice and terms, retention of HMAC identifiers and match snapshots, backup expiration/restoration, key rotation, and access/deletion requests from non-users. A keyed telephone identifier is pseudonymous personal data. Review breach exposure, observability and deletion across backups. Confirm the Spanish consent text and the distinction between local names, transmitted selected numbers and grouped counterpart disclosure.
+
+Review Google API Services User Data Policy, applicable Workspace Limited Use rules, user-facing disclosure, least privilege, onward transfer, and whether ranking in a dating product and disclosure to a counterpart qualify as permitted uses. Obtain provider-policy approval for these specific purposes and complete applicable OAuth verification before enabling Google. A successful grant demonstrates technical authorization only. If the purposes fail policy review, Google imports must stay off. Browser imports need independent platform/privacy review. [Google user data policy](https://developers.google.com/terms/api-services-user-data-policy) · [Workspace developer policy](https://developers.google.com/workspace/workspace-api-user-data-developer-policy)
+
+Future verified owner phone numbers and contact-based exclusions require separate consent, abuse controls, ownership verification, lifecycle and migration design. This integration uses shared numbers solely for positive ranking and grouped context.

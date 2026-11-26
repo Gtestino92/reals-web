@@ -2255,3 +2255,14 @@ The [retained Admin grant correction](navigation-flicker.md#retained-admin-grant
 keeps Android's queue and conversation priority during the Web-only Admin
 navigation flow. Focused tests cover both completion orders and Chromium
 verifies clean entry and retirement on queue discovery.
+
+
+### Shared contacts (deliberate Web-first feature)
+
+| Area | Android reference and comparison | Web evidence | Status |
+|---|---|---|---|
+| Account and Home | MatchmakingHomeScreen delegates AccountSection. Android has no shared-contact consent, import, replacement, invite or withdrawal flow to migrate. | AccountSection, Home, useHomeNavigation and src/contacts. Synthetic consent, replacement, cancellation, selection, stale revision, withdrawal and Back/Forward tests. | COMPLETE for Web-first management in synthetic browsers |
+| First Chat | ChatScreen places ChatHeader before FirstChatGuidancePanel. The bucket is a Web-first addition to this hierarchy. | ChatSession and SharedContactIndicator. Chat metadata drives grouped disclosure, collapse and per-chat dismissal. Existing decision, message, audio and question surfaces keep their roles. | COMPLETE in synthetic browser scenarios |
+| Browser and PWA | Web capability discovery, direct picker activation and Google popup ownership differ from native permissions and system Back. | Desktop dark and mobile light Chromium and WebKit engine smoke. Real Google grants, physical device selection, installed-PWA return, keyboard and screen-reader checks pending. | PLATFORM-LIMITED |
+
+[Validation and screenshots](testing.md#synthetic-shared-contact-validation)

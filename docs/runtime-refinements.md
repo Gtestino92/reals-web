@@ -75,3 +75,18 @@ Remaining manual checks: real user-reported SQL latency and live token/GPS condi
 Production changes: `src/home/location.ts`, `useHome.ts`, `SearchingScreen.tsx`; `src/tabs/policy.ts`, `src/App.tsx`; `src/auth/SignOutButton.tsx`/`sign-out.css`, `src/home/AccountSection.tsx` and `Home.tsx`. Tests: policy/dialog, App ownership/session, Home/location/Account, onboarding confirmation, shared DOM setup/sign-out helper. Tooling/config: package scripts, Vitest compact reporting, focused runner, synthetic queue/ownership browser fixtures and timing runner. Documentation: AGENTS.md, .env.example, testing/local-development/ownership/parity docs and this review.
 
 HEAD remains `a6864fe3188e5ca2e3700507bff74cac3ece1cae`; no commit/push/PR/merge/deploy. Android checkout was on development; backend checkout was on feature/local-docker-network-hardening, with the reviewed matchmaking sources and API contract identical to its development ref. Both were read-only. No .env.local contents were printed or modified.
+
+
+## Contact operation ownership
+
+| Event | State accepted or retired |
+|---|---|
+| Open Contactos / resume | A cancellable owner GET installs one validated status. A newer read or write aborts an older read. Compatible foreground reads preserve the selection, scroll and picker operation. A failed transient read disables confirmation until revalidation. |
+| Accept consent | The explicit action sends the displayed required version and revision. A successful response installs the next revision. A second gesture starts the provider. |
+| Choose provider / confirm | The operation owns a revision, temporary rows and cancellation signal. Background reads can invalidate that intent. Confirmation only uses the captured revision. One write can run at a time. |
+| Conflict, rejected or uncertain write | Drop the intent, read current status and display a safe outcome message. A status read has no historical selection count or request identifier. Only a successful replacement response confirms its count. |
+| Erase / withdraw | Confirm, issue unconditional DELETE and refresh after 204. Both remain available to participants during provider shutdown. |
+| Leave, pagehide, session generation or tab lease loss | Abort owned work and release rows. An obsolete popup callback cannot install data. Visibility changes while choosing a Google account initiate ordinary revalidation and do not by themselves cancel the popup. JavaScript garbage collection controls eventual memory reclamation. |
+| First Chat metadata | Validate the active participant/match and current read serial. Remove changed social context before history and exits settle. Resume hides context while revalidating. An interrupted write's pre-resume metadata cannot reinstate the range. Block, expiry, terminal state and session disposal suppress disclosure. |
+
+Only the invitation dismissal and per-account/per-chat presentation preference use durable storage. Browser history carries ordinary navigation entries. No periodic contact sync, OAuth refresh token, selection cache or new chat polling loop is involved.

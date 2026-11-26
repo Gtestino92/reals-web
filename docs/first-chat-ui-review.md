@@ -26,3 +26,8 @@ Home reports its active conversation to SessionApp, which selects a dedicated sh
 - `node tools/chat-layout-check.mjs` with local Vite running: headless Chrome synthetic conversation, send confirmation, all six requested viewport sizes with populated and empty timeline. No horizontal overflow; composer within viewport. Captures in `artifacts/first-chat/`. These use fake chat data and do not authenticate or call backend services. Empty screenshots hide rendered fixture messages and check the resulting layout.
 
 Remaining manual checks: Android/iOS virtual keyboard, real safe areas, touch and screen-reader interaction, long real conversations, and real authenticated browser history traversal across document boundaries. Chrome emulation does not validate a device keyboard. No commit, push or deployment performed.
+
+
+## Optional shared-contact strip
+
+An initially collapsed strip sits beneath the header controls. Its accessible buttons expand the private-identity explanation or dismiss it for this account and chat. Unsupported metadata, zero/unavailable overlap and terminal contexts leave the space empty. The UI maps only the three approved buckets. Existing match/chat reads drive it. A current metadata removal takes effect before delayed or failed message history. There is no counterpart participation status, exact count or negative trust signal. See the [synthetic evidence](testing.md#synthetic-shared-contact-validation).
