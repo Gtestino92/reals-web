@@ -17,17 +17,13 @@ permissions:
 
 jobs:
   audit:
-    name: Audit dependencies (${{ matrix.ref }})
+    name: Audit dependencies (${{ github.event_name == 'schedule' && 'development' || 'current' }})
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        ref: ${{ fromJSON(github.event_name == 'schedule' && '["development","main"]' || '["current"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ matrix.ref == 'current' && github.sha || format('refs/heads/{0}', matrix.ref) }}
+          ref: ${{ github.event_name == 'schedule' && 'refs/heads/development' || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:

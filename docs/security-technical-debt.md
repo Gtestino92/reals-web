@@ -104,6 +104,7 @@ Local regression evidence includes both chat sessions, real response headers, au
 
 - Priority: P1.
 - Status: Recurring scanning implemented. Upstream remediation remains open.
+- Scheduled scans cover `development`. Enable scheduled scans of `main` when the audit workflow and runner are promoted to production. Pull requests to either branch retain the path-filtered audit.
 - The `7d933ae` / PR #65 baseline was reproduced on 2026-11-26. Production and full scans each counted four high-severity package entries from two underlying advisories. Including development dependencies added zero findings.
 - The production tree contains `firebase@13.2.0` → `@firebase/firestore@4.19.1` → `@grpc/grpc-js@1.9.16`, also via `@firebase/firestore-compat@0.4.17`. The four entries include inherited findings. The static Web app imports modular Auth and App Check and has no identified Node gRPC server execution path.
 - High, CVE-2026-101916. Certain server configurations can treat unauthorized client certificates as authorized. [GHSA-m9gg-hp2v-232j](https://github.com/advisories/GHSA-m9gg-hp2v-232j)
