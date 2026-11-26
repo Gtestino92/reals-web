@@ -59,17 +59,28 @@ A missing route and a missing `/assets/*.js` path both returned the SPA HTML wit
 
 ### First increment in source
 
-Vite copies [`public/_headers`](../public/_headers) to `dist/_headers`. Pages interprets the single `/*` rule for static responses on its own host. The rule pins `X-Content-Type-Options: nosniff` and `Referrer-Policy: strict-origin-when-cross-origin` to their observed values. It sets `X-Frame-Options: DENY` because the Web app is a top-level destination with no embedding requirement identified. The policy applies to pages that embed Reals. Firebase Auth and reCAPTCHA frames are served by their own origins.
+Vite copies [`public/_headers`](../public/_headers) to `dist/_headers`. Pages interprets the shared `/*` rule for static responses on its own host. The rule pins `X-Content-Type-Options: nosniff` and `Referrer-Policy: strict-origin-when-cross-origin` to their observed values. It sets `X-Frame-Options: DENY` because the Web app is a top-level destination with no embedding requirement identified. The policy applies to pages that embed Reals. Firebase Auth and reCAPTCHA frames are served by their own origins.
 
-The Permissions Policy disables camera capture and Payment Request, which the current app does not use. Photo selection uses a file input and local canvas cropping. Geolocation and microphone are available to the same origin, subject to normal browser permission prompts, with no cross-origin delegation. CSP and CSP Report-Only remain pending the [resource inventory gaps](security-technical-debt.md#1-content-security-policy-csp).
+The Permissions Policy disables camera capture and Payment Request, which the current app does not use. Photo selection uses a file input and local canvas cropping. Geolocation and microphone are available to the same origin, subject to normal browser permission prompts, with no cross-origin delegation. The additional `https://reals-web.pages.dev/*` rule sends the [candidate policy](../public/_headers) in Report-Only mode. Pages combines both matching rules. Other hosts receive only the shared rule.
 
 Railway keeps its own headers and CORS. For comparison, its public `/api/ping` returned JSON with `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, and `Cache-Control: no-cache, no-store, max-age=0, must-revalidate`. Pages applies redirects ahead of custom header rules. Its asset rules also have no effect on a Pages Function response. [Cloudflare Pages header scope](https://developers.cloudflare.com/pages/configuration/headers/)
 
 ### Verification and rollout
 
-- The automated check asserts a single rule with exactly the reviewed headers and permissions and compares the source file with the Vite build output. API transport tests exercise the separate Railway origin. Synthetic `dev` and `prod` builds both copied the file byte for byte.
+- The automated check asserts both rules with exactly the reviewed headers and permissions and compares the source file with the Vite build output. API transport tests exercise the separate Railway origin. Synthetic `dev` and `prod` builds both copied the file byte for byte.
 - The deployed baseline rendered the login form without horizontal overflow in clean Chromium at desktop and mobile emulated viewports. The Google popup reached Google's sign-in page. No CSP violations were observed on anonymous startup, where both CSP headers were absent. Local Chromium with the built headers denied framing and confirmed the camera, payment, microphone and geolocation policy settings.
-- After an authorized deployment, repeat the document, fallback, asset and redirect checks against Pages. Verify real email sign-in, Google popup completion, App Check exchange and refresh, authenticated Railway traffic, signed image/audio loading, recording, geolocation and Calendar navigation with an approved test account. These checks are pending, as is deployed verification of the new headers.
+
+### Hosted DEV smoke checklist
+
+Use a clean profile and an approved account after an authorized release. Inspect violations locally. Record only directive and origin, omitting paths, queries, tokens, console exports and HARs.
+
+1. Check the document, fallback and assets for the exact Report-Only header and four baseline headers. Confirm the enforcing header is absent. Check redirects separately.
+2. Complete email and Google sign-in, popup return and token refresh. Verify App Check exchange, refresh and authenticated Railway traffic.
+3. Open profile images and verify the initial and final photo origins independently of audio. Exercise selection and crop.
+4. In both chats play received audio, record, preview and send. Check microphone permission, geolocation and the tab favicon.
+5. Open a legal document in the reader and its browser link. Open Google Calendar and return to Reals.
+
+Enforcement requires separate review after these flows pass and unexplained violations, including provider styles and media redirects, are resolved. Inventory production independently. To roll back, remove the hostname-specific rule and its test expectation in a reviewed revision, release through the normal DEV process and recheck the shared headers. See the [resource inventory and local evidence](security-technical-debt.md#1-content-security-policy-csp).
 
 ## Remaining rollout steps
 

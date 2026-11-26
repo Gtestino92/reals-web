@@ -9,16 +9,36 @@ import { expect, it } from 'vitest';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const source = join(root, 'public', '_headers');
 
-it('defines exactly one Pages path rule with the reviewed response headers', () => {
+it('defines the baseline on every host and the exact report-only policy on DEV', () => {
   const lines = readFileSync(source, 'utf8').trimEnd().split(/\r?\n/);
   // A path rule belongs to the Pages deployment. The Railway API has its own ingress.
   // Checking the whole rule catches extra or duplicate headers and permission directives.
+  expect(lines.every(line => Buffer.byteLength(line) <= 2000)).toBe(true);
+  const policy = [
+    "default-src 'none'",
+    "script-src 'self' https://apis.google.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "media-src 'self' blob: https://d8ff7ef04413af6626533c4f2fab3e5a.r2.cloudflarestorage.com",
+    "connect-src 'self' https://reals-backend-dev.up.railway.app https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://content-firebaseappcheck.googleapis.com https://www.google.com/recaptcha/",
+    "frame-src https://reals-backend-firebase.firebaseapp.com/__/auth/iframe https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/",
+    "font-src 'self'",
+    "manifest-src 'self'",
+    "worker-src 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join('; ');
   expect(lines).toEqual([
     '/*',
     '  X-Content-Type-Options: nosniff',
     '  X-Frame-Options: DENY',
     '  Referrer-Policy: strict-origin-when-cross-origin',
     '  Permissions-Policy: camera=(), payment=(), geolocation=(self), microphone=(self)',
+    '',
+    'https://reals-web.pages.dev/*',
+    `  Content-Security-Policy-Report-Only: ${policy}`,
   ]);
 });
 
