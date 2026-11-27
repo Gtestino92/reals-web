@@ -7,11 +7,65 @@ const { chromium, webkit } = require('playwright');
 const url = 'http://127.0.0.1:5177/tools/shared-contacts-fixture.html';
 const directory = 'artifacts/shared-contacts';
 await mkdir(directory, { recursive: true });
+async function checkRegionHistory(browser) {
+  const failures = [];
+  for (const scenario of ['forward', 'revision', 'session']) {
+    const page = await browser.newPage();
+    try {
+      await page.route('**/*', route => new URL(route.request().url()).origin === new URL(url).origin ? route.continue() : route.abort());
+      const button = name => page.getByRole('button', { name, exact: true });
+      await page.goto(url);
+      for (const name of ['Cuenta', 'Contactos', 'Acepto participar', 'Elegir del dispositivo']) await button(name).click();
+      const before = await page.evaluate(() => ({ state: history.state, length: history.length }));
+      await page.getByRole('button', { name: /País de los números locales/ }).click();
+      if (scenario === 'session') {
+        await page.evaluate(() => window.contactsFixture.endSession());
+        await page.getByText('Preparando sesión sintética…').waitFor();
+        await page.evaluate(() => window.contactsFixture.restartSession());
+        await button('Cuenta').waitFor();
+        assert.equal(await page.evaluate(() => history.length), before.length, scenario);
+        await page.goBack();
+        await button('Cuenta').waitFor();
+        assert.equal(await page.getByRole('checkbox').count(), 0);
+      } else {
+        if (scenario === 'forward') {
+          await page.keyboard.press('Escape');
+          await page.getByRole('dialog').waitFor({ state: 'detached' });
+          await page.goForward();
+          assert.equal(await page.getByRole('checkbox').count(), 4);
+          await page.getByRole('button', { name: /País de los números locales/ }).click();
+          await page.goBack();
+          await page.getByRole('dialog').waitFor({ state: 'detached' });
+          assert.equal(await page.getByRole('button', { name: /País de los números locales/ }).evaluate(b => b === document.activeElement), true);
+        } else {
+          await page.evaluate(() => {
+            window.contactsFixture.invalidate();
+            window.dispatchEvent(new Event('pageshow'));
+          });
+          await page.getByText(/El estado de tus contactos cambió/).waitFor();
+        }
+        assert.deepEqual(await page.evaluate(() => ({ state: history.state, length: history.length })), before, scenario);
+        await button('Volver a Cuenta').click();
+        await button('Contactos').waitFor();
+        await page.goForward();
+        await button('Elegir del dispositivo').waitFor();
+        assert.equal(await page.getByRole('checkbox').count(), 0);
+      }
+      assert.equal(await page.getByRole('dialog').count(), 0);
+    } catch (error) { failures.push(error); } finally { await page.close(); }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Country selector history regressions');
+}
 for (const [name, engine, options] of [
   ['chromium', chromium, { channel: 'chrome' }], ['webkit', webkit, {}],
 ]) {
   const browser = await engine.launch(options);
   try {
+    if (process.argv.includes('--region-history')) {
+      await checkRegionHistory(browser);
+      console.log(name, 'region history passed');
+      continue;
+    }
     for (const mobile of [true, false]) {
       const variant = mobile ? 'mobile-light' : 'desktop-dark';
       const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }, colorScheme: mobile ? 'light' : 'dark' });

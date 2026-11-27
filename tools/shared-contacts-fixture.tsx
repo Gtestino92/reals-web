@@ -36,6 +36,8 @@ let status = { mutationRevision: crypto.randomUUID(), requiredConsentVersion: 1,
 let range: string | null = 'ONE_TO_FIVE';
 Object.assign(window, { contactsFixture: {
   invalidate() { status.mutationRevision = crypto.randomUUID(); },
+  endSession() { notifyIdentity(null); },
+  restartSession() { notifyIdentity(identity); },
   setRange(next: string | null) { range = next; window.dispatchEvent(new Event('online')); },
 } });
 const api = new ApiClient(async (url, init) => {
@@ -74,7 +76,8 @@ const api = new ApiClient(async (url, init) => {
   return json({ status, submittedCount: body.numbers.length, distinctCount: new Set(body.numbers).size });
 });
 const identity = { uid: 'synthetic', emailVerified: true, getIdToken: async () => 'synthetic', reload: async () => {} };
-const controller = new SessionController({ observe: next => { next(identity); return () => {}; }, signIn: async () => identity, signUp: async () => identity, google: async () => identity, verify: async () => {}, signOut: async () => {} }, api, false);
+let notifyIdentity: (user: typeof identity | null) => void;
+const controller = new SessionController({ observe: next => { notifyIdentity = next; next(identity); return () => {}; }, signIn: async () => identity, signUp: async () => identity, google: async () => identity, verify: async () => {}, signOut: async () => {} }, api, false);
 const chat = options.has('chat');
 function Fixture() {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);

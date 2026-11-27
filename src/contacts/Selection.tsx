@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getCountries, parsePhoneNumberFromString } from 'libphonenumber-js/max';
 import type { CountryCode } from 'libphonenumber-js';
 import type { ContactRow } from './providers';
@@ -26,17 +26,18 @@ function review(rows: ContactRow[], country: CountryCode | undefined) {
   return { groups: [...groups.values()], invalid };
 }
 
-export function Selection({ rows, countryCode, updating, disabled, pending = false, confirm, cancel }: {
-  pending?: boolean; disabled: boolean; rows: ContactRow[]; countryCode: string | null | undefined; updating: boolean;
+export type RegisterContactRegion = (close: () => void) => () => void;
+
+export function Selection({ rows, countryCode, updating, disabled, pending = false, registerContactRegion, confirm, cancel }: {
+  registerContactRegion?: RegisterContactRegion | undefined; pending?: boolean; disabled: boolean; rows: ContactRow[]; countryCode: string | null | undefined; updating: boolean;
   confirm: (numbers: string[]) => void; cancel: () => void;
 }) {
   const [region, setRegion] = useState(() => countries.find(code => code === countryCode) ?? '');
   const [adjusting, setAdjusting] = useState(false);
   const [query, setQuery] = useState('');
-  const closing = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!adjusting) return;
     const node = dialog.current;
     node?.showModal();
@@ -44,26 +45,15 @@ export function Selection({ rows, countryCode, updating, disabled, pending = fal
     const resize = () => node?.style.setProperty('--country-viewport', viewport?.height + 'px');
     if (viewport) resize();
     viewport?.addEventListener('resize', resize);
-    const back = (event: PopStateEvent) => {
-      // Home owns navigation to other screens. A same-screen Back only closes this dialog.
-      if (event.state?.trail?.at(-1) === 'contacts') event.stopImmediatePropagation();
-      node?.close();
-      setAdjusting(false);
-    };
-    window.addEventListener('popstate', back, true);
+    const release = registerContactRegion?.(() => setAdjusting(false));
     return () => {
+      release?.();
       viewport?.removeEventListener('resize', resize);
-      window.removeEventListener('popstate', back, true);
       node?.close();
       trigger.current?.focus({ preventScroll: true });
     };
-  }, [adjusting]);
-  function closeSelector() {
-    if (closing.current) return;
-    closing.current = true;
-    if (history.state?.contactRegion) history.back();
-    else setAdjusting(false);
-  }
+  }, [adjusting, registerContactRegion]);
+  function closeSelector() { setAdjusting(false); }
   const [excluded, setExcluded] = useState({ rows: new Set<number>(), numbers: new Set<string>() });
   const country = countries.find(code => code === region);
   const { groups, invalid } = useMemo(() => review(rows, country), [rows, country]);
@@ -83,8 +73,6 @@ export function Selection({ rows, countryCode, updating, disabled, pending = fal
     <p>Cada teléfono cuenta una vez, aunque esté guardado con varios nombres.</p>
     {rows.some(row => !row.number.startsWith('+')) && <div>
       <button ref={trigger} className="contact-region" aria-haspopup="dialog" onClick={() => {
-        closing.current = false;
-        history.pushState({ ...history.state, contactRegion: true }, '');
         setQuery('');
         setAdjusting(true);
       }}><span><small>País de los números locales</small><strong>{country ? names.of(country) : 'Elegí un país'}</strong></span><span aria-hidden="true">›</span></button>

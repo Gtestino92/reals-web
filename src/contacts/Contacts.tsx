@@ -4,7 +4,7 @@ import type { SessionController } from '../auth/session';
 import { contactStatus, importResult, ownerPath, type ContactStatus } from './contracts';
 import { ProviderError, providers, syntheticContacts, type Providers, type PickContacts, type ContactRow } from './providers';
 import { ContactHeader, ContactSkeleton } from './ContactLoading';
-import { Selection } from './Selection';
+import { Selection, type RegisterContactRegion } from './Selection';
 import './contacts.css';
 
 const changed = 'El estado de tus contactos cambió. Revisalo y volvé a elegir si querés continuar.';
@@ -22,8 +22,8 @@ function writeError(error: unknown) {
   }
 }
 interface Intent { revision: string; rows: ContactRow[] }
-export default function Contacts({ controller, onBack, sources = providers }: {
-  controller: SessionController; onBack: () => void; sources?: Providers;
+export default function Contacts({ controller, onBack, registerContactRegion, sources = providers }: {
+  controller: SessionController; onBack: () => void; sources?: Providers; registerContactRegion?: RegisterContactRegion;
 }) {
   const [status, setStatus] = useState<ContactStatus | null>(null);
   const [intent, setIntent] = useState<Intent | null>(null);
@@ -203,7 +203,7 @@ export default function Contacts({ controller, onBack, sources = providers }: {
         <button disabled={busy} onClick={() => google ? void pick(google) : void loadGoogle()}>{google ? 'Elegir cuenta de Google' : 'Preparar Google Contacts'}</button></>}</>}
       {phase === 'provider' && <button onClick={release}>Cancelar</button>}
     </section>
-    {intent && <Selection pending={phase === 'writing'} disabled={stale || busy} rows={intent.rows} countryCode={controller.snapshot.profile?.countryCode} updating={status.state !== 'NOT_CONFIGURED'} cancel={release} confirm={numbers => void mutate('selection', 'PUT', { numbers }, intent.revision, numbers.length)}/>}
+    {intent && <Selection registerContactRegion={registerContactRegion} pending={phase === 'writing'} disabled={stale || busy} rows={intent.rows} countryCode={controller.snapshot.profile?.countryCode} updating={status.state !== 'NOT_CONFIGURED'} cancel={release} confirm={numbers => void mutate('selection', 'PUT', { numbers }, intent.revision, numbers.length)}/>}
     {status.acceptedConsentVersion !== null && <section className="home-card"><h3>Administrar participación</h3>
       {status.state !== 'NOT_CONFIGURED' && <button aria-busy={mutation === 'DELETEselection'} disabled={busy} onClick={() => { if (window.confirm('¿Borrar la selección actual y conservar tu consentimiento?')) void mutate('selection', 'DELETE'); }}>Borrar contactos compartidos</button>}
       <button aria-busy={mutation === 'DELETEconsent'} disabled={busy} onClick={() => { if (window.confirm('¿Querés deshabilitar los contactos en común? Se borrarán los teléfonos compartidos y retirarás tu consentimiento para priorizar encuentros y mostrar coincidencias. Para volver a usar la función tendrás que aceptar e importar tus contactos nuevamente.')) void mutate('consent', 'DELETE'); }}>Deshabilitar contactos en común</button></section>}</>}

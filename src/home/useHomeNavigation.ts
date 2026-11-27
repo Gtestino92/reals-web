@@ -41,6 +41,11 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     }
     return release;
   }, []);
+  const contactRegion = useRef<(() => void) | null>(null);
+  const registerContactRegion = useCallback((close: () => void) => {
+    contactRegion.current = close;
+    return () => { if (contactRegion.current === close) contactRegion.current = null; };
+  }, []);
   const secondChat = useRef<{ canLeave: () => boolean; leave: () => void } | null>(null);
   const registerSecondChat = useCallback((policy: { canLeave: () => boolean; leave: () => void }) => {
     secondChat.current = policy;
@@ -64,6 +69,17 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const pop = (event: PopStateEvent) => {
       const previous = current.current;
       let incoming = entry(event.state);
+      const closeRegion = contactRegion.current;
+      if (!moving.current && closeRegion && previous.trail.at(-1) === 'contacts' &&
+          incoming?.owner === previous.owner && incoming.trail.at(-1) === 'account' &&
+          incoming.trail.join('/') === previous.trail.slice(0, -1).join('/')) {
+        // Restore the existing Contacts slot before returning focus to the review.
+        // A retired review releases its callback even if traversal is still pending.
+        moving.current = true;
+        afterMove.current = () => { if (contactRegion.current === closeRegion) closeRegion(); };
+        window.history.forward();
+        return;
+      }
       if (searchBack.current && incoming?.owner === previous.owner && event.state.search !== true) {
         // Keep repeated Back inside Search until cancellation or reconciliation settles.
         window.history.pushState({ ...previous, search: true }, '', '/');
@@ -194,6 +210,6 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const value:Entry={owner:initial.owner,trail:target==='home'?['home']:['home','activity']};
     window.history.replaceState(value,'','/');current.current=value;setState(value);
   };
-  return { setSearchBack, registerVisualReview, finishVisualReview, registerSecondChat, openSecondChat, restoreSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
+  return { registerContactRegion, setSearchBack, registerVisualReview, finishVisualReview, registerSecondChat, openSecondChat, restoreSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
 }
 export type HomeNavigation = ReturnType<typeof useHomeNavigation>;
