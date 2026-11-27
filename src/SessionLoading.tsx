@@ -1,14 +1,21 @@
-import { createContext, useCallback, useContext, useLayoutEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import seal from './assets/reals-seal.png';
 import './auth/login.css';
 
 const Startup = createContext<(() => void) | null>(null);
 
-export function StartupBoundary({ children }: { children: ReactNode }) {
-  const [starting, setStarting] = useState(true);
-  const finish = useCallback(() => setStarting(false), []);
+export function StartupBoundary({ attempt = 0, slowRecovery, children }: { attempt?: number; slowRecovery?: ReactNode; children: ReactNode }) {
+  const [completed, setCompleted] = useState(-1);
+  const [slowAttempt, setSlowAttempt] = useState(-1);
+  const starting = attempt > completed;
+  const finish = useCallback(() => setCompleted(previous => Math.max(previous, attempt)), [attempt]);
+  useEffect(() => {
+    if (!starting) return;
+    const timer = setTimeout(() => setSlowAttempt(attempt), 30000);
+    return () => clearTimeout(timer);
+  }, [attempt, starting]);
   return <Startup.Provider value={starting ? finish : null}>
-    {starting && <StartupLoading />}
+    {starting && <StartupLoading>{slowAttempt === attempt && slowRecovery}</StartupLoading>}
     <div hidden={starting}>{children}</div>
   </Startup.Provider>;
 }
@@ -20,7 +27,7 @@ export function useStartupDestination(ready: boolean) {
   return finish !== null;
 }
 
-export function StartupLoading() {
+export function StartupLoading({ children }: { children?: ReactNode }) {
   return <main className="login-page startup-loading"><section className="login-panel">
     <header className="login-header login-brand">
       <img className="login-seal" src={seal} alt="" width="54" height="54" />
@@ -29,6 +36,7 @@ export function StartupLoading() {
     </header>
     <SessionLoading />
     <div className="startup-indicator" aria-hidden="true" />
+    {children}
   </section></main>;
 }
 

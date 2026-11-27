@@ -70,8 +70,7 @@ indicator. Signed-out, blocked-tab, transfer, recovery, legal decision and
 actionable errors still reach their respective screens. After legal entry, Home
 reports readiness only after its projection and passive Second Chat decision.
 A pending automatic First Chat hands off to the chat loader without revealing
-ordinary Home. An existing queue goes straight to Searching. Manual sign-in,
-direct Admin challenges, in-app skeletons and explicit retry feedback retain
+ordinary Home. An existing queue goes straight to Searching. Manual email, registration and Google authentication rearm the same boundary through the operational destination. A stalled startup offers sign-out after 30 seconds while the original operation continues. Direct Admin challenges, in-app skeletons and explicit retry feedback retain
 their own presentation. The [architecture notes](frontend-architecture.md#initial-presentation)
 describe the boundary.
 

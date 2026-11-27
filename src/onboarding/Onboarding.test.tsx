@@ -2230,3 +2230,36 @@ it.each(['version', 'account'])('discards late public document content after %s 
   expect(screen.getByRole('button', { name: 'Confirmar lectura' })).toBeDisabled();
   expect(writes('POST')).toHaveLength(0);
 });
+
+it.each(['DRAFT', 'INACTIVE', 'ACTIVE', null])('keeps one manual-auth loader through legal and destination reads for %s', async status => {
+  profile = status ? { ...initialProfile, status } : null;
+  vi.mocked(auth.observe).mockImplementation(next => { observer = next; next(null); return vi.fn(); });
+  let authenticate!: (identity: Identity) => void;
+  vi.mocked(auth.google).mockImplementation(() => new Promise(resolve => { authenticate = resolve; }));
+  const base = fetcher.getMockImplementation()!;
+  const holds = new Map<string, () => void>();
+  let legalRead = false;
+  fetcher.mockImplementation(async (url, options) => {
+    const path = String(url);
+    if (path === '/api/me/legal-status') legalRead = true;
+    if (path === '/api/me' || path === '/api/me/legal-status' ||
+        (legalRead && path === (status ? '/api/me/home' : '/api/me/profile'))) {
+      await new Promise<void>(resolve => holds.set(path, resolve));
+    }
+    return base(url, options);
+  });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Continuar con Google' }));
+  const loader = screen.getByRole('status');
+  expect(loader).toHaveTextContent('Preparando Reals…');
+  await act(async () => authenticate(user));
+  for (const path of ['/api/me', '/api/me/legal-status', status ? '/api/me/home' : '/api/me/profile']) {
+    await waitFor(() => expect(holds.has(path)).toBe(true));
+    expect(screen.getByRole('status')).toBe(loader);
+    expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
+    await act(async () => holds.get(path)?.());
+  }
+  const heading = status === 'ACTIVE' ? 'Inicio' : status ? 'Completá tu perfil' : 'Crear perfil';
+  expect(await screen.findByRole('heading', { name: heading })).toBeVisible();
+  expect(loader).not.toBeInTheDocument();
+});

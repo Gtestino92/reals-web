@@ -40,19 +40,19 @@ export function OperationalApp({ firebase, api, ownership }: AppProps) {
 }
 function SessionApp({ controller }: { controller: SessionController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  return <StartupBoundary>
+  return <StartupBoundary attempt={controller.startupAttempt} slowRecovery={<><p>La preparación está tardando más de lo habitual.</p><SignOutButton onConfirm={controller.signOut}/></>}>
     <SessionDestination state={state} controller={controller} />
   </StartupBoundary>;
 }
 function SessionDestination({ controller, state }: { controller: SessionController; state: SessionSnapshot }) {
   const restoring = state.phase === 'checking' || (state.phase === 'loading' && state.operation === null);
-  const starting = useStartupDestination(!restoring && state.phase !== 'ready');
+  const starting = useStartupDestination(!['checking', 'loading', 'authenticating', 'ready'].includes(state.phase));
   useLayoutEffect(() => {
     // An explicit login always starts in ordinary Reals, even after a direct /admin URL.
     if (state.phase === 'login' || state.phase === 'authenticating') window.history.replaceState(null, '', '/');
   }, [state.phase]);
   if (state.phase === 'ready') return <LegalSession key={state.account?.id} controller={controller}><ReadySession key={`${state.account?.id}/${state.profile?.id}`} controller={controller} /></LegalSession>;
-  if (starting) return null;
+  if (starting && restoring) return null;
   // Manual authentication keeps its operation through backend bootstrap.
   // Restoration has no operation and must not expose an intermediate login form.
   if (restoring) return <AuthenticationLoading />;

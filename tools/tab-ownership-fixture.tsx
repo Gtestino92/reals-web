@@ -33,5 +33,9 @@ if (params.has('startup-home')) {
 createRoot(root).render(<React.StrictMode><App {...(params.get('ownership') === 'auto' ? {} : { ownership: manager })} api={api} firebase={{ localVerification: false, service: {
   ...(params.has('startup-home') ? { googleContext: async () => ({ provider: 'google.com', authTime: Date.now() }) } : {}),
   observe: next => { observers.add(next); next(params.get('kind') === 'login' ? null : { uid: params.get('uid') ?? 'fixture', emailVerified: true, getIdToken: async () => 'synthetic', reload: async () => {} }); return () => { observers.delete(next); }; },
-  signIn: async () => { throw Error('Fixture'); }, signUp: async () => { throw Error('Fixture'); }, google: async () => { throw Error('Fixture'); }, verify: async () => {}, signOut: async () => { if (!params.has('signout')) throw Error('Unexpected fixture signout'); Object.assign(window, { signouts: ++signoutCount }); observers.forEach(next => next(null)); },
+  signIn: async () => { throw Error('Fixture'); }, signUp: async () => { throw Error('Fixture'); }, google: async () => {
+    if (!params.has('manual')) throw Error('Fixture');
+    await new Promise(resolve => setTimeout(resolve, 180));
+    return { uid: 'fixture', emailVerified: true, getIdToken: async () => 'synthetic', reload: async () => {} };
+  }, verify: async () => {}, signOut: async () => { if (!params.has('signout')) throw Error('Unexpected fixture signout'); Object.assign(window, { signouts: ++signoutCount }); observers.forEach(next => next(null)); },
 } }} /></React.StrictMode>);
