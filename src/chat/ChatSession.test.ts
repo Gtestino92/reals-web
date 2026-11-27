@@ -465,3 +465,45 @@ it.each(['ACCEPTED','REJECTED','TIMED_OUT'])('reconciles a competing %s resoluti
   expect(home).toHaveBeenCalledWith('La conversación se cerró.',true);
   expect(writes()).toHaveLength(1);
 });
+
+it.each([
+  ['UNILATERAL_CANCEL','ACCEPTED','text',true],
+  ['SAFETY_REPORT','ACCEPTED','audio',true],
+  ['no record','CHAT_REJECTED','text',true],
+  ['SAFETY_REPORT','REJECTED','text',false],
+  ['UNILATERAL_CANCEL','TIMED_OUT','text',false],
+  ['UNKNOWN','ACCEPTED','text',false],
+  ['wrong chat','ACCEPTED','text',false],
+  ['wrong partner','CHAT_REJECTED','text',false],
+  ['read failure','CHAT_ACTIVE','text',false],
+] as const)('checks %s / %s during a stalled %s send', async (type,status,media,closed) => {
+  let now = Date.now();
+  vi.spyOn(Date,'now').mockImplementation(() => now);
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  let release!: () => void;
+  request.mockImplementation(async (...args) => {
+    if (args[2] === 'POST') await new Promise<void>(resolve => {release=resolve;});
+    if (args[0].endsWith('/exit-requests')) {
+      if (type === 'read failure') throw new ApiError('network');
+      if (type === 'no record' || type === 'wrong partner') return [];
+      return [{...exitFixture(false),chatId:type==='wrong chat'?'another':'c',type:type==='wrong chat'?'SAFETY_REPORT':type,status,details:'private report'}];
+    }
+    if (args[0] === '/matches/m') return {id:'m',userAId:'me',userBId:type==='wrong partner'?'other':'them',state:type==='no record'||type==='wrong partner'?status:'CHAT_ACTIVE'};
+    return base(...args);
+  });
+  const sent = session.send('Mensaje',null,media==='audio'?new Blob(['audio'],{type:'audio/mp4'}):null);
+  const calls = request.mock.calls.length;
+  await session.poll();
+  expect(request.mock.calls).toHaveLength(calls);
+  now += 6000;
+  await session.poll();
+  const snapshot = session.getSnapshot();
+  expect(home).toHaveBeenCalledTimes(closed?1:0);
+  expect(snapshot.confirmed).toBeNull();
+  expect(JSON.stringify([snapshot,home.mock.calls])).not.toContain('private report');
+  release();
+  await sent;
+  if (closed) expect(session.getSnapshot()).toBe(snapshot);
+  expect(writes()).toHaveLength(1);
+});
