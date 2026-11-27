@@ -291,7 +291,10 @@ export class SessionController {
   };
   private invalidate() { this.snapshot = { ...this.snapshot, adminEligible: false }; this.emailVerificationNeedsRefresh = false; this.resetEligibility(); this.adminView = false; this.adminViewEpoch++; this.admin.clear(); this.controller.abort(); this.controller = new AbortController(); return ++this.generation; }
   private current(generation: number) { return this.available() && this.listeners.size > 0 && generation === this.generation; }
+  private startupGeneration = 0;
+  get startupAttempt() { return this.startupGeneration; }
   private replace(user: Identity | null) {
+    if (user) this.startupGeneration++;
     this.invalidate(); this.locked = false; this.user = user;
     this.install({ ...initial, appeal: null, appealUncertain: false, suspensionExpiry: null, suspensionBusy: false, phase: user ? 'loading' : 'login', operation: null, account: null, profile: null, error: null, verificationMessage: null });
     this.ownership?.assert();
@@ -407,6 +410,7 @@ export class SessionController {
     }
     this.locked = true;
     const generation = this.invalidate();
+    this.startupGeneration++;
     this.install({ phase: 'authenticating', operation, error: null, resetMessage: null });
     // Called synchronously: popup opens in the original user interaction.
     let request: Promise<Identity>;

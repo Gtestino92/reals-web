@@ -12,7 +12,7 @@ it.each(['CHAT_ACTIVE', 'VISUAL_PHASE'])('uses private decision feedback with au
   await session.refresh();
   chat.myDecision = 'APPROVED'; matchState = state;
   await session.refresh();
-  expect(home).toHaveBeenCalledWith(state === 'CHAT_ACTIVE' ? 'Tu decisión quedó registrada.' : 'El chat terminó.', state !== 'CHAT_ACTIVE');
+  expect(home).toHaveBeenCalledWith(state === 'CHAT_ACTIVE' ? '' : 'El chat terminó.', state !== 'CHAT_ACTIVE');
   expect(JSON.stringify(home.mock.calls)).not.toMatch(/Ambas|Actividad|mutu/);
 });
 it('keeps quick approval pending for presentation only and excludes duplicates', async () => {
@@ -30,7 +30,7 @@ it('keeps quick approval pending for presentation only and excludes duplicates',
     await vi.advanceTimersByTimeAsync(100);
     expect(session.getSnapshot().decisionPending).toBe('approve'); expect(home).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(200); await pending;
-    expect(home).toHaveBeenCalledWith('Tu decisión quedó registrada.', false); expect(writes()).toHaveLength(1);
+    expect(home).toHaveBeenCalledWith('', false); expect(writes()).toHaveLength(1);
   } finally { vi.useRealTimers(); }
 });
 it.each(['dispose', 'hidden'])('releases presentation ownership on %s', async outcome => {
@@ -190,3 +190,35 @@ it('does not request timeout before the advisory delay',async()=>{
 it.each([{}, {reason:'HARASSMENT',details:'<b>x</b>',blockUser:false}, {reason:'OTHER',details:'',blockUser:true}])('rejects malformed safety details without a write',async body=>{await session.refresh();await session.action('safety',body);expect(writes()).toHaveLength(0);});
 it('does not classify a malformed match state as conclusive termination',async()=>{request.mockResolvedValue({id:'m',userAId:'me',userBId:'them'});await session.refresh();expect(home).not.toHaveBeenCalled();expect(session.getSnapshot().blocked).toBe(true);});
 it('does not hide unsupported future chat states as known-closed',async()=>{chat.status='FUTURE';await session.refresh();expect(home).not.toHaveBeenCalled();expect(session.getSnapshot().blocked).toBe(true);});
+
+it('expires only the stalled initial read and ignores its eventual terminal result after retry', async () => {
+  vi.useFakeTimers();
+  try {
+    let release!: (response: unknown) => void;
+    request.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const stalled = session.refresh();
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(session.getSnapshot()).toMatchObject({ busy: false, blocked: true, chat: null });
+    expect(session.getSnapshot().error).toContain('Reintentá');
+    await session.refresh();
+    release({ id: 'm', userAId: 'me', userBId: 'them', state: 'EXPIRED' });
+    await stalled;
+    expect(home).not.toHaveBeenCalled();
+    expect(session.getSnapshot()).toMatchObject({ blocked: false, error: '', chat: { id: 'c' } });
+  } finally { vi.useRealTimers(); }
+});
+
+it.each(['approve', 'reject'] as const)('navigates without a decision notice after authoritative %s', async choice => {
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  request.mockImplementation((path, ...args) => {
+    if (path.endsWith('/chat-decision')) {
+      matchState = choice === 'approve' ? 'VISUAL_PHASE' : 'CHAT_REJECTED';
+      return Promise.resolve({});
+    }
+    return base(path, ...args);
+  });
+  await session.action(choice);
+  expect(home).toHaveBeenCalledWith('', true);
+  expect(writes()).toHaveLength(1);
+});

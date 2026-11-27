@@ -72,7 +72,7 @@ export function Onboarding({ Home, active = true, controller, management, naviga
     if (model) previousProfile.current = id ?? null;
   }, [model, management]);
   const [busy, setBusy] = useState(!management), [blocked,setBlocked] = useState(true);
-  const starting = useStartupDestination(!management && active && (!!model || !busy));
+  const starting = useStartupDestination(!management && active && !busy && !model?.interactions);
   const [loadingCountries, setLoadingCountries] = useState(true);
   const [blockingRead, setBlockingRead] = useState(!!management);
   const [navigationLocked, setNavigationLocked] = useState(!management);

@@ -604,12 +604,27 @@ it('polling keeps location failure guidance but authoritative queue membership s
   expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(screen.queryByRole('button', { name: 'Reintentar ubicación' })).toBeNull(); expect(writes()).toHaveLength(0);
 });
 it('leaves waiting for authoritative new activity using the same poller', async () => {
+  installFirstChatBackend();
+  const original = fetcher.getMockImplementation()!;
+  let historyReady!: () => void;
+  fetcher.mockImplementation(async (path, options) => {
+    if (String(path).includes('/messages?')) await new Promise<void>(resolve => { historyReady = resolve; });
+    return original(path, options);
+  });
   home.matchmaking.inQueue = true; vi.useFakeTimers();
   const view = mount(); await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); fetcher.mockClear();
   home.matchmaking.inQueue = false; home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }]; status.version++;
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.getByRole('heading', { name: 'Encontramos a alguien' })).toBeVisible();
+  expect(document.querySelector('.search-screen')).toHaveAttribute('aria-busy', 'true');
+  expect(screen.queryByRole('button', { name: 'Cancelar búsqueda' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Primer chat' })).toBeNull();
+  act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  expect(screen.getByText('Preparando la conversación…')).toBeVisible();
+  await act(async () => historyReady());
   expect(screen.getByRole('region', { name: 'Primer chat' })).toBeVisible();
+  expect(fetcher.mock.calls.filter(([url]) => String(url).includes('/messages?'))).toHaveLength(1);
   expect(document.querySelector('.search-screen')).toBeNull(); expect(screen.queryByRole('heading', { name: 'Inicio' })).toBeNull();
   expect(fetcher.mock.calls.filter(([url]) => url === '/api/me/home')).toHaveLength(1);
   fetcher.mockClear();
@@ -693,11 +708,13 @@ it('reports a match from hidden polling without navigation, then acknowledges on
   expect(screen.getByRole('button', { name: 'Ver Actividad' })).toHaveAccessibleDescription('1 novedad');
   expect(releaseHome).toBeDefined();
   await act(async () => releaseHome?.());
-  expect(screen.getByRole('region', { name: 'Primer chat' })).toBeVisible();
+  expect(screen.queryByRole('region', { name: 'Primer chat' })).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Encontramos a alguien' })).toBeVisible();
   expect(document.title).toBe('(1) Reals');
   expect(screen.getByRole('alert')).toHaveTextContent(/actualizar el chat/);
+  expect(document.querySelector('.search-screen')).toHaveAttribute('aria-busy', 'false');
   failChat = false;
-  await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Reintentar conexión' })));
   expect(screen.getByRole('heading', { name: 'María' })).toBeVisible();
   expect(document.title).toBe('Reals');
 });
@@ -836,8 +853,13 @@ it.each(['network','http'])('transient %s failure preserves a valid First Chat a
   installFirstChatBackend();const original=fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url,options)=>url==='/api/matches/m/chat'?(failure==='network'?Promise.reject(new TypeError()):Promise.resolve(json({code:'SERVICE_UNAVAILABLE'},503))):original(url,options));
   home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByRole('alert');
-  expect(screen.getByRole('region',{name:'Primer chat'})).toBeVisible();
-  act(()=>window.dispatchEvent(new PopStateEvent('popstate')));expect(screen.getByRole('region',{name:'Primer chat'})).toBeVisible();
+  const retry = screen.getByRole('button', { name: 'Reintentar conexión' });
+  expect(screen.queryByRole('region', { name: 'Primer chat' })).toBeNull();
+  act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  expect(retry).toBeVisible();
+  fetcher.mockImplementation(original);
+  fireEvent.click(retry);
+  expect(await screen.findByRole('heading', { name: 'María' })).toBeVisible();
 });
 it('terminal suppression is not inherited by a new authenticated identity',async()=>{
   installFirstChatBackend();const original=fetcher.getMockImplementation()!;let closed=true;
@@ -1066,4 +1088,55 @@ it.each(['healthy','failed Home','denied scheduling'] as const)('guards scheduli
   await act(async()=>finishScheduling(json(snapshot)));
   expect(screen.getByRole('heading',{name:'Proponé tus horarios'})).toBeVisible();
   expect(affinityReads()).toEqual([]);
+});
+
+it.each(['signout', 'hidden', 'decision', 'expired'])('owns the delayed queue-to-chat snapshot through %s', async change => {
+  installFirstChatBackend();
+  const original = fetcher.getMockImplementation()!;
+  let finishExits!: () => void;
+  let firstRead = true;
+  fetcher.mockImplementation(async (url, options) => {
+    if (url === '/api/chats/c/exit-requests' && firstRead) {
+      firstRead = false;
+      await new Promise<void>(resolve => { finishExits = resolve; });
+    }
+    if (url === '/api/matches/m/chat' && change === 'decision') {
+      const response = await original(url, options);
+      return json({ ...await response.json(), partnerDecision: 'APPROVED' });
+    }
+    if (url === '/api/matches/m' && change === 'expired') return json({ code: 'CHAT_EXPIRED' },409);
+    return original(url, options);
+  });
+  home.matchmaking.inQueue = true;
+  mount(); await confirmed();
+  home.matchmaking.inQueue = false;
+  home.pendingActions = [{type:'FIRST_CHAT', matchId:'m', chatId:'c'}]; status.version++;
+  fireEvent(document, new Event('visibilitychange'));
+  if (change === 'expired') {
+    expect(await screen.findByText('El chat venció.')).toBeVisible();
+    expect(fetcher.mock.calls.filter(([url]) => url === '/api/matches/m')).toHaveLength(1);
+    return;
+  }
+  await waitFor(() => expect(finishExits).toBeDefined());
+  expect(screen.getByRole('heading', {name:'Encontramos a alguien'})).toBeVisible();
+  if (change === 'signout') act(() => observer(null));
+  const visibility = vi.mocked(Object.getOwnPropertyDescriptor(document,'visibilityState')!.get!);
+  if (change === 'hidden') {
+    visibility.mockReturnValue('hidden'); fireEvent(document,new Event('visibilitychange'));
+  }
+  await act(async () => finishExits());
+  if (change === 'signout') {
+    expect(screen.getByRole('button',{name:'Ingresar'})).toBeEnabled();
+    expect(screen.queryByRole('region',{name:'Primer chat'})).toBeNull();
+    return;
+  }
+  if (change === 'hidden') {
+    expect(screen.queryByRole('region',{name:'Primer chat'})).toBeNull();
+    visibility.mockReturnValue('visible'); fireEvent(document,new Event('visibilitychange'));
+  }
+  expect(await screen.findByRole('heading',{name:'María'})).toBeVisible();
+  if (change === 'decision') {
+    expect(screen.getByRole('button',{name:'No aprobar'})).toBeEnabled();
+    expect(screen.queryByRole('textbox',{name:'Mensaje'})).toBeNull();
+  }
 });

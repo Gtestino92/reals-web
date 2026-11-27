@@ -90,3 +90,32 @@ it('auth notification cancels pending entry without freezing subsequent reads or
  release();await pending;expect(writes(h)).toHaveLength(0);expect(h.session.getSnapshot().busy).toBe(false);
  h.request.mockImplementation(base);await h.session.resume();await h.session.refresh();await h.session.openFromUserAction(h.intent);expect(writes(h)).toHaveLength(0);expect(h.session.getSnapshot().blocked).toBe(false);
 });
+
+it.each(['confirmed', 'malformed', 'rejected', 'ambiguous', 'disposed'])('owns one pending reaction until %s', async outcome => {
+  const h = harness();
+  const target = messageFixture('1');
+  h.messages.push(target);
+  await h.session.refresh();
+  const base = h.request.getMockImplementation()!;
+  let release!: () => void;
+  h.request.mockImplementation(async (...args) => {
+    if (args[2] !== 'PUT') {
+      if (outcome === 'confirmed') throw new TypeError('offline');
+      return base(...args);
+    }
+    await new Promise<void>(resolve => { release = resolve; });
+    if (outcome === 'ambiguous') throw new TypeError('offline');
+    if (outcome === 'rejected') throw new ApiError('backend', 409);
+    return { ...target, reactionType: outcome === 'malformed' ? null : 'HEART' };
+  });
+  expect(h.session.react('missing')).toBeUndefined();
+  const flight = h.session.react('1');
+  expect(h.session.getSnapshot().pendingReaction).toBe('1');
+  expect(h.session.getSnapshot().messages[0]?.reactionType).toBeNull();
+  expect(h.session.react('1')).toBeUndefined();
+  if (outcome === 'disposed') h.session.dispose();
+  release(); await flight;
+  expect(writes(h)).toHaveLength(1);
+  expect(h.session.getSnapshot().pendingReaction).toBeNull();
+  expect(h.session.getSnapshot().messages[0]?.reactionType ?? null).toBe(outcome === 'confirmed' ? 'HEART' : null);
+});

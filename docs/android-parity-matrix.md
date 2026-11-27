@@ -2275,3 +2275,17 @@ The native device picker controls its own labels and selection. Reals review sta
 The native picker keeps the existing management controls and notice in place until settlement. Volver a Cuenta retires the local intent. Chromium and WebKit measure control positions across delayed selection, empty results and ordinary cancellation with `node tools/shared-contacts-smoke.mjs --picker-transitions`. Successful selection replaces the management card with review. The Android system window transition still needs a physical-device check.
 
 Account privacy actions use an in-app confirmation dialog. Cancelling keeps the current selection. Confirmed selection deletion stays in Contacts, while successful consent withdrawal returns to Account.
+
+## Chat confirmation, manual login and automatic entry (2026-11-27)
+
+Compared with Android `83e4ef7` and backend commons at `74fc488`. Status describes the listed behavior in synthetic Web runs.
+
+| Flow and Android reference | Web behavior and parity |
+| --- | --- |
+| Outgoing messages and sender groups, `ChatChrome.kt` | COMPLETE for measured text states. Both chats use the confirmed row geometry for pending text, quotes and delivery metadata. The shared pending audio placeholder reserves the player footprint. Failure and uncertainty keep their distinct recovery actions. |
+| `ChatMessageActionHandler.kt`, `HeartReactionChip`, `PassiveReceivedHeartBadge` | COMPLETE for tested geometry and optimistic feedback. Both SVG paths come from the drawables. Incoming chips reserve 48 px, with a 20 px icon inset toward the bubble. The passive received badge uses the filled drawable. One pending target fits Web's existing serialized writes. |
+| First Chat decision and shared-contact strip | COMPLETE for the tested transition, privacy range, keyboard dismissal and persistence. An empty terminal message still navigates and suppresses reopening. The close SVG occupies 18 px in the existing control. |
+| `LoginScreen.kt`, `RealsApp.kt` | PLATFORM-LIMITED. Firebase popup and tab ownership are browser-specific. The requested Web startup presentation covers the complete manual attempt and releases for decisions or recovery. Slow-start sign-out becomes available after Firebase authentication settles. Searching reports its own busy state through conversation preparation and clears it for recovery. |
+| `MatchmakingHomeScreen.kt`, `RealsRootViewModel.openFirstChat`, `FirstChatCoordinator.load` | Android installs a loading First Chat with a history owner. Web deliberately keeps Searching visible while its own validated chat snapshot loads. Cancellation remains tied to queue state. Browser Back keeps its existing navigation guard. |
+
+Physical keyboards on mobile, device screen readers and visual comparison on a physical Android device remain unverified. See [measurements and fixture instructions](testing.md#chat-transition-browser-evidence).

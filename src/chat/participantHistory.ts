@@ -50,7 +50,7 @@ export class ParticipantHistory {
   }
   mergeReaction(path: string, message: Message) {
     const target = this.rows.find(row => row.id === message.id);
-    if (!target || !path.endsWith(`/messages/${encodeURIComponent(message.id)}/reaction`)
+    if (message.reactionType !== 'HEART' || !target || !path.endsWith(`/messages/${encodeURIComponent(message.id)}/reaction`)
       || message.senderId !== target.senderId || message.messageType !== target.messageType
       || (this.counterpartAudio(target) && !target.audio)) throw new ApiError('invalid');
     return this.merge([message]);

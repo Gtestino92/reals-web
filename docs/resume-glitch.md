@@ -86,3 +86,7 @@ An interrupted return remains invalidated. The next foreground verification
 reconciles before Search can act, while the mounted Home document and usable
 snapshot survive. Ordinary visibility revalidation keeps its existing status
 polling policy and never reopens the startup presentation.
+
+### First Chat preparation and resume
+
+A foreground-verified Home projection selects the chat. During automatic entry, Home retains the existing search seal and First Chat mounts its session without rendering the timeline. A hidden or superseded read cannot reveal it. The session records foreground verification with the complete snapshot and invalidates it on concealment. After entry, ordinary focus and revalidation keep the same chat and composer mounted.

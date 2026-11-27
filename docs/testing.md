@@ -172,3 +172,35 @@ Run `node tools/shared-contacts-smoke.mjs --additions` for the focused import jo
 For independent Backend coverage, run `./mvnw -Dtest=SharedContactsPostgresIT test` in a disposable checkout of Backend a1538817afe61be6805c719bb6917f3a8334ef8a with JDK 21 and Docker. It creates disposable PostgreSQL, exercises two owners with five fictional numbers in common, reads the new chat bucket via MockMvc, then verifies invalidation, quota and concurrency. On Docker Desktop 29 the local test needed JAVA_TOOL_OPTIONS=-Dapi.version=1.44 for Testcontainers. For a browser connected to local Backend with fictional entries see [local configuration](deployment.md#local-synthetic-backend).
 
 Physical verification remains open. After provider/legal approval, test Chrome Android native selection, multi-number contacts, cancel/deny and refocus, Safari iPhone with the unsupported-picker state and Google popup, and installed-PWA popup return, pagehide/BFCache, tab lease loss and sign-out during pagination. Exercise the soft keyboard, screen reader focus and chat controls on a small screen. WebKit on Windows and viewport emulation exercise engine/layout behavior only.
+
+## Chat transition browser evidence
+
+Validated on Windows against base `3ac0c250` using synthetic Firebase identities, HTTP responses and an MP4 recorder fixture. Browser frames and rectangle measurements come from the real React components. The following are observations from the delayed fixtures.
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| First and Second Chat, 360 px Chromium, “Prueba de envío 1” | 145.39 × 84 px pending, 149.39 × 58 px confirmed | 149.39 × 58 px in both states, with the same focused composer |
+| First Chat, 360 px Chromium, short / wrapped / multiline / quoted text | Short text 94.41 × 84 → 82.48 × 58 px | Respectively 91 × 58, 257.55 × 322, 91 × 82 and 137.19 × 110 px in both states |
+| Manual Google login to the existing queue | Three visible loading messages and 11–13 visible sign-out frames | One visible status, “Preparando Reals…”, zero sign-out frames |
+| Automatic queue exit to ready conversation | 32–33 frames showing incomplete chat | Zero intermediate Home or incomplete chat frames. The same search seal remains mounted until reveal. |
+| Initialization reads | One match, one chat, one history, one exit-request read | Same four reads. Discovery to ready frame took 564–711 ms in one eight-case run. The match-found presentation lasted 490–584 ms. |
+
+Chromium and WebKit covered 320 px dark, 360 px light, and 1280 px in both themes. The fixture measures short, wrapped, multiline and quoted First Chat text, Second Chat text and audio, the 48 px heart target, an icon inset under 12 px, pending and confirmed heart semantics, and reduced motion. It checks the 18 px dismiss SVG, popup bounds, header stability and keyboard focus restoration. All timings include fixture delays and scheduling. Physical Android/iOS keyboards, assistive technology, real Firebase and hosted-backend latency require separate testing.
+
+Representative Chromium captures at 360 px:
+
+| State | Base | Task branch |
+| --- | --- | --- |
+| Pending send | [Before](evidence/chat-visual-responsiveness/before-pending.png) | [After](evidence/chat-visual-responsiveness/after-pending.png) |
+| Confirmed send | [Before](evidence/chat-visual-responsiveness/before-confirmed.png) | [After](evidence/chat-visual-responsiveness/after-confirmed.png) |
+| Shared-contact popup | [Before](evidence/chat-visual-responsiveness/before-contacts.png) | [After](evidence/chat-visual-responsiveness/after-contacts.png) |
+
+Start Vite with `npm run dev -- --host 127.0.0.1 --port 5187 --strictPort`. Run `node tools/chat-transition-browser.mjs` with installed Chrome, Playwright WebKit and Playwright available to Node. An external Playwright installation can be supplied via its module file URL in `PLAYWRIGHT_MODULE`. The fixture writes screenshots to `artifacts/chat-transition/`. For a baseline run, use the task's fixtures with the base application code and pass `--baseline`. For the repeated composer-focus and geometry check, run `node tools/mobile-chat-browser.mjs --geometry`. The initial 360 px reproduction used `--geometry --baseline --focus-baseline`.
+
+Focused regression command (681 passed in 16 files):
+
+```sh
+npm run test:focused -- src/App.test.tsx src/App.ownership.test.tsx src/onboarding/Onboarding.test.tsx src/home/Home.test.tsx src/home/Home.secondRestoration.test.tsx src/chat/ChatSession.test.ts src/chat/FirstChat.test.tsx src/chat/SecondChat.test.tsx src/chat/SecondChat.review.test.tsx src/chat/SecondChat.contract.test.tsx src/chat/SecondChatSession.test.ts src/chat/SecondChatSession.media.test.ts src/chat/SecondChatSession.terminalAudio.test.ts src/chat/postBlockMedia.security.test.ts src/chat/textSend.test.tsx src/chat/sharedContacts.test.tsx --maxWorkers=2
+```
+
+`npm run typecheck`, `npm run check:architecture` (115 production modules, zero runtime cycles), the production `npm run build` and `git diff --check` passed. Build used the synthetic public settings in the CI “Build dev and prod” step with `VITE_REALS_ENVIRONMENT=prod`, `VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION=false` and `VITE_FIREBASE_APP_CHECK_DEBUG=false`. Vite reported the existing 500 kB chunk advisory.

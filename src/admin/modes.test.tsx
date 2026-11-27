@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { OperationalApp } from '../App';
 import { ApiClient } from '../auth/api';
 import type { AuthService, Identity } from '../auth/firebase';
+import { chatFixture } from '../chat/fixtures';
 import { emptyHome, homeStatus } from '../home/fixtures';
 import { homeSecondFixture } from '../home/secondHome.fixtures';
 import { defaults } from '../onboarding/contracts';
@@ -265,7 +266,15 @@ it.each(['queue', 'first chat', 'second chat', 'changed version', 'failed read']
       Object.assign(chat.secondChat!, { chatId: 'c', chatStatus: 'ACTIVE', myAttendanceStatus: 'ON_TIME' });
       projection.nextSteps = [chat];
     }
-    h.fetcher.mockImplementation((path, options) => path === '/api/me/home' ? Promise.resolve(json(projection)) : h.base(path, options));
+    h.fetcher.mockImplementation(async (path, options) => {
+      if (path === '/api/me/home') return json(projection);
+      if (outcome === 'first chat') {
+        if (path === '/api/matches/m') return json({ id: 'm', userAId: 'u', userBId: 'them', state: 'CHAT_ACTIVE' });
+        if (path === '/api/matches/m/chat') return json(chatFixture());
+        if (path === '/api/chats/c/exit-requests' || String(path).startsWith('/api/chats/c/messages?')) return json([]);
+      }
+      return h.base(path, options);
+    });
     await act(async () => h.home(outcome === 'failed read' ? json({}, 503) : json({ ...homeStatus(), version: 2 })));
     if (outcome === 'queue') await screen.findByRole('heading', { name: 'Buscando chat' });
     else if (outcome === 'first chat') await screen.findByRole('region', { name: 'Primer chat' });

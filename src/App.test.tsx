@@ -30,17 +30,17 @@ function credentials() {
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: ' test@example.com ' } });
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password' } });
 }
-it.each(['password', 'google'])('keeps branded progress through %s authentication and a slow backend bootstrap', async provider => {
+it.each(['password', 'google', 'registration'])('keeps branded progress through %s authentication and a slow backend bootstrap', async provider => {
   let finish!: (response: Response) => void;
   fetcher.mockImplementation(path => path === '/api/me' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(json({ code: 'PROFILE_NOT_FOUND' }, 404)));
   mount(true); login(); credentials();
-  const panel = document.querySelector('.login-panel');
-  fireEvent.click(screen.getByRole('button', { name: provider === 'google' ? 'Continuar con Google' : 'Ingresar' }));
+  if (provider === 'registration') fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' }));
+  fireEvent.click(screen.getByRole('button', { name: provider === 'google' ? 'Continuar con Google' : provider === 'registration' ? 'Crear cuenta' : 'Ingresar' }));
   await waitFor(() => expect(finish).toBeDefined());
-  expect(document.querySelector('.login-panel')).toBe(panel); expect(screen.queryByLabelText('Email')).toBeNull();
-  expect(screen.queryByRole('form')).toBeNull(); expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  expect(screen.queryByLabelText('Email')).toBeNull();
+  expect(screen.queryByRole('form')).toBeNull(); expect(screen.getByRole('status')).toHaveTextContent('Preparando Reals…');
   expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
-  expect(screen.queryByText('Preparando Reals…')).toBeNull(); expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
+  expect(screen.queryByText('Sin perfil: falta completar el registro.')).toBeNull();
   await act(async () => finish(json({ id: 'u', status: 'ACTIVE' })));
   await screen.findByText('Sin perfil: falta completar el registro.');
 });
@@ -432,10 +432,40 @@ it('restores signup mode and drafts when a pending Google popup is cancelled', a
   mount(); login(); credentials();
   fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' }));
   fireEvent.click(screen.getByRole('button', { name: 'Continuar con Google' }));
-  expect(screen.getByRole('status')).toHaveTextContent('Preparando tu sesión de forma segura…');
+  expect(screen.getByRole('status')).toHaveTextContent('Preparando Reals…');
   await act(async () => cancel({ code: 'auth/popup-closed-by-user' }));
   expect(screen.getByRole('radio', { name: 'Crear cuenta' })).toBeChecked();
   expect(screen.getByLabelText('Password')).toHaveValue('password');
   expect(screen.getByRole('alert')).toBeVisible();
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it.each(['signIn', 'signUp', 'google'] as const)('offers slow-start sign-out only after %s settles', async operation => {
+  mount(true); login(); credentials();
+  if (operation === 'signUp') fireEvent.click(screen.getByRole('radio', { name: 'Crear cuenta' }));
+  let authenticate!: (identity: Identity) => void;
+  vi.mocked(auth[operation]).mockImplementationOnce(() => new Promise(done => { authenticate = done; }));
+  let completeRead!: (response: Response) => void;
+  fetcher.mockImplementationOnce(() => new Promise(done => { completeRead = done; }));
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(screen.getByRole('button', { name: {signIn:'Ingresar', signUp:'Crear cuenta', google:'Continuar con Google'}[operation] }));
+    await act(async () => vi.advanceTimersByTimeAsync(31000));
+    expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
+    // Firebase can notify before its credential promise settles.
+    await act(async () => observer(user));
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
+    await act(async () => authenticate(user));
+    expect(completeRead).toBeDefined();
+    confirmSignOut();
+    await act(async () => {});
+    expect(screen.getByRole('button', { name: 'Ingresar' })).toBeEnabled();
+    credentials(); ready();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Ingresar' })));
+    expect(screen.getByText('Sin perfil: falta completar el registro.')).toBeVisible();
+    await act(async () => completeRead(json({ id: 'obsolete', status: 'ACTIVE' })));
+    expect(screen.getByText('Sin perfil: falta completar el registro.')).toBeVisible();
+    expect(auth.signOut).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); }
 });

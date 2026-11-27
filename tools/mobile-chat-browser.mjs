@@ -5,6 +5,7 @@ import { fixtureServer, iso, scenario } from './second-chat-synthetic.mjs';
 
 const base = process.argv.find(arg => arg.startsWith('--url='))?.slice(6) ?? 'http://127.0.0.1:5187';
 const baseline = process.argv.includes('--baseline');
+const geometryOnly = process.argv.includes('--geometry');
 const focusBaseline = process.argv.includes('--focus-baseline');
 const directory = 'artifacts/mobile-chat';
 const draft = 'Estoy escribiendo un borrador que debería conservarse. '.repeat(17).trim();
@@ -99,6 +100,8 @@ try {
           ?.closest('button')?.getAttribute('aria-label') === 'Enviar mensaje'`), JSON.stringify(send));
         await tap(send);
         await until(`textSends.length === ${i}`);
+        const bubbleSize = () => evaluate("(() => { const {width,height} = [...document.querySelectorAll('.chat-message.outgoing')].at(-1).getBoundingClientRect(); return [width,height]; })()");
+        const pendingSize = geometryOnly && await bubbleSize();
         const pending = await focusState();
         if (i === 4) {
           await evaluate('trackedInput.blur()');
@@ -109,6 +112,11 @@ try {
         await until(`trackedInput.value === '' && [...document.querySelectorAll('.chat-message-row')].some(row => row.textContent.includes(${JSON.stringify(text)}))`);
         const confirmed = await focusState();
         console.log(JSON.stringify({ chat, width, send: i, before, pending, confirmed }));
+        if (geometryOnly) {
+          const confirmedSize = await bubbleSize();
+          console.log(JSON.stringify({ chat, width, pendingSize, confirmedSize }));
+          if (!baseline) assert.deepEqual(confirmedSize, pendingSize);
+        }
         if (focusBaseline) continue;
         const { events: pendingEvents, ...pendingState } = pending;
         const { events: confirmedEvents, ...confirmedState } = confirmed;
@@ -121,7 +129,7 @@ try {
       }
     }
 
-    for (const check of focusBaseline ? ['send'] : baseline ? ['layout'] : ['layout', 'send']) for (const chat of ['first', 'second']) {
+    for (const check of geometryOnly || focusBaseline ? ['send'] : baseline ? ['layout'] : ['layout', 'send']) for (const chat of ['first', 'second']) {
       for (const [width, height, scheme] of [[360, 780, 'light'], [430, 900, 'dark'], [1280, 800, 'light']]) {
         if (focusBaseline && width !== 360) continue;
         second.messages = [...messages];
@@ -193,7 +201,7 @@ try {
         await settle();
         const normal = await inspect();
         if (check === 'send') {
-          if (width >= 768) {
+          if (width >= 768 && !geometryOnly) {
             await setDraft('Envío con teclado');
             await settle();
             await evaluate("document.querySelector('[aria-label=\"Enviar mensaje\"]').focus()");

@@ -79,12 +79,12 @@ that status sample, so a marker-triggered reconciliation adds no status GET.
 boundary owns visibility only. Firebase and the session controller select the
 session state, the legal gate authorizes entry, and Home, Onboarding and the chat
 sessions report when their destination or actionable error can be shown. The
-boundary releases once, before paint, with no new request or deadline. Ordinary startup presents the brand and progress indicator.
+boundary releases before paint for the current authentication attempt. Explicit authentication and replacement identities advance its generation. A completion from an older generation cannot reveal a newer destination. After 30 seconds, authenticated bootstrap and destination loading can offer sign-out. Pending Firebase operations cannot be cancelled by this control. Ordinary startup presents the brand and progress indicator.
 Account and actionable recovery screens own sign-out. Tab ownership uses the same presentation for acquisition before the
 operational tree exists, with explicit contention and failure feedback.
 
 See [startup and Home return](navigation-flicker.md#startup-and-home-return)
-for the backend read ordering, mutation review and measurements.
+for the backend read ordering, mutation review and measurements. Automatic First Chat entry mounts one session while the search presentation is visible. The chat renders its timeline only after metadata, messages and exit requests are installed together. A failed read returns retry controls to the search surface. The queue cancellation handler is retired when the authoritative queue ends.
 
 On eligible ticks, pending costs at most one additional GET when a version
 changes, an advertised or known activity boundary is crossed, recovery is due,
