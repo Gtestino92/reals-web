@@ -176,8 +176,8 @@ for (const [name, engine, options] of [
       await press('Actualizar contactos'); await page.getByText(/El estado de tus contactos cambió/).waitFor();
       await press('Elegir del dispositivo'); await press('Actualizar contactos');
       await page.getByText('Sincronizaste 3 teléfonos.').waitFor();
-      page.once('dialog', dialog => dialog.accept()); await press('Deshabilitar contactos en común');
-      await button('Acepto participar').waitFor(); await press('Volver a Cuenta');
+      await press('Deshabilitar contactos en común'); await press('Deshabilitar');
+      await button('Contactos').waitFor();
       assert.equal(await button('Contactos').evaluate(b => b === document.activeElement), true);
       await page.goForward(); await button('Acepto participar').waitFor();
       await page.goto(url + '?google'); await press('Cuenta'); await press('Contactos'); await press('Acepto participar');

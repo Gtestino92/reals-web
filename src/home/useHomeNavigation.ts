@@ -41,10 +41,10 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     }
     return release;
   }, []);
-  const contactRegion = useRef<(() => void) | null>(null);
-  const registerContactRegion = useCallback((close: () => void) => {
-    contactRegion.current = close;
-    return () => { if (contactRegion.current === close) contactRegion.current = null; };
+  const contactDialog = useRef<(() => void) | null>(null);
+  const registerContactDialog = useCallback((close: () => void) => {
+    contactDialog.current = close;
+    return () => { if (contactDialog.current === close) contactDialog.current = null; };
   }, []);
   const secondChat = useRef<{ canLeave: () => boolean; leave: () => void } | null>(null);
   const registerSecondChat = useCallback((policy: { canLeave: () => boolean; leave: () => void }) => {
@@ -69,14 +69,14 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const pop = (event: PopStateEvent) => {
       const previous = current.current;
       let incoming = entry(event.state);
-      const closeRegion = contactRegion.current;
-      if (!moving.current && closeRegion && previous.trail.at(-1) === 'contacts' &&
+      const closeDialog = contactDialog.current;
+      if (!moving.current && closeDialog && previous.trail.at(-1) === 'contacts' &&
           incoming?.owner === previous.owner && (incoming.trail.length === 1 || incoming.trail.at(-1) === 'account') &&
           incoming.trail.join('/') === previous.trail.slice(0, -1).join('/')) {
         // Restore the existing Contacts slot before returning focus to the review.
         // A retired review releases its callback even if traversal is still pending.
         moving.current = true;
-        afterMove.current = () => { if (contactRegion.current === closeRegion) closeRegion(); };
+        afterMove.current = () => { if (contactDialog.current === closeDialog) closeDialog(); };
         window.history.forward();
         return;
       }
@@ -210,6 +210,6 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const value:Entry={owner:initial.owner,trail:target==='home'?['home']:['home','activity']};
     window.history.replaceState(value,'','/');current.current=value;setState(value);
   };
-  return { registerContactRegion, setSearchBack, registerVisualReview, finishVisualReview, registerSecondChat, openSecondChat, restoreSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
+  return { registerContactDialog, setSearchBack, registerVisualReview, finishVisualReview, registerSecondChat, openSecondChat, restoreSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
 }
 export type HomeNavigation = ReturnType<typeof useHomeNavigation>;

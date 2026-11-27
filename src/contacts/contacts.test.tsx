@@ -84,11 +84,19 @@ it('discards stale consent and requires a fresh decision', async () => {
 it.each([['Borrar contactos compartidos', 'selection'], ['Deshabilitar contactos en común', 'consent']])('allows unconditional %s with imports disabled', async (button, path) => {
   const controller = controllerFixture();
   const request = vi.spyOn(controller, 'request').mockResolvedValueOnce({ ...synced, state: 'RESYNC_REQUIRED', importAvailable: false }).mockResolvedValueOnce(undefined).mockResolvedValue(initial);
-  vi.spyOn(window, 'confirm').mockReturnValue(true);
-  render(<Contacts controller={controller} onBack={vi.fn()} sources={{}}/>);
+  const onBack = vi.fn();
+  render(<Contacts controller={controller} onBack={onBack} sources={{}}/>);
   expect(await screen.findByText('Necesitás volver a sincronizar')).toBeVisible();
   await click(button);
+  expect(screen.getByRole('dialog')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Cancelar' })).toHaveFocus();
+  await click('Cancelar');
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: button })).toHaveFocus();
+  await click(button);
+  await click(path === 'selection' ? 'Borrar contactos' : 'Deshabilitar');
   await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+  expect(onBack).toHaveBeenCalledTimes(path === 'consent' ? 1 : 0);
   expect(request.mock.calls[1]?.[0]).toBe(ownerPath + '/' + path);
   expect(request.mock.calls[1]?.slice(2)).toEqual(['DELETE', undefined, undefined, undefined]);
 });
@@ -194,11 +202,13 @@ it('keeps privacy controls available during slow capability discovery and shows 
   let finish!: (value: unknown) => void;
   const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(synced)
     .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue(initial);
-  vi.spyOn(window, 'confirm').mockReturnValue(true);
-  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: () => new Promise(() => {}) }}/>);
+  const onBack = vi.fn();
+  render(<Contacts controller={controller} onBack={onBack} sources={{ picker: () => new Promise(() => {}) }}/>);
   const button = await screen.findByRole('button', { name: 'Deshabilitar contactos en común' });
   expect(screen.getByRole('status', { name: 'Cargando contactos' })).toBeVisible();
   fireEvent.click(button);
+  await click('Deshabilitar');
+  expect(onBack).not.toHaveBeenCalled();
   expect(button).toHaveAttribute('aria-busy', 'true');
   expect(button).toBeDisabled();
   await act(async () => finish(undefined));
@@ -270,4 +280,16 @@ it.each([true, false])('settles the picker before the foreground read (same revi
     expect(review).not.toBeInTheDocument();
     expect(screen.getByText(/El estado de tus contactos cambió/)).toBeVisible();
   }
+});
+
+it('stays in Contacts when the server cannot confirm withdrawal', async () => {
+  const controller = controllerFixture(), onBack = vi.fn();
+  const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(synced)
+    .mockRejectedValueOnce(new Error()).mockResolvedValue(synced);
+  render(<Contacts controller={controller} onBack={onBack} sources={{}}/>);
+  await click('Deshabilitar contactos en común');
+  await click('Deshabilitar');
+  expect(await screen.findByText(/No pudimos confirmar el resultado/)).toBeVisible();
+  expect(request.mock.calls.filter(call => call[2] === 'DELETE')).toHaveLength(1);
+  expect(onBack).not.toHaveBeenCalled();
 });
