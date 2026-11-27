@@ -1,4 +1,10 @@
 .contacts .home-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.contact-skeleton { display: grid; gap: 24px; }
+.contact-skeleton-actions { display: grid; gap: 12px; }
+.contact-skeleton .placeholder-line { width: min(62%, 18rem); height: 1em; margin: 0; border-radius: 6px; background: var(--color-outline-variant); }
+.contact-skeleton .contact-skeleton-title { width: min(75%, 15rem); height: 1.4em; }
+.contact-skeleton .contact-skeleton-description { width: min(94%, 40rem); }
+.contact-skeleton .placeholder-control { height: 44px; margin: 0; border-radius: var(--radius-row); background: var(--color-surface-variant); }
 .contacts .home-card p, .contacts .home-card h3 { margin: 0; }
 .contacts button, .contact-indicator button, .contact-invite button {
   background: var(--color-surface); color: var(--color-primary); border: 1px solid var(--color-outline-variant);
