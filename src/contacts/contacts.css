@@ -18,3 +18,11 @@
 .contact-invite h3 { display: flex; align-items: center; gap: 8px; }
 .contact-invite h3 svg { color: var(--color-secondary); flex: none; }
 .contacts button.contact-region { background: transparent; border: 0; text-decoration: underline; text-underline-offset: 3px; padding-inline: 0; font-size: .9rem; }
+
+.contacts button[aria-busy] { position: relative; padding-inline: 2rem; }
+.contacts button[aria-busy=true]::after {
+  content: ''; position: absolute; right: .65rem; top: calc(50% - .5rem); width: 1rem; height: 1rem;
+  box-sizing: border-box; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: auth-spin 800ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .contacts button[aria-busy=true]::after { animation: none; } }

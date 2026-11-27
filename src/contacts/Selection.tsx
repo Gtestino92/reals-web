@@ -23,8 +23,8 @@ function review(rows: ContactRow[], country: CountryCode | undefined) {
   return { groups: [...groups.values()], invalid };
 }
 
-export function Selection({ rows, countryCode, updating, disabled, confirm, cancel }: {
-  disabled: boolean; rows: ContactRow[]; countryCode: string | null | undefined; updating: boolean;
+export function Selection({ rows, countryCode, updating, disabled, pending = false, confirm, cancel }: {
+  pending?: boolean; disabled: boolean; rows: ContactRow[]; countryCode: string | null | undefined; updating: boolean;
   confirm: (numbers: string[]) => void; cancel: () => void;
 }) {
   const [region, setRegion] = useState(() => countries.find(code => code === countryCode) ?? '');
@@ -42,7 +42,7 @@ export function Selection({ rows, countryCode, updating, disabled, confirm, canc
     }
     setExcluded(next);
   }
-  return <section className="home-card"><h3>Revisá tus contactos</h3>
+  return <fieldset disabled={pending} className="home-card"><h3>Revisá tus contactos</h3>
     <p>Cada teléfono cuenta una vez, aunque esté guardado con varios nombres.</p>
     {rows.some(row => !row.number.startsWith('+')) && <div>
       <button className="contact-region" aria-expanded={adjusting} onClick={() => setAdjusting(!adjusting)}>{country ? 'País de los números locales: ' + names.of(country) : 'Elegir país para números locales'}</button>
@@ -58,7 +58,7 @@ export function Selection({ rows, countryCode, updating, disabled, confirm, canc
     {!!invalid.length && <details><summary>Teléfonos sin incluir ({invalid.length})</summary><p>Revisá el país o el formato en tu agenda.</p>
       {invalid.map((row, i) => <p key={i}>{row.name || 'Sin nombre'} · {row.number}</p>)}</details>}
     <p role="status">{numbers.size} {numbers.size === 1 ? 'teléfono seleccionado' : 'teléfonos seleccionados'}{numbers.size > 2000 && ' · Elegí hasta 2000 teléfonos.'}</p>
-    <button className="contact-primary" disabled={disabled || !numbers.size || numbers.size > 2000} onClick={() => confirm([...numbers])}>{updating ? 'Actualizar contactos' : 'Importar contactos'}</button>
+    <button className="contact-primary" aria-busy={pending} disabled={disabled || !numbers.size || numbers.size > 2000} onClick={() => confirm([...numbers])}>{updating ? 'Actualizar contactos' : 'Importar contactos'}</button>
     <button onClick={cancel}>Cancelar selección</button>
-  </section>;
+  </fieldset>;
 }

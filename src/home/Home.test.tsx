@@ -152,6 +152,19 @@ it('protects draft on browser Back, cancels, then confirms without another histo
 it('does not show a draft prompt on confirmed expiration',async()=>{
  await openVisualReturnFixture();fireEvent.change(screen.getByLabelText('Mensaje personal'),{target:{value:'Borrador'}});const base=fetcher.getMockImplementation()!;fetcher.mockImplementation((path,options)=>path==='/api/matches/visual'?Promise.resolve(json({id:'visual',userAId:'u',userBId:'them',state:'EXPIRED'})):base(path,options));act(()=>window.dispatchEvent(new Event('online')));await screen.findByRole('heading',{name:'Inicio'});expect(screen.queryByRole('dialog')).toBeNull();
 });
+it('keeps sign-out out of the branded loader after session bootstrap', async () => {
+  const base = fetcher.getMockImplementation()!;
+  let finish!: () => void;
+  fetcher.mockImplementation(async (url, options) => {
+    if (url === '/api/me/home/status') await new Promise<void>(resolve => { finish = resolve; });
+    return base(url, options);
+  });
+  mount(); await waitFor(() => expect(finish).toBeDefined());
+  expect(screen.getByText('Preparando Reals…')).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).toBeNull();
+  await act(async () => finish());
+  await screen.findByRole('heading', { name: 'Inicio' });
+});
 it('offers confirmed exceptional sign-out after initial Home failure, while preserving retry', async () => {
   const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, options) => url === '/api/me/home/status' ? Promise.reject(new TypeError('offline')) : base(url, options));

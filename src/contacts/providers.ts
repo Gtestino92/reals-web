@@ -11,6 +11,23 @@ function append(rows: ContactRow[], name: unknown, number: unknown) {
   rows.push({ name: typeof name === 'string' ? name.slice(0, 200) : '', number: number.trim().length > 64 ? 'Teléfono demasiado largo (más de 64 caracteres)' : number.trim() });
 }
 
+// The native operation has no AbortSignal. Keep only its occupancy across views.
+let nativePickerOpen = false;
+const pickerBusy = 'Ya hay un selector de contactos abierto. Cerralo antes de volver a intentar.';
+const activation = 'Tocá Elegir del dispositivo para abrir los contactos.';
+const settings = 'Si rechazaste el permiso, revisá Ajustes de Android → Apps → Chrome → Permisos → Contactos. Si usás Reals instalada, revisá también los permisos del navegador que la abre. Después volvé a intentar.';
+
+function pickerFailure(error: unknown): Error {
+  const name = object(error) && typeof error.name === 'string' ? error.name : '';
+  const message = object(error) && typeof error.message === 'string' ? error.message : '';
+  if (name === 'AbortError') return new ProviderError('Cancelaste la selección.');
+  if (/user (activation|gesture)/i.test(message)) return new ProviderError(activation);
+  if (/already (in use|open|active)|picker is already/i.test(message)) return new ProviderError(pickerBusy);
+  if (name === 'InvalidStateError') return new ProviderError('No pudimos abrir tus contactos. Si hay otro selector abierto, cerralo. ' + settings);
+  if (name === 'SecurityError' || name === 'NotAllowedError') return new ProviderError('El navegador no permitió el acceso. ' + settings);
+  if (name === 'TypeError' && /unable to open a contact selector/i.test(message)) return new ProviderError('No pudimos abrir tus contactos. ' + settings);
+  return new ProviderError('El selector no pudo completar la solicitud. Cerralo si sigue abierto y volvé a intentar.');
+}
 export async function preparePicker(): Promise<PickContacts | null> {
   if (!window.isSecureContext || window.top !== window || !('contacts' in navigator)) return null;
   const manager = navigator.contacts;
@@ -20,7 +37,13 @@ export async function preparePicker(): Promise<PickContacts | null> {
   const select = manager.select.bind(manager);
   return async signal => {
     signal.throwIfAborted();
-    const contacts: unknown = await select(props.includes('name') ? ['tel', 'name'] : ['tel'], { multiple: true });
+    if (nativePickerOpen) throw new ProviderError(pickerBusy);
+    if (navigator.userActivation?.isActive === false) throw new ProviderError(activation);
+    nativePickerOpen = true;
+    let contacts: unknown;
+    try { contacts = await select(props.includes('name') ? ['tel', 'name'] : ['tel'], { multiple: true }); }
+    catch (error) { throw pickerFailure(error); }
+    finally { nativePickerOpen = false; }
     signal.throwIfAborted();
     if (!Array.isArray(contacts)) throw new ProviderError('El selector devolvió una respuesta inesperada.');
     if (contacts.length > 4000) throw oversized();

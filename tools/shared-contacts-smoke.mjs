@@ -38,7 +38,7 @@ for (const [name, engine, options] of [
       await press('Actualizar contactos'); await page.getByText(/El estado de tus contactos cambió/).waitFor();
       await press('Elegir del dispositivo'); await press('Actualizar contactos');
       await page.getByText('Sincronizaste 3 teléfonos.').waitFor();
-      page.once('dialog', dialog => dialog.accept()); await press('Retirar participación');
+      page.once('dialog', dialog => dialog.accept()); await press('Deshabilitar contactos en común');
       await button('Acepto participar').waitFor(); await press('Volver a Cuenta');
       assert.equal(await button('Contactos').evaluate(b => b === document.activeElement), true);
       await page.goForward(); await button('Acepto participar').waitFor();
@@ -47,6 +47,15 @@ for (const [name, engine, options] of [
       assert.equal(await page.getByRole('checkbox').first().isChecked(), true);
       await press('Deseleccionar todos'); await press('Seleccionar todos'); await press('Importar contactos');
       await page.getByText('Sincronizaste 3 teléfonos.').waitFor();
+      await page.goto(url + '?recovery'); await press('Cuenta'); await press('Contactos');
+      await page.getByRole('status', { name: 'Cargando contactos' }).waitFor();
+      await press('Acepto participar');
+      assert.equal(await button('Acepto participar').getAttribute('aria-busy'), 'true');
+      for (let i = 0; i < 2; i++) {
+        await press('Elegir del dispositivo'); await page.getByText(/Chrome → Permisos → Contactos/).waitFor();
+        await press('Volver a Cuenta'); await press('Contactos');
+      }
+      await press('Elegir del dispositivo'); await page.getByRole('checkbox').waitFor();
       await page.goto(url + '?unsupported'); await press('Cuenta'); await press('Contactos');
       await page.getByText(/no hay fuentes de contactos habilitadas/).waitFor(); assert.equal(await button('Acepto participar').count(), 0);
       await page.goto(url + '?chat'); const indicator = page.getByRole('button', { name: /Entre 1 y 5/ });

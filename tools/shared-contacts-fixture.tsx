@@ -5,7 +5,7 @@ import { SessionController } from '../src/auth/session';
 import { Home } from '../src/home/Home';
 import { FirstChat } from '../src/chat/FirstChat';
 import { emptyHome, homeStatus } from '../src/home/fixtures';
-import { providers } from '../src/contacts/providers';
+import { preparePicker, providers } from '../src/contacts/providers';
 import '../src/styles/tokens.css';
 import '../src/styles/global.css';
 import '../src/auth/login.css';
@@ -19,7 +19,17 @@ const rows = [
 ];
 delete providers.google;
 delete providers.picker;
-if (options.has('google')) providers.google = async () => async () => rows;
+if (options.has('recovery')) {
+  let attempts = 0;
+  Object.defineProperty(navigator, 'contacts', { configurable: true, value: {
+    getProperties: async () => ['name', 'tel'],
+    select: async () => {
+      if (++attempts <= 2) throw new TypeError('Unable to open a contact selector');
+      return [{ name: ['Ejemplo'], tel: ['+12025550100'] }];
+    },
+  } });
+  providers.picker = preparePicker;
+} else if (options.has('google')) providers.google = async () => async () => rows;
 else if (!options.has('unsupported')) providers.picker = async () => async () => rows;
 let status = { mutationRevision: crypto.randomUUID(), requiredConsentVersion: 1, acceptedConsentVersion: null as number | null,
   acceptedAt: null as string | null, syncedAt: null as string | null, state: 'NOT_CONFIGURED', importAvailable: true };
@@ -46,6 +56,7 @@ const api = new ApiClient(async (url, init) => {
   if (path === '/chats/c/messages' || path === '/chats/c/exit-requests') return json(path.endsWith('/messages') ? [{
     id: 'msg1', chatSessionId: 'c', senderId: 'them', sentAt: new Date().toISOString(), messageType: 'TEXT', content: '¡Hola! A mí me gusta caminar.',
   }] : [], { headers: { 'X-Reals-Counterpart-Audio-Access': 'ALLOWED' } });
+  if (options.has('recovery') && path.startsWith('/me/shared-contacts')) await new Promise(resolve => setTimeout(resolve, 800));
   if (path === '/me/shared-contacts') return json(status);
   if (!path.startsWith('/me/shared-contacts/')) throw Error('Unexpected synthetic route');
   if (method === 'PUT' && new Headers(init?.headers).get('X-Contact-Revision') !== status.mutationRevision)
