@@ -39,10 +39,10 @@ it('requires separate consent and selection, advances the revision and submits o
   await click('Acepto participar');
   expect(request.mock.calls[1]?.slice(2)).toEqual(['PUT', { version: 3 }, undefined, initial.mutationRevision]);
   expect(pick).not.toHaveBeenCalled();
-  await click('Elegir del dispositivo'); await click('Seleccionar todos los válidos');
+  await click('Elegir del dispositivo'); await click('Seleccionar todos');
   fireEvent.click(screen.getAllByRole('checkbox')[1]!);
-  await click('Confirmar reemplazo');
-  expect(await screen.findByText('Selección sincronizada: 1 número distinto.')).toBeVisible();
+  await click('Importar contactos');
+  expect(await screen.findByText('Sincronizaste 1 teléfono.')).toBeVisible();
   expect(request.mock.calls[2]?.slice(2)).toEqual(['PUT', { numbers: [rows[0]!.number] }, undefined, accepted.mutationRevision]);
   expect(JSON.stringify(localStorage)).not.toContain(rows[0]!.number);
 });
@@ -51,8 +51,8 @@ it.each(['CONTACT_MUTATION_STALE', 'CONTACT_REVISION_REQUIRED', 'CONTACT_REPLACE
   const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(accepted)
     .mockRejectedValueOnce(new ApiError(code === 'network' ? 'network' : 'backend', 409, code)).mockResolvedValue(synced);
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => async () => rows }}/>);
-  await click('Elegir del dispositivo'); await click('Confirmar reemplazo');
-  expect(await screen.findByRole('heading', { name: 'Selección sincronizada' })).toBeVisible();
+  await click('Elegir del dispositivo'); await click('Importar contactos');
+  expect(await screen.findByRole('heading', { name: 'Contactos sincronizados' })).toBeVisible();
   expect(screen.queryByRole('checkbox')).toBeNull();
   expect(request.mock.calls.map(c => c[2] ?? 'GET')).toEqual(['GET', 'PUT', 'GET']);
 });
@@ -64,7 +64,7 @@ it('reconciles a selection rejected by Fetch redirect policy without replay', as
   vi.spyOn(controller, 'request').mockImplementation((path, signal, method, body, access, revision) =>
     api.request(path, signal, undefined, method, body, undefined, true, undefined, access, revision));
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => async () => rows }}/>);
-  await click('Elegir del dispositivo'); await click('Confirmar reemplazo');
+  await click('Elegir del dispositivo'); await click('Importar contactos');
   await screen.findByText(/No pudimos confirmar el resultado/);
   expect(screen.queryByRole('checkbox')).toBeNull();
   expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method, init?.redirect])).toEqual([
@@ -122,7 +122,7 @@ it('preserves review on compatible resume and discards it on an external revisio
   expect(box).not.toBeChecked();
   request.mockRejectedValueOnce(new ApiError('network'));
   await act(async () => { window.dispatchEvent(new Event('pageshow')); });
-  expect(screen.getByRole('button', { name: 'Confirmar reemplazo' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Importar contactos' })).toBeDisabled();
   expect(screen.getAllByRole('checkbox')[0]).toBe(box);
   request.mockResolvedValue({ ...accepted, mutationRevision: crypto.randomUUID() });
   await click('Consultar estado');
@@ -130,13 +130,26 @@ it('preserves review on compatible resume and discards it on an external revisio
   expect(screen.queryByRole('checkbox')).toBeNull();
   expect(request.mock.calls.every(call => call[2] === undefined)).toBe(true);
 });
-it('sends an explicitly confirmed empty Google replacement and discards local names and the region', async () => {
+it('preselects Google numbers and prevents an empty update', async () => {
   const controller = controllerFixture();
-  const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(accepted).mockResolvedValueOnce({ status: synced, submittedCount: 0, distinctCount: 0 });
+  const request = vi.spyOn(controller, 'request').mockResolvedValue(synced);
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ google: async () => async () => rows }}/>);
   await click('Preparar Google Contacts'); await click('Elegir cuenta de Google');
-  expect((await screen.findAllByRole('checkbox'))[0]).not.toBeChecked();
-  await click('Confirmar reemplazo');
-  expect(await screen.findByText('Selección sincronizada: 0 números distintos.')).toBeVisible();
-  expect(request.mock.calls[1]?.[3]).toEqual({ numbers: [] });
+  expect((await screen.findAllByRole('checkbox'))[0]).toBeChecked();
+  await click('Deseleccionar todos');
+  expect(screen.getByRole('button', { name: 'Actualizar contactos' })).toBeDisabled();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  [false, {}, 'Las importaciones están pausadas por el momento.'],
+  [true, {}, 'Por ahora no hay fuentes de contactos habilitadas.'],
+  [true, { picker: async (): Promise<null> => null }, 'Este navegador no ofrece el selector de contactos del dispositivo.'],
+  [true, { picker: async (): Promise<never> => { throw Error(); } }, 'No pudimos comprobar el selector. Volvé a entrar en Contactos para reintentar.'],
+] as const)('explains availability when imports=%s and sources=%o', async (importAvailable, sources, message) => {
+  const controller = controllerFixture();
+  vi.spyOn(controller, 'request').mockResolvedValue({ ...synced, importAvailable });
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={sources}/>);
+  expect(await screen.findByText(message)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Retirar participación' })).toBeEnabled();
 });

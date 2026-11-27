@@ -2266,3 +2266,5 @@ verifies clean entry and retirement on queue discovery.
 | Browser and PWA | Web capability discovery, direct picker activation and Google popup ownership differ from native permissions and system Back. | Desktop dark and mobile light Chromium and WebKit engine smoke. Real Google grants, physical device selection, installed-PWA return, keyboard and screen-reader checks pending. | PLATFORM-LIMITED |
 
 [Validation and screenshots](testing.md#synthetic-shared-contact-validation)
+
+The native device picker controls its own labels and selection. Reals review starts after it returns and selects all eligible unique phones for either source. Web does not generate “(y 1 más)” or rewrite provider names. Attributing a particular label to Android or the returned display name requires observation on the device. The synthetic browser fixture exercises Argentine national/international duplicates and light/mobile and dark/desktop review states.
