@@ -11,7 +11,7 @@ export function SearchingScreen({ preparing, failure, phase, error, busy, blocke
   const queueContent = canRetryLocation ? { title: 'No pudimos obtener tu ubicación', body: 'Todavía no solicitamos tu ingreso a la búsqueda. Revisá el mensaje y reintentá la ubicación.' } : phase === 'failed' ? failed : searching;
   const content = preparing ? { title: 'Encontramos a alguien', body: failure ? 'No pudimos preparar la conversación.' : 'Preparando la conversación…' } : queueContent;
   const canCancel = phase !== 'canceling' && (phase === 'locating' || phase === 'admitting' || phase === 'reconciling' || (inQueue && !busy && !blocked));
-  return <div className="home search-screen" aria-busy={busy}>
+  return <div className="home search-screen" aria-busy={preparing ? !failure : busy}>
     <img src={seal} width="64" height="64" alt="Reals" />
     <div className={`search-dots${phase === 'failed' ? ' search-dots-paused' : ''}`} aria-hidden="true"><span/><span/><span/></div>
     <h2>{content.title}</h2>

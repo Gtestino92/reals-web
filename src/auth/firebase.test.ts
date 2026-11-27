@@ -229,3 +229,19 @@ it('does not install Google reauthentication after identity replacement', async 
   await expect(service().reauthenticateGoogle!(user)).rejects.toThrow();
   expect(sdk.getIdTokenResult).not.toHaveBeenCalled();
 });
+
+it('discards obsolete observer deliveries after sign-out and after a subsequent sign-in', async () => {
+  const auth = service(); auth.observe(next, failure);
+  sdk.auth.currentUser = user;
+  await auth.signOut();
+  sdk.auth.currentUser = null; observer(null); await flush();
+  observer(user);
+  expect(next.mock.calls).toEqual([[null]]);
+  const replacement = { ...user, uid: 'replacement' };
+  sdk.signInWithPopup.mockResolvedValueOnce({ user: replacement });
+  await auth.google();
+  sdk.auth.currentUser = replacement; observer(replacement);
+  observer(user); observer(null); await flush();
+  expect(next.mock.calls).toEqual([[null], [replacement]]);
+  expect(sdk.signOut).toHaveBeenCalledOnce();
+});

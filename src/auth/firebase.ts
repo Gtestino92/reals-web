@@ -104,11 +104,13 @@ export function configureFirebase(env: ImportMetaEnv = import.meta.env, ownershi
           let active = true;
           let revision = 0;
           const unsubscribe = onAuthStateChanged(auth, user => {
-            if (!active) return;
+            // A queued SDK event can arrive after sign-out or identity replacement.
+            const current = auth.currentUser;
+            if (!active || current?.uid !== user?.uid) return;
             const event = ++revision;
             const authEvent = ++authRevision;
             googleSessionReady = false;
-            if (user) { next(user); return; }
+            if (current) { next(current); return; }
             // Keep the login hidden until Google can open synchronously and safely.
             void prepareSession(authEvent).then(() => {
               if (active && event === revision && authEvent === authRevision) next(null);

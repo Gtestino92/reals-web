@@ -69,7 +69,7 @@ startup uses the Reals seal, existing editorial tokens and reduced-motion-aware
 indicator. Signed-out, blocked-tab, transfer, recovery, legal decision and
 actionable errors still reach their respective screens. After legal entry, Home
 reports readiness only after its projection and passive Second Chat decision.
-A pending automatic First Chat keeps startup visible through history and exit requests. During ordinary matchmaking the existing Searching view instead changes to “Encontramos a alguien”. The chat owner stays mounted across reveal. Preparation failure offers retry and return to Home. An existing queue goes straight to Searching. Manual email, registration and Google authentication rearm the same boundary through the operational destination. A stalled startup offers sign-out after 30 seconds while the original operation continues. Direct Admin challenges, in-app skeletons and explicit retry feedback retain
+A pending automatic First Chat keeps startup visible through history and exit requests. During ordinary matchmaking the existing Searching view instead changes to “Encontramos a alguien”. The chat owner stays mounted across reveal. Preparation failure offers retry and return to Home. An existing queue goes straight to Searching. Manual email, registration and Google authentication rearm the same boundary through the operational destination. Once Firebase authentication has settled, a stalled startup offers sign-out after 30 seconds while the original operation continues. Direct Admin challenges, in-app skeletons and explicit retry feedback retain
 their own presentation. The [architecture notes](frontend-architecture.md#initial-presentation)
 describe the boundary.
 

@@ -617,6 +617,7 @@ it('leaves waiting for authoritative new activity using the same poller', async 
   home.matchmaking.inQueue = false; home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }]; status.version++;
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(screen.getByRole('heading', { name: 'Encontramos a alguien' })).toBeVisible();
+  expect(document.querySelector('.search-screen')).toHaveAttribute('aria-busy', 'true');
   expect(screen.queryByRole('button', { name: 'Cancelar búsqueda' })).toBeNull();
   expect(screen.queryByRole('region', { name: 'Primer chat' })).toBeNull();
   act(() => window.dispatchEvent(new PopStateEvent('popstate')));
@@ -711,6 +712,7 @@ it('reports a match from hidden polling without navigation, then acknowledges on
   expect(screen.getByRole('heading', { name: 'Encontramos a alguien' })).toBeVisible();
   expect(document.title).toBe('(1) Reals');
   expect(screen.getByRole('alert')).toHaveTextContent(/actualizar el chat/);
+  expect(document.querySelector('.search-screen')).toHaveAttribute('aria-busy', 'false');
   failChat = false;
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Reintentar conexión' })));
   expect(screen.getByRole('heading', { name: 'María' })).toBeVisible();

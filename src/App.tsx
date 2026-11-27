@@ -40,7 +40,7 @@ export function OperationalApp({ firebase, api, ownership }: AppProps) {
 }
 function SessionApp({ controller }: { controller: SessionController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  return <StartupBoundary attempt={controller.startupAttempt} slowRecovery={<><p>La preparación está tardando más de lo habitual.</p><SignOutButton onConfirm={controller.signOut}/></>}>
+  return <StartupBoundary attempt={controller.startupAttempt} slowRecovery={(state.phase === 'loading' || state.phase === 'ready') && <><p>La preparación está tardando más de lo habitual.</p><SignOutButton onConfirm={controller.signOut}/></>}>
     <SessionDestination state={state} controller={controller} />
   </StartupBoundary>;
 }
