@@ -50,7 +50,8 @@ export class SecondChatSession {
   private readonly history: ParticipantHistory;
   get eligible() { return this.history.eligible; }
   private observeAccess = (access: CounterpartAudioAccess) =>
-    this.history.observe(access, messages => this.install({ messages, audioAccess: this.history.access }));
+    this.history.observe(access, messages => this.install({ messages, audioAccess: this.history.access,
+      pendingReaction: access === 'RESTRICTED' ? null : this.state.pendingReaction }));
   private listeners = new Set<() => void>();
   private lifetime = new AbortController();
   private read: AbortController | null = null;
@@ -235,7 +236,7 @@ export class SecondChatSession {
   }
   private returnToHome(message: string) {
     this.history.clear();
-    this.install({ returnHome: message, busy: false, blocked: true, messages: [], historyReady: false, entryPending: false, pendingAction: null, outgoing: null, confirmed: null });
+    this.install({ pendingReaction: null, returnHome: message, busy: false, blocked: true, messages: [], historyReady: false, entryPending: false, pendingAction: null, outgoing: null, confirmed: null });
     this.retired = true; this.read?.abort();
   }
   checkAbsoluteExpiry = () => {

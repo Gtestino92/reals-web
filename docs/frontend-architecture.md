@@ -84,7 +84,7 @@ Account and actionable recovery screens own sign-out. Tab ownership uses the sam
 operational tree exists, with explicit contention and failure feedback.
 
 See [startup and Home return](navigation-flicker.md#startup-and-home-return)
-for the backend read ordering, mutation review and measurements.
+for the backend read ordering, mutation review and measurements. Automatic First Chat entry mounts one session while the search presentation is visible. The chat renders its timeline only after metadata, messages and exit requests are installed together. A failed read returns retry controls to the search surface. The queue cancellation handler is retired when the authoritative queue ends.
 
 On eligible ticks, pending costs at most one additional GET when a version
 changes, an advertised or known activity boundary is crossed, recovery is due,

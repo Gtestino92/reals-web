@@ -5,14 +5,15 @@ import { mergeMessages, parseChat, parseGuidance, parseExits, parseMessage, plai
 import type { Chat, Exit, Message, Reply } from './contracts';
 import { messageRequest, type Outgoing } from './messageRequest';
 export type { Outgoing } from './messageRequest';
-interface State { pendingReaction: string | null; audioAccess: CounterpartAudioAccess; decisionPending: 'approve' | 'reject' | null; guidancePending: boolean; messageError: boolean; messagePending: boolean; confirmedReply: Reply | null; confirmedFile: Blob | null; reactionFeedback: 'pending' | 'error' | null; chat: Chat | null; messages: Message[]; exits: Exit[]; busy: boolean; error: string; blocked: boolean; outgoing: Outgoing | null; confirmed: string | null; confirmationVersion: number; offset: number; historyLimited: boolean }
+interface State { foregroundVerified: boolean; pendingReaction: string | null; audioAccess: CounterpartAudioAccess; decisionPending: 'approve' | 'reject' | null; guidancePending: boolean; messageError: boolean; messagePending: boolean; confirmedReply: Reply | null; confirmedFile: Blob | null; reactionFeedback: 'pending' | 'error' | null; chat: Chat | null; messages: Message[]; exits: Exit[]; busy: boolean; error: string; blocked: boolean; outgoing: Outgoing | null; confirmed: string | null; confirmationVersion: number; offset: number; historyLimited: boolean }
 export class ChatSession {
-  private state: State = { pendingReaction: null, audioAccess: 'UNKNOWN', decisionPending: null, guidancePending: false, messageError: false, messagePending: false, confirmedReply: null, confirmedFile: null, reactionFeedback: null, chat: null, messages: [], exits: [], busy: false, error: '', blocked: true, outgoing: null, confirmed: null, confirmationVersion: 0, offset: 0, historyLimited: false };
+  private state: State = { foregroundVerified: false, pendingReaction: null, audioAccess: 'UNKNOWN', decisionPending: null, guidancePending: false, messageError: false, messagePending: false, confirmedReply: null, confirmedFile: null, reactionFeedback: null, chat: null, messages: [], exits: [], busy: false, error: '', blocked: true, outgoing: null, confirmed: null, confirmationVersion: 0, offset: 0, historyLimited: false };
   private readonly history: ParticipantHistory;
   get eligible() { return this.history.eligible; }
   private observeAccess = (access: CounterpartAudioAccess) => {
     if (access === 'RESTRICTED') this.hideContactRange();
-    this.history.observe(access, messages => this.install({ messages, audioAccess: this.history.access }));
+    this.history.observe(access, messages => this.install({ messages, audioAccess: this.history.access,
+      pendingReaction: access === 'RESTRICTED' ? null : this.state.pendingReaction }));
   };
   private listeners = new Set<() => void>();
   private lifetime = new AbortController();
@@ -31,12 +32,13 @@ export class ChatSession {
   getSnapshot = () => this.state;
   private install(patch: Partial<State>) { if (!this.lifetime.signal.aborted) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); } }
   start() { if (this.lifetime.signal.aborted) { this.lifetime = new AbortController(); this.read = null; this.writing = false; this.serial++; } }
-  dispose() { this.hideContactRange(); this.history.clear(); this.install({ pendingReaction: null, messages: [], blocked: true }); this.lifetime.abort(); this.read?.abort(); }
-  private hideContactRange() {
-    if (this.state.chat?.sharedContactRange) {
-      const { sharedContactRange, ...chat } = this.state.chat;
-      this.install({ chat });
-    }
+  dispose() { this.hideContactRange(); this.history.clear(); this.install({ foregroundVerified: false, pendingReaction: null, messages: [], blocked: true }); this.lifetime.abort(); this.read?.abort(); }
+  private hideContactRange(background = false) {
+    const chat = this.state.chat;
+    if (chat?.sharedContactRange) {
+      const { sharedContactRange, ...concealed } = chat;
+      this.install({ chat: concealed, ...(background ? { foregroundVerified: false } : {}) });
+    } else if (background && this.state.foregroundVerified) this.install({ foregroundVerified: false });
   }
   private async presentDecision(signal: AbortSignal) {
     const remaining = 300 - (Date.now() - this.decisionStarted);
@@ -111,7 +113,7 @@ export class ChatSession {
     const outgoing = this.state.outgoing;
     const confirmed = outgoing && merged.some(m => m.clientMessageId === outgoing.clientMessageId && m.senderId === this.me);
     if (epoch !== this.disclosureEpoch || document.visibilityState === 'hidden' || this.history.access === 'RESTRICTED') delete chat.sharedContactRange;
-    this.install({ chat, messages: merged, exits, offset: Date.parse(chat.serverTime) - (started + received) / 2, blocked: false,
+    this.install({ foregroundVerified: epoch === this.disclosureEpoch && document.visibilityState === 'visible', chat, messages: merged, exits, offset: Date.parse(chat.serverTime) - (started + received) / 2, blocked: false,
       ...(confirmed ? { outgoing: null, confirmed: outgoing.content, confirmedReply: outgoing.replyTo, confirmedFile: outgoing.file, confirmationVersion: this.state.confirmationVersion + 1 } : {}), historyLimited: this.state.historyLimited || (!cursor && messages.length >= 500) });
     if (chat.myDecision !== 'PENDING') this.finish('', false);
   }
@@ -134,7 +136,7 @@ export class ChatSession {
   };
   concealContacts = () => {
     this.disclosureEpoch++;
-    this.hideContactRange();
+    this.hideContactRange(true);
   };
   resume = () => {
     this.concealContacts();
@@ -147,10 +149,18 @@ export class ChatSession {
     if (this.terminal || this.writing || this.read || !this.current(this.serial)) return;
     const read = new AbortController(); this.read = read;
     const signal = AbortSignal.any([read.signal, this.lifetime.signal]), serial = ++this.serial;
+    // Bound the first snapshot even when a token provider ignores AbortSignal.
+    const initial = !this.state.chat;
+    const deadline = initial ? setTimeout(() => {
+      if (!this.current(serial) || this.read !== read) return;
+      read.abort(); this.read = null; this.serial++;
+      this.install({ busy: false, blocked: true, error: 'La conversación está tardando en responder. Reintentá la conexión.' });
+    }, 30000) : undefined;
+    read.signal.addEventListener('abort', () => clearTimeout(deadline), { once: true });
     this.install({ busy: !this.state.chat });
-    try { await this.load(signal, serial, full); if (this.current(serial) && !silent) this.install({ error: '', reactionFeedback: null, messageError: false }); }
+    try { await this.load(signal, serial, full); if (this.current(serial) && (initial || !silent)) this.install({ error: '', reactionFeedback: null, messageError: false }); }
     catch (error) { if (this.current(serial) && !signal.aborted && !this.terminalError(error)) this.install({ blocked: true, error: 'No pudimos actualizar el chat. Revisá tu conexión y usá Reintentar conexión.' }); }
-    finally { if (this.current(serial)) { this.read = null; this.install({ busy: false }); } }
+    finally { clearTimeout(deadline); if (this.current(serial)) { this.read = null; this.install({ busy: false }); } }
   };
   private async write(path: string, method: string, body: unknown, outgoing?: Outgoing, reactionId: string | null = null) {
     if (this.terminal || this.writing || !this.current(this.serial)) return;

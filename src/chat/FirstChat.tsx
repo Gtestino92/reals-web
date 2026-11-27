@@ -19,42 +19,62 @@ import { activityId } from '../notifications/activityPolicy';
 import { usePresentedActivity } from '../notifications/usePresentedActivity';
 import { SharedContactIndicator } from './SharedContactIndicator';
 type DialogAction = 'mutual' | 'cancel' | 'safety' | 'block';
-export function FirstChat({ controller, matchId, chatId, onHome }: { controller: SessionController; matchId: string; chatId: string; onHome: (message?: string, closed?: boolean) => void }) {
+export function FirstChat({ controller, matchId, chatId, onHome, preparing = false, onPrepared, onPreparationFailure }: {
+  preparing?: boolean; onPrepared?: () => void;
+  onPreparationFailure?: (failure: { message: string; retry: () => void; leave: () => void } | null) => void;
+  controller: SessionController; matchId: string; chatId: string; onHome: (message?: string, closed?: boolean) => void }) {
   const dirty = useRef(false), knownClosed = useRef(false), terminalMessage = useRef('');
   const [terminalNotice,setTerminalNotice] = useState(''), [audioDirty,setAudioDirty] = useState(false), [audioEpoch,setAudioEpoch] = useState(0);
   const [session] = useState(() => new ChatSession(controller,matchId,chatId,controller.snapshot.account?.id ?? '',(message, closed) => { knownClosed.current = closed; terminalMessage.current = message; if (dirty.current) setTerminalNotice((message ? message + ' ' : '') + 'Conservamos tu borrador hasta que vuelvas a Inicio.'); else onHome(message,closed); }));
   const state = useSyncExternalStore(session.subscribe,session.getSnapshot);
-  const starting = useStartupDestination(!!state.chat || !!state.error);
+  const starting = useStartupDestination((!preparing && !!state.chat) || !!state.error);
+  useLayoutEffect(() => {
+    if (preparing && state.foregroundVerified && document.visibilityState === 'visible' && state.chat &&
+        !state.busy && !state.blocked && state.chat.myDecision === 'PENDING') onPrepared?.();
+  }, [preparing, state.foregroundVerified, state.chat, state.busy, state.blocked, onPrepared]);
+  const goHome = useRef(onHome);
+  goHome.current = onHome;
+  useLayoutEffect(() => {
+    if (preparing) onPreparationFailure?.(state.error && !state.busy ? {
+      message: state.error, retry: () => void session.refresh(), leave: () => goHome.current(),
+    } : null);
+  }, [preparing, session, state.error, state.busy, onPreparationFailure]);
   const [draft,setDraft] = useState(''), [reply,setReply] = useState<NonNullable<Message['replyTo']> | null>(null), [dialog,setDialog] = useState<DialogAction | null>(null), [now,setNow] = useState(Date.now()), [unseen,setUnseen] = useState(false);
   const root = useRef<HTMLElement>(null), timeline = useRef<HTMLOListElement>(null), nearBottom = useRef(true), text = useRef<HTMLTextAreaElement>(null), heading = useRef<HTMLHeadingElement>(null);
   const composing = useRef(false), observedHeight = useRef(0);
   const { attach: setText, resize: resizeInput } = useChatDraftHeight(text, draft);
-  useChatViewport(root, timeline, nearBottom, observedHeight, true, resizeInput);
+  useChatViewport(root, timeline, nearBottom, observedHeight, !preparing, resizeInput);
   useEffect(() => {
     const owner = controller.sessionSignal;
     session.start();
     const retire = () => session.dispose();
     if (owner?.aborted) { retire(); return; }
     owner?.addEventListener('abort', retire, { once: true });
-    void session.refresh();
-    const timer = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.refresh(false,true); },5000);
+    let live = true;
+    queueMicrotask(() => { if (live) void session.refresh(); });
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      const snapshot = session.getSnapshot();
+      if (document.visibilityState === 'visible' && (snapshot.chat || !snapshot.error)) void session.refresh(false,true);
+    },5000);
     const tick = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.checkExitTimeout(); },1000);
     const resume = () => { if (document.visibilityState === 'visible') void session.resume(); else session.concealContacts(); };
     window.addEventListener('pagehide', session.concealContacts); document.addEventListener('visibilitychange',resume); window.addEventListener('online',resume);
-    return () => { owner?.removeEventListener('abort', retire); session.dispose(); clearInterval(timer); clearInterval(tick); window.removeEventListener('pagehide', session.concealContacts); document.removeEventListener('visibilitychange',resume); window.removeEventListener('online',resume); };
+    return () => { live = false; owner?.removeEventListener('abort', retire); session.dispose(); clearInterval(timer); clearInterval(tick); window.removeEventListener('pagehide', session.concealContacts); document.removeEventListener('visibilitychange',resume); window.removeEventListener('online',resume); };
   }, [session, controller]);
-  useLayoutEffect(() => { if (!starting) heading.current?.focus(); }, [starting]);
+  useLayoutEffect(() => { if (!starting && !preparing) heading.current?.focus(); }, [starting, preparing]);
   useEffect(() => {
     if (state.audioAccess === 'RESTRICTED' && !state.outgoing && reply?.type === 'MESSAGE' && reply.messageType === 'AUDIO' && reply.senderId !== session.me) setReply(null);
   }, [state.audioAccess, state.outgoing, reply, session]);
   useEffect(() => { if (state.confirmationVersion > 0) { setDraft(d => d === state.confirmed ? '' : d); setReply(current => current?.type === state.confirmedReply?.type && current?.targetId === state.confirmedReply?.targetId ? null : current); } }, [state.confirmationVersion]);
   useEffect(() => {
     const list = timeline.current;
-    if (nearBottom.current && list) { list.scrollTop = list.scrollHeight; setUnseen(false); } else setUnseen(true);
-  }, [state.messages.length + Number(!!state.outgoing)]);
+    if (!list) return;
+    if (nearBottom.current) { list.scrollTop = list.scrollHeight; setUnseen(false); } else setUnseen(true);
+  }, [state.messages.length + Number(!!state.outgoing), preparing]);
   useEffect(() => { const warn = (e: BeforeUnloadEvent) => { if (dirty.current) { e.preventDefault(); } }; window.addEventListener('beforeunload',warn); return () => window.removeEventListener('beforeunload',warn); }, [draft,state.outgoing]);
   const chat = state.chat, p = policy(chat,state.exits,now+state.offset), me = session.me, eligible = session.eligible, g = chat?.guidance;
-  usePresentedActivity(root, chat?.status === 'ACTIVE' && !knownClosed.current ? activityId('FIRST_CHAT', matchId, chatId) : null);
+  usePresentedActivity(root, !preparing && !starting && chat?.status === 'ACTIVE' && !knownClosed.current ? activityId('FIRST_CHAT', matchId, chatId) : null);
   const partner = chat?.partner.displayName.trim();
   const disabled = state.busy || state.blocked, ordinary = p.ordinary && !disabled && !state.outgoing;
   const decisionPanel=chat?.status==='ACTIVE' && chat.myDecision==='PENDING' && chat.partnerDecision==='APPROVED';
@@ -75,6 +95,7 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
     window.addEventListener('popstate',back);
     return () => window.removeEventListener('popstate',back);
   });
+  if (preparing) return null;
   return <section ref={root} className="first-chat" aria-label="Primer chat">
     <div className="chat-chrome">
     <header className="chat-heading chat-heading-actions">

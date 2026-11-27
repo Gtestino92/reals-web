@@ -94,3 +94,13 @@ All owner contact requests use Fetch's `redirect: error` at the configured API d
 Only the invitation dismissal and per-account/per-chat presentation preference use durable storage. Browser history carries ordinary navigation entries. No periodic contact sync, OAuth refresh token, selection cache or new chat polling loop is involved.
 
 A device picker invocation owns the document's native picker slot until its promise settles. Retiring a Reals intent discards late results but cannot close Android's selector. Reuse the prepared capability on the next explicit tap. Reals never retries permission prompts automatically. Chrome can report a selector-open TypeError, which does not identify the underlying permission state. After earlier denials, check Android Settings → Apps → Chrome → Permissions → Contacts. Installed PWAs may use the host browser's permission settings. [Android repeated denial](https://developer.android.com/about/versions/11/privacy/permissions) · [Chrome Contact Picker](https://developer.chrome.com/docs/capabilities/web-apis/contact-picker) · [Selector exceptions](https://developer.mozilla.org/en-US/docs/Web/API/ContactsManager/select)
+
+## Chat and startup response ownership
+
+| Operation | Presentation owner and installation rule |
+| --- | --- |
+| Send, retry, POST result or history reconciliation | The existing session keeps the client ID and draft. Confirmed history and outgoing retirement install together. Delivery metadata and grouped rows share dimensions across confirmation. |
+| Reaction PUT, response, follow-up read | The guarded writer sets a single pending message ID. The lane displays a filled heart immediately. Only a validated HEART on the requested participant message enters history. Failure clears the pending target and reconciles through reads. Successful confirmation survives a failed follow-up. |
+| First Chat decision or terminal read | The existing Home callback still receives the closed flag. A reconciled decision returns silently. Safety, abandonment and expiry retain their existing feedback. |
+| Manual authentication and identity replacement | A monotonically increasing attempt number scopes completion to its startup boundary. Firebase, bootstrap, legal and destination gates retain their request ownership. After 30 seconds a stalled presentation offers an explicit exit. |
+| Queue discovery, initial chat read, visibility and retry | Home retains Searching after authoritative queue exit, removes cancellation and suspends its ordinary polling. First Chat owns match, metadata, history and exit reads. Reveal requires a current foreground snapshot. A 30-second initial-read deadline retires the read generation and allows retry without ending the conversation. |
