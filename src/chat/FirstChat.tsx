@@ -73,8 +73,15 @@ export function FirstChat({ controller, matchId, chatId, onHome, preparing = fal
     if (task) {
       submittedRevision.current = draftRevision.current;
       submittedReply.current = reply;
+      setDraft('');
     }
   };
+  useLayoutEffect(() => {
+    const outgoing = state.outgoing;
+    if (outgoing?.content && outgoing.phase !== 'pending' && submittedRevision.current === draftRevision.current) {
+      setDraft(outgoing.content);
+    }
+  }, [state.outgoing]);
   useLayoutEffect(() => {
     if (!state.confirmationVersion) return;
     if (submittedRevision.current === draftRevision.current) setDraft('');

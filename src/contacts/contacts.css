@@ -48,6 +48,7 @@
   .contacts .country-dialog { inset:0; margin:0; width:100vw; max-width:none; height:var(--country-viewport,100dvh); max-height:100dvh; border:0; border-radius:0; padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); }
 }
 .chat-identity .contact-indicator {
+  margin-block-start:6px;
   position:relative; width:fit-content; max-width:100%; flex-wrap:nowrap; gap:0;
   background:var(--color-surface-variant); border-radius:var(--radius-row);
   box-shadow:inset 0 0 0 1px var(--color-outline-variant);
