@@ -9,16 +9,30 @@ const directory = 'artifacts/shared-contacts';
 await mkdir(directory, { recursive: true });
 async function checkRegionHistory(browser) {
   const failures = [];
-  for (const scenario of ['forward', 'revision', 'session']) {
+  for (const scenario of ['invitation', 'forward', 'revision', 'session']) {
     const page = await browser.newPage();
     try {
       await page.route('**/*', route => new URL(route.request().url()).origin === new URL(url).origin ? route.continue() : route.abort());
       const button = name => page.getByRole('button', { name, exact: true });
       await page.goto(url);
-      for (const name of ['Cuenta', 'Contactos', 'Acepto participar', 'Elegir del dispositivo']) await button(name).click();
+      const entry = scenario === 'invitation' ? ['Importar mis contactos'] : ['Cuenta', 'Contactos'];
+      for (const name of [...entry, 'Acepto participar', 'Elegir del dispositivo']) await button(name).click();
       const before = await page.evaluate(() => ({ state: history.state, length: history.length }));
-      await page.getByRole('button', { name: /País de los números locales/ }).click();
-      if (scenario === 'session') {
+      const region = page.getByRole('button', { name: /País de los números locales/ });
+      const excluded = page.getByRole('checkbox', { name: /12025550100/ });
+      if (scenario === 'invitation') await excluded.uncheck();
+      await region.click();
+      if (scenario === 'invitation') {
+        assert.deepEqual(before.state.trail, ['home', 'contacts']);
+        await page.goBack();
+        await page.getByRole('dialog').waitFor({ state: 'detached' });
+        assert.deepEqual(await page.evaluate(() => ({ state: history.state, length: history.length })), before);
+        assert.equal(await excluded.isChecked(), false);
+        assert.equal(await page.getByRole('checkbox', { checked: true }).count(), 2);
+        assert.equal(await region.evaluate(b => b === document.activeElement), true);
+        await page.goBack();
+        await button('Cuenta').waitFor();
+      } else if (scenario === 'session') {
         await page.evaluate(() => window.contactsFixture.endSession());
         await page.getByText('Preparando sesión sintética…').waitFor();
         await page.evaluate(() => window.contactsFixture.restartSession());

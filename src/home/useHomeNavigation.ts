@@ -71,7 +71,7 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
       let incoming = entry(event.state);
       const closeRegion = contactRegion.current;
       if (!moving.current && closeRegion && previous.trail.at(-1) === 'contacts' &&
-          incoming?.owner === previous.owner && incoming.trail.at(-1) === 'account' &&
+          incoming?.owner === previous.owner && (incoming.trail.length === 1 || incoming.trail.at(-1) === 'account') &&
           incoming.trail.join('/') === previous.trail.slice(0, -1).join('/')) {
         // Restore the existing Contacts slot before returning focus to the review.
         // A retired review releases its callback even if traversal is still pending.

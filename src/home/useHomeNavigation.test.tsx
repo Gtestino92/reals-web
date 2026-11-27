@@ -130,9 +130,9 @@ it('does not let a stale Second Chat entry bypass another screen navigation lock
 
 it('rejects synchronous repeated Second Chat entry before React updates the external guard',()=>{const {result}=renderHook(()=>useHomeNavigation(()=>true));const push=vi.spyOn(history,'pushState');act(()=>{expect(result.current.openSecondChat('c','m')).toBe(true);expect(result.current.openSecondChat('c','m')).toBe(false);});expect(push).toHaveBeenCalledOnce();push.mockRestore();});
 
-it('consumes Back for the live contact selector using the existing Contacts entry', async () => {
+it.each(['home', 'account'] as const)('consumes dialog Back on the Contacts entry from %s', async parent => {
   const { result } = renderHook(() => useHomeNavigation(() => true));
-  act(() => result.current.open('account'));
+  if (parent === 'account') act(() => result.current.open('account'));
   act(() => result.current.open('contacts'));
   const before = { state: history.state, length: history.length };
   const close = vi.fn();
@@ -142,8 +142,8 @@ it('consumes Back for the live contact selector using the existing Contacts entr
   expect({ state: history.state, length: history.length }).toEqual(before);
   expect(result.current.destination).toBe('contacts');
   release();
-  act(() => result.current.backTo('account'));
-  await waitFor(() => expect(result.current.destination).toBe('account'));
+  act(() => result.current.backTo(parent));
+  await waitFor(() => expect(result.current.destination).toBe(parent));
   act(() => history.forward());
   await waitFor(() => expect(result.current.destination).toBe('contacts'));
   expect(close).toHaveBeenCalledOnce();
