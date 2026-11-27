@@ -7,7 +7,7 @@ import { chatFixture, controllerFixture, messageFixture } from './fixtures';
 import { secondHarness } from './secondFixtures';
 import type { Message } from './contracts';
 
-function conversation(kind: 'first' | 'second', quotaExhausted = false) {
+function conversation(kind: 'first' | 'second', quotaExhausted = false, withIncoming = false) {
   const second = kind === 'second' ? secondHarness() : null;
   const controller = second?.controller ?? controllerFixture();
   const chat = chatFixture();
@@ -17,12 +17,16 @@ function conversation(kind: 'first' | 'second', quotaExhausted = false) {
     if (second) Object.assign(second.status.audioPolicy ?? {}, policy);
   }
   const messages: Message[] = second?.messages ?? [];
+  if (withIncoming) messages.push(messageFixture());
   const secondRequest = second?.request.getMockImplementation();
   let closed = false;
   let complete: (() => void) | undefined;
   const write = vi.fn(async (body: unknown) => {
     if (!object(body) || typeof body.content !== 'string' || typeof body.clientMessageId !== 'string') throw Error('Invalid test send');
-    const message = { ...messageFixture(String(messages.length + 1), 'me'), content: body.content, clientMessageId: body.clientMessageId };
+    const r = body.replyTo;
+    const replyTo: Message['replyTo'] = object(r) && r.type === 'MESSAGE' && typeof r.targetId === 'string'
+      ? {type:'MESSAGE',targetId:r.targetId,previewText:null} : null;
+    const message = { ...messageFixture(String(messages.length + 1), 'me'), replyTo, content: body.content, clientMessageId: body.clientMessageId };
     await new Promise<void>(resolve => { complete = resolve; });
     messages.push(message);
     return message;
@@ -198,4 +202,121 @@ it('leaves focus outside Second Chat when authorization ends during a pending se
   await chat.confirm();
   expect(screen.queryByRole('region', { name: 'Segundo chat' })).toBeNull();
   expect(outside).toHaveFocus();
+});
+
+it.each(['first', 'second'] as const)('%s retains an identical newly edited draft and completes an interrupted history read', async kind => {
+  const chat = conversation(kind, false, true);
+  const input = await screen.findByRole('textbox', { name: 'Mensaje' });
+  await waitFor(() => expect(input).toBeEnabled());
+  const original = vi.mocked(chat.controller.request).getMockImplementation()!;
+  let releaseHistory: (() => void) | undefined;
+  let pages = 0;
+  vi.mocked(chat.controller.request).mockImplementation(async (...args) => {
+    if (args[0].includes('/messages?') && ++pages === 1) {
+      args[4]?.('ALLOWED');
+      await new Promise<void>(resolve => { releaseHistory = resolve; });
+      return [{ ...messageFixture('99'), content: 'Lectura obsoleta' }];
+    }
+    return original(...args);
+  });
+  fireEvent.change(input, { target: { value: 'Igual' } });
+  tap();
+  fireEvent.change(input, { target: { value: 'Otro' } });
+  fireEvent.change(input, { target: { value: 'Igual' } });
+  expect(submit()).toBeDisabled();
+  await chat.confirm();
+  expect(input).toHaveValue('Igual');
+  expect(submit()).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: /^Responder mensaje/ }));
+  tap();
+  fireEvent.submit(input.closest('form')!);
+  expect(chat.write).toHaveBeenCalledTimes(2);
+  expect(chat.write.mock.calls[0]).not.toEqual(chat.write.mock.calls[1]);
+  await chat.confirm();
+  await act(async () => releaseHistory?.());
+  expect(chat.write.mock.calls[1]?.[0]).toMatchObject({replyTo:{type:'MESSAGE',targetId:'1'}});
+  expect(screen.queryByText('Lectura obsoleta')).toBeNull();
+  expect(pages).toBe(2);
+  expect(input).toHaveValue('');
+});
+
+it.each(['first', 'second'] as const)('%s keeps the confirmed bubble when the history body fails', async kind => {
+  const chat = conversation(kind);
+  const input = await screen.findByRole('textbox', { name: 'Mensaje' });
+  await waitFor(() => expect(input).toBeEnabled());
+  const original = vi.mocked(chat.controller.request).getMockImplementation()!;
+  vi.mocked(chat.controller.request).mockImplementation(async (...args) => {
+    if (args[0].includes('/messages?')) throw new ApiError('network');
+    return original(...args);
+  });
+  fireEvent.change(input, {target:{value:'Confirmado'}});
+  tap();
+  fireEvent.change(input, {target:{value:'Siguiente'}});
+  await chat.confirm();
+  expect(screen.getByText('Confirmado')).toBeVisible();
+  expect(submit()).toBeDisabled();
+  expect(input).toHaveValue('Siguiente');
+  expect(chat.write).toHaveBeenCalledOnce();
+});
+
+it.each(['first', 'second'] as const)('%s refuses another text after the partner access restriction arrives', async kind => {
+  const chat = conversation(kind);
+  const input = await screen.findByRole('textbox', { name: 'Mensaje' });
+  await waitFor(() => expect(input).toBeEnabled());
+  const original = vi.mocked(chat.controller.request).getMockImplementation()!;
+  vi.mocked(chat.controller.request).mockImplementation(async (...args) => {
+    if (args[0].includes('/messages?')) {
+      args[4]?.('RESTRICTED');
+      return [];
+    }
+    return original(...args);
+  });
+  fireEvent.change(input, {target:{value:'Primero'}});
+  tap();
+  fireEvent.change(input, {target:{value:'Segundo'}});
+  await chat.confirm();
+  expect(submit()).toBeDisabled();
+  fireEvent.submit(input.closest('form')!);
+  expect(chat.write).toHaveBeenCalledOnce();
+});
+
+it.each(['first', 'second'] as const)('%s retains a malformed text acknowledgement as uncertain', async kind => {
+  const chat = conversation(kind);
+  const input = await screen.findByRole('textbox', { name: 'Mensaje' });
+  await waitFor(() => expect(input).toBeEnabled());
+  const original = vi.mocked(chat.controller.request).getMockImplementation()!;
+  const post = vi.fn();
+  vi.mocked(chat.controller.request).mockImplementation(async (...args) => {
+    if (args[2] !== 'POST') return original(...args);
+    post(args[3]);
+    return { ...messageFixture('2','me'), ...(object(args[3]) ? args[3] : {}), content:null };
+  });
+  fireEvent.change(input, {target:{value:'Sin confirmar'}});
+  tap();
+  await screen.findByRole('button', {name:/Reconciliar y reintentar/});
+  fireEvent.submit(input.closest('form')!);
+  expect(post).toHaveBeenCalledOnce();
+  expect(submit()).toBeDisabled();
+  expect(input).toHaveValue('Sin confirmar');
+});
+
+it.each(['first', 'second'] as const)('%s merges incoming text and reactions around the POST cursor', async kind => {
+  const chat = conversation(kind, false, true);
+  const input = await screen.findByRole('textbox', { name: 'Mensaje' });
+  await waitFor(() => expect(input).toBeEnabled());
+  const original = vi.mocked(chat.controller.request).getMockImplementation()!;
+  vi.mocked(chat.controller.request).mockImplementation(async (...args) => {
+    if (args[0].includes('/messages?')) {
+      expect(args[0]).not.toContain('after=2');
+      args[4]?.('ALLOWED');
+      return [ { ...messageFixture('1'), reactionType:'HEART' }, { ...messageFixture('3'), content:'Mensaje entrante' } ];
+    }
+    return original(...args);
+  });
+  fireEvent.change(input, {target:{value:'Mensaje saliente'}});
+  tap();
+  await chat.confirm();
+  expect(screen.getByText('Mensaje saliente')).toBeVisible();
+  expect(screen.getByText('Mensaje entrante')).toBeVisible();
+  expect(screen.getByRole('img',{name:'Reaccionaste con coraz\u00f3n'})).toBeVisible();
 });

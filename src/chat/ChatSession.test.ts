@@ -222,3 +222,17 @@ it.each(['approve', 'reject'] as const)('navigates without a decision notice aft
   expect(home).toHaveBeenCalledWith('', true);
   expect(writes()).toHaveLength(1);
 });
+
+it.each(['decision','exit','expiry'])('installs %s and updated guidance before accepting another text', async transition => {
+  await session.refresh();
+  chat.guidance.question.instanceId = 'question-2';
+  if (transition === 'decision') chat.partnerDecision = 'APPROVED';
+  if (transition === 'expiry') chat.timeoutAt = new Date(Date.now()-1000).toISOString();
+  if (transition === 'exit') exits = [{id:'exit', requesterUserId:'them', responderUserId:'me',
+    type:'MUTUAL_CANCEL', status:'PENDING', createdAt:new Date().toISOString()}];
+  await session.send('Primero',null);
+  expect(session.getSnapshot().chat?.guidance?.question.instanceId).toBe('question-2');
+  expect(session.canSendText).toBe(false);
+  await session.send('Segundo',null);
+  expect(writes()).toHaveLength(1);
+});

@@ -1,3 +1,4 @@
+import { object } from '../auth/api';
 import { vi } from 'vitest';
 import { controllerFixture, messageFixture } from './fixtures';
 import type { Message } from './contracts';
@@ -39,8 +40,11 @@ export function secondHarness() {
     if (path.endsWith('/status') || method === 'POST' && path.includes('/second-chat/')) return structuredClone(secondStatusResponse(status));
     if (path === '/chats/c') return secondChatResponse(status);
     if (method === 'POST' && path.endsWith('/messages')) {
-      if (!body || typeof body !== 'object' || !('clientMessageId' in body)) throw Error();
-      const message = {...messageFixture('3','me'),clientMessageId:String(body.clientMessageId)}; messages.push(message); return message;
+      if (!object(body) || typeof body.content !== 'string' || typeof body.clientMessageId !== 'string') throw Error();
+      const r = body.replyTo;
+      const replyTo: Message['replyTo'] = object(r) && r.type === 'MESSAGE' && typeof r.targetId === 'string'
+        ? {type:'MESSAGE',targetId:r.targetId,previewText:null} : null;
+      const message = {...messageFixture(String(messages.length+1),'me'),content:body.content,clientMessageId:body.clientMessageId,replyTo}; messages.push(message); return message;
     }
     if (method === 'POST' && path.endsWith('/audio-messages')) {
       if (!(body instanceof FormData) || typeof body.get('clientMessageId') !== 'string') throw Error('Invalid audio request');

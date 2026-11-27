@@ -55,7 +55,7 @@ export function FirstChat({ controller, matchId, chatId, onHome, preparing = fal
     const timer = window.setInterval(() => {
       setNow(Date.now());
       const snapshot = session.getSnapshot();
-      if (document.visibilityState === 'visible' && (snapshot.chat || !snapshot.error)) void session.refresh(false,true);
+      if (document.visibilityState === 'visible' && (snapshot.chat || !snapshot.error)) void session.poll();
     },5000);
     const tick = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.checkExitTimeout(); },1000);
     const resume = () => { if (document.visibilityState === 'visible') void session.resume(); else session.invalidateForeground(); };
@@ -66,7 +66,20 @@ export function FirstChat({ controller, matchId, chatId, onHome, preparing = fal
   useEffect(() => {
     if (state.audioAccess === 'RESTRICTED' && !state.outgoing && reply?.type === 'MESSAGE' && reply.messageType === 'AUDIO' && reply.senderId !== session.me) setReply(null);
   }, [state.audioAccess, state.outgoing, reply, session]);
-  useEffect(() => { if (state.confirmationVersion > 0) { setDraft(d => d === state.confirmed ? '' : d); setReply(current => current?.type === state.confirmedReply?.type && current?.targetId === state.confirmedReply?.targetId ? null : current); } }, [state.confirmationVersion]);
+  const draftRevision = useRef(0), submittedRevision = useRef(-1);
+  const submittedReply = useRef(reply);
+  const sendText = () => {
+    const task = session.send(draft, reply ? { type: reply.type, targetId: reply.targetId } : null);
+    if (task) {
+      submittedRevision.current = draftRevision.current;
+      submittedReply.current = reply;
+    }
+  };
+  useLayoutEffect(() => {
+    if (!state.confirmationVersion) return;
+    if (submittedRevision.current === draftRevision.current) setDraft('');
+    if (submittedReply.current === reply) setReply(null);
+  }, [state.confirmationVersion]);
   useEffect(() => {
     const list = timeline.current;
     if (!list) return;
@@ -77,6 +90,7 @@ export function FirstChat({ controller, matchId, chatId, onHome, preparing = fal
   usePresentedActivity(root, !preparing && !starting && chat?.status === 'ACTIVE' && !knownClosed.current ? activityId('FIRST_CHAT', matchId, chatId) : null);
   const partner = chat?.partner.displayName.trim();
   const disabled = state.busy || state.blocked, ordinary = p.ordinary && !disabled && !state.outgoing;
+  const textEnabled = session.canSendText && session.replyAvailable(reply) && !audioDirty;
   const decisionPanel=chat?.status==='ACTIVE' && chat.myDecision==='PENDING' && chat.partnerDecision==='APPROVED';
   const decisionTitle=useRef<HTMLHeadingElement>(null);
   const decisionDisabled=disabled || audioDirty || !p.decide || state.outgoing?.phase==='uncertain';
@@ -120,7 +134,7 @@ export function FirstChat({ controller, matchId, chatId, onHome, preparing = fal
     </aside>}
     {p.decisionOnly && audioDirty && <p role="status">Conservamos tu borrador de audio. <button disabled={!!state.outgoing?.file} onClick={()=>{setAudioEpoch(value=>value+1);setAudioDirty(false);}}>Descartar borrador de audio</button></p>}
     {p.decisionOnly && state.messageError && state.error && <p className="chat-composer-error" role="alert">{state.error} <button disabled={state.busy} onClick={()=>void session.refresh()}>Reintentar conexión</button></p>}
-    {g && !p.decisionOnly && <div className="chat-guidance-viewport"><ReplySwipe mouseDoubleClick key={g.question.instanceId ?? g.question.text} enabled={ordinary && !audioDirty && !!g.question.instanceId} label="Responder pregunta" onReply={() => g.question.instanceId && beginReply({ type: 'GUIDANCE_QUESTION', targetId: g.question.instanceId }, g.question.text)}><aside className="chat-panel chat-guidance" aria-label="Conversación guiada"><div className="chat-guidance-copy"><p className="chat-guidance-ordinal">Pregunta {g.questionOrdinal} de {g.maxQuestions}</p><p>{g.question.text}</p>
+    {g && !p.decisionOnly && <div className="chat-guidance-viewport"><ReplySwipe mouseDoubleClick key={g.question.instanceId ?? g.question.text} enabled={textEnabled && !!g.question.instanceId} label="Responder pregunta" onReply={() => g.question.instanceId && beginReply({ type: 'GUIDANCE_QUESTION', targetId: g.question.instanceId }, g.question.text)}><aside className="chat-panel chat-guidance" aria-label="Conversación guiada"><div className="chat-guidance-copy"><p className="chat-guidance-ordinal">Pregunta {g.questionOrdinal} de {g.maxQuestions}</p><p>{g.question.text}</p>
       {g.completed ? <p className="chat-guidance-state">Etapa guiada completada.</p> : g.myNextRequested && <p className="chat-guidance-state">Esperando a {partner || 'la otra persona'} para continuar.</p>}</div>
       {canProgressGuidance && <button className={`${g.progressionAction === 'COMPLETE' ? 'chat-guidance-complete' : 'chat-guidance-next'} ${!state.blocked && !audioDirty ? 'chat-stable-control' : ''}`} aria-busy={state.guidancePending} aria-label={g.progressionAction === 'COMPLETE' ? 'Completar etapa' : 'Otra pregunta'} disabled={!ordinary || audioDirty} onClick={() => void session.action('guidance')}>{g.progressionAction === 'COMPLETE' ? 'Completar' : <ChatIcon name="next"/>}{state.guidancePending && <span className="chat-visually-hidden" role="status">Solicitando avance…</span>}</button>}
     </aside></ReplySwipe></div>}
@@ -130,7 +144,7 @@ export function FirstChat({ controller, matchId, chatId, onHome, preparing = fal
     <div className="chat-history">
     <ol className="chat-timeline" aria-label="Mensajes" ref={timeline} onScroll={() => { const l = timeline.current; if (l && (observedHeight.current === 0 || observedHeight.current === l.clientHeight)) nearBottom.current = l.scrollHeight-l.scrollTop-l.clientHeight < 100; if (nearBottom.current) setUnseen(false); }}>
       {state.messages.map((m, index, messages) => <li key={m.id} className={`chat-message-row ${m.senderId === me ? 'outgoing' : 'incoming'}${messages[index - 1]?.senderId === m.senderId ? ' chat-message-continuation' : ''}`}>
-        <ReplySwipe enabled={ordinary && !audioDirty && m.senderId !== me && ((m.messageType === 'TEXT' && !!m.content) || (m.messageType === 'AUDIO' && !!m.audio))} label={`Responder mensaje de ${chat?.partner.displayName ?? 'tu match'}`} onReply={() => beginReply({ type: 'MESSAGE', targetId: m.id, senderId: m.senderId, messageType: m.messageType }, m.messageType === 'AUDIO' ? 'Mensaje de audio' : m.content ?? '')}><article className={m.senderId === me ? 'chat-message outgoing' : 'chat-message incoming'}>
+        <ReplySwipe enabled={textEnabled && m.senderId !== me && ((m.messageType === 'TEXT' && !!m.content) || (m.messageType === 'AUDIO' && !!m.audio))} label={`Responder mensaje de ${chat?.partner.displayName ?? 'tu match'}`} onReply={() => beginReply({ type: 'MESSAGE', targetId: m.id, senderId: m.senderId, messageType: m.messageType }, m.messageType === 'AUDIO' ? 'Mensaje de audio' : m.content ?? '')}><article className={m.senderId === me ? 'chat-message outgoing' : 'chat-message incoming'}>
         {m.replyTo && <blockquote className="chat-quote"><ReplyQuote {...replyPreview(m.replyTo,me,chat?.partner.userId,chat?.partner.displayName)}/></blockquote>}
         {m.messageType === 'TEXT' && m.content ? <p>{m.content}</p> : m.messageType === 'AUDIO' && m.audio ? <MessageAudio source={m.audio.url} durationMillis={m.audio.durationMillis} refresh={() => session.renewAudio(m.id)}/> : <p>Mensaje no compatible.</p>}
         <time dateTime={m.sentAt}>{new Date(m.sentAt).toLocaleTimeString('es-AR',{ hour: '2-digit',minute:'2-digit' })}</time>
@@ -142,13 +156,13 @@ export function FirstChat({ controller, matchId, chatId, onHome, preparing = fal
     {unseen && <button className="chat-new-messages" onClick={() => { const l = timeline.current; if (l) l.scrollTop=l.scrollHeight; nearBottom.current=true; setUnseen(false); }}>Ver mensajes nuevos</button>}
     </div>
     {/* Hide ordinary composition while retaining draft ownership and delivery reconciliation. */}
-    <form hidden={p.decisionOnly} className="chat-composer" aria-busy={state.messagePending} onSubmit={e => { e.preventDefault(); if (ordinary && !audioDirty && !composing.current && plainText(draft)) void session.send(draft,reply ? { type:reply.type,targetId:reply.targetId } : null); }}>
+    <form hidden={p.decisionOnly} className="chat-composer" aria-busy={state.messagePending} onSubmit={e => { e.preventDefault(); if (textEnabled && !composing.current && plainText(draft)) sendText(); }}>
       {reply && <aside className="chat-reply-preview" aria-label="Respuesta seleccionada"><ReplyQuote {...replyPreview(reply,me,chat?.partner.userId,chat?.partner.displayName)}/><button type="button" className="chat-icon-button" aria-label="Quitar respuesta" disabled={!!state.outgoing} onClick={() => setReply(null)}><ChatIcon name="close"/></button></aside>}
-      <AudioComposer key={audioEpoch} textDraft={text} textConfirmationVersion={state.confirmed !== null && state.confirmedFile === null ? state.confirmationVersion : 0} policy={chat?.audioPolicy ?? null} disabled={!ordinary || dialog !== null} payloadLocked={!!state.outgoing} confirmedFile={state.confirmedFile} onDirtyChange={setAudioDirty} onSend={file => session.send('',reply ? { type:reply.type,targetId:reply.targetId } : null,file)}>{microphone => <>
+      <AudioComposer key={audioEpoch} textDraft={text} textConfirmationVersion={state.confirmed !== null && state.confirmedFile === null ? state.confirmationVersion : 0} policy={chat?.audioPolicy ?? null} disabled={!ordinary || dialog !== null} payloadLocked={!!state.outgoing} confirmedFile={state.confirmedFile} onDirtyChange={setAudioDirty} onSend={file => { submittedRevision.current = -1; submittedReply.current = reply; return session.send('',reply ? { type:reply.type,targetId:reply.targetId } : null,file); }}>{microphone => <>
       <div className="chat-composer-row">
-      <label className="chat-visually-hidden" htmlFor="chat-draft">Mensaje</label><textarea placeholder="Mensaje" id="chat-draft" ref={setText} maxLength={1000} value={draft} onChange={e => setDraft(e.target.value)} disabled={!p.ordinary || state.blocked || audioDirty} rows={1}
+      <label className="chat-visually-hidden" htmlFor="chat-draft">Mensaje</label><textarea placeholder="Mensaje" id="chat-draft" ref={setText} maxLength={1000} value={draft} onChange={e => { draftRevision.current++; setDraft(e.target.value); }} disabled={!p.ordinary || state.blocked || audioDirty} rows={1}
         onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onBlur={() => { composing.current = false; }}
-        onKeyDown={event => submitChatOnEnter(event, composing.current, ordinary && !audioDirty && plainText(draft))}/>{microphone}<TextSendButton draft={text} className="chat-icon-button chat-send" disabled={!ordinary || audioDirty || !plainText(draft)}><ChatIcon name="send"/></TextSendButton></div><span className="chat-character-count">{draft.length}/1000</span>
+        onKeyDown={event => submitChatOnEnter(event, composing.current, textEnabled && plainText(draft))}/>{microphone}<TextSendButton draft={text} className="chat-icon-button chat-send" disabled={!textEnabled || !plainText(draft)}><ChatIcon name="send"/></TextSendButton></div><span className="chat-character-count">{draft.length}/1000</span>
       {!!draft && !plainText(draft) && <p>Usá texto sin &lt;, &gt; ni caracteres de control. Máximo 1000 caracteres.</p>}
       </>}</AudioComposer>
       {state.error && state.messageError && !dialog && <p className="chat-composer-error" role="alert">{state.error} <button type="button" disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
