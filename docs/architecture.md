@@ -41,3 +41,5 @@ Contracts remain in [backend API](../../reals-backend/docs/commons/api.md) and [
 ACTIVE profiles enter the scoped Home overview directly. Home validates projections,
 uses lightweight status polling and reconciles queue mutations. See the
 [Home flow, invariant matrix and integration limitations](home-review.md).
+
+Confirmed queue cancellation overlaps the guarded leave with the conservative Home status baseline. The mutation owner installs the subsequent authoritative Home and compatible profile before releasing actions. Admission, ambiguous writes and concurrent re-entry have separate reconciliation requirements. [Request ordering and consistency](runtime-refinements.md#confirmed-queue-cancellation)

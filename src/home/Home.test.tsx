@@ -603,7 +603,7 @@ it('polling keeps location failure guidance but authoritative queue membership s
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); expect(screen.queryByRole('button', { name: 'Reintentar ubicación' })).toBeNull(); expect(writes()).toHaveLength(0);
 });
-it('leaves waiting for authoritative new activity using the same poller', async () => {
+it.each(['poll', 'cancel'])('prepares authoritative new activity after %s', async trigger => {
   installFirstChatBackend();
   const original = fetcher.getMockImplementation()!;
   let historyReady!: () => void;
@@ -615,7 +615,10 @@ it('leaves waiting for authoritative new activity using the same poller', async 
   const view = mount(); await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   expect(screen.getByRole('heading', { name: 'Buscando chat' })).toBeVisible(); fetcher.mockClear();
   home.matchmaking.inQueue = false; home.pendingActions = [{ type: 'FIRST_CHAT', matchId: 'm', chatId: 'c' }]; status.version++;
-  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  if (trigger === 'cancel') {
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' }));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+  } else await act(async () => vi.advanceTimersByTimeAsync(5000));
   expect(screen.getByRole('heading', { name: 'Encontramos a alguien' })).toBeVisible();
   expect(document.querySelector('.search-screen')).toHaveAttribute('aria-busy', 'true');
   expect(screen.queryByRole('button', { name: 'Cancelar búsqueda' })).toBeNull();
@@ -1139,4 +1142,62 @@ it.each(['signout', 'hidden', 'decision', 'expired'])('owns the delayed queue-to
     expect(screen.getByRole('button',{name:'No aprobar'})).toBeEnabled();
     expect(screen.queryByRole('textbox',{name:'Mensaje'})).toBeNull();
   }
+});
+it('waits for both cancellation lanes and both projection reads before enabling Home', async () => {
+  home.matchmaking.inQueue = true;
+  mount(); await ready();
+  const original = fetcher.getMockImplementation()!;
+  const pending = new Map<string, (response: Response) => void>();
+  fetcher.mockImplementation((url, options) => {
+    const path = String(url).slice(4);
+    if (['/matchmaking/queue', '/me/home/status', '/me/profile', '/me/home'].includes(path)) {
+      return new Promise(resolve => pending.set(options?.method + ' ' + path, resolve));
+    }
+    return original(url, options);
+  });
+  const cancel = screen.getByRole('button', { name: 'Cancelar búsqueda' });
+  fireEvent.click(cancel); fireEvent.click(cancel);
+  await waitFor(() => expect([...pending.keys()].sort()).toEqual(['DELETE /matchmaking/queue', 'GET /me/home/status']));
+  await act(async () => pending.get('GET /me/home/status')!(json(status)));
+  expect(pending.size).toBe(2);
+  home.matchmaking.inQueue = false;
+  await act(async () => pending.get('DELETE /matchmaking/queue')!(json({ userId: 'u', inQueue: false })));
+  expect([...pending.keys()].slice(2).sort()).toEqual(['GET /me/home', 'GET /me/profile']);
+  await act(async () => pending.get('GET /me/home')!(json(home)));
+  expect(cancel).toBeDisabled();
+  await act(async () => pending.get('GET /me/profile')!(json(profile)));
+  await waitFor(() => expect(search()).toBeEnabled());
+  expect(writes()).toHaveLength(1);
+});
+
+it.each([{ userId: 'u', inQueue: true }, { userId: 'other', inQueue: false }, { userId: 'u' }])(
+  'fully reconciles an ambiguous DELETE acknowledgement %j and requires explicit recovery', async ack => {
+    home.matchmaking.inQueue = true;
+    mount(); await ready();
+    const original = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation((url, options) => {
+      if (options?.method === 'DELETE') {
+        home.matchmaking.inQueue = false;
+        return Promise.resolve(json(ack));
+      }
+      return original(url, options);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' }));
+    await screen.findByRole('alert');
+    expect(fetcher.mock.calls.some(([url, options]) => url === '/api/matchmaking/queue' && options?.method === 'GET')).toBe(true);
+    refreshView(); await waitFor(() => expect(search()).toBeEnabled());
+    expect(writes()).toHaveLength(1);
+  },
+);
+
+it('verifies and retains concurrent queue re-entry after an acknowledged cancellation', async () => {
+  home.matchmaking.inQueue = true;
+  mount(); await ready();
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, options) => options?.method === 'DELETE'
+    ? Promise.resolve(json({ userId: 'u', inQueue: false })) : original(url, options));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar búsqueda' }));
+  await confirmed();
+  expect(fetcher.mock.calls.some(([url, options]) => url === '/api/matchmaking/queue' && options?.method === 'GET')).toBe(true);
+  expect(writes()).toHaveLength(1);
 });
