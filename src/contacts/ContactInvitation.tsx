@@ -32,7 +32,7 @@ export function ContactInvitation({ controller, open }: { controller: SessionCon
     setDismissed(true); setVisible(false);
     try { localStorage.setItem(key, 'dismissed'); } catch { /* Current view still honors dismissal. */ }
   }
-  return <aside className="home-card contact-invite"><h3>Contactos en común</h3>
-    <p>Si querés, podés elegir contactos para encontrar coincidencias durante un primer chat.</p>
-    <button onClick={() => { dismiss(); open(); }}>Ver Contactos</button><button onClick={dismiss}>Descartar invitación</button></aside>;
+  return <aside className="home-card contact-invite"><h3><svg aria-hidden="true" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m1 3a5 5 0 0 1 4 5"/></svg> Descubrí conocidos en común</h3>
+    <p>Encontrá personas con vínculos sociales en común. Si querés participar, elegís qué contactos compartir.</p>
+    <div className="contact-bulk"><button className="contact-primary" onClick={() => { dismiss(); open(); }}>Importar mis contactos</button><button onClick={dismiss}>Descartar invitación</button></div></aside>;
 }

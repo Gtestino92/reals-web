@@ -11,7 +11,7 @@ export interface Fields {
   displayName: string; birthDate: string; gender: string; lookingForGenders: string[]; intention: string;
   city: string; countryCode: string; bio: string; preferredMinAge: number; preferredMaxAge: number; maxDistanceKm: number;
 }
-export interface FullProfile extends Profile, Fields { authenticityVerificationStatus: string }
+export interface FullProfile extends Omit<Profile, 'countryCode'>, Fields { authenticityVerificationStatus: string }
 export interface Country { code: string; displayName: string }
 export interface Photo { id: string; url: string; position: number; validationStatus: string; moderationStatus: string; isPersonPhoto: boolean; isFullBody: boolean }
 export interface LegalDocument { type: string; version: string; requiredAction: string; satisfied: boolean; url: string }

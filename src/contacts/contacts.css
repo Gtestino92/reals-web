@@ -12,3 +12,9 @@
 .contact-indicator button { font-size: .85rem; padding: 4px 8px; min-height: 28px; }
 .contact-indicator p { flex-basis: 100%; font-size: .85rem; margin: 0; }
 .contact-invite button { margin-inline-end: 8px; }
+
+.contacts button.contact-primary, .contact-invite button.contact-primary { background: var(--color-primary); color: var(--color-on-primary); font-weight: 600; }
+.contact-bulk { display: flex; flex-wrap: wrap; gap: 8px; }
+.contact-invite h3 { display: flex; align-items: center; gap: 8px; }
+.contact-invite h3 svg { color: var(--color-secondary); flex: none; }
+.contacts button.contact-region { background: transparent; border: 0; text-decoration: underline; text-underline-offset: 3px; padding-inline: 0; font-size: .9rem; }

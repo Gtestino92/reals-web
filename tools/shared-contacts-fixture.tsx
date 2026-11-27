@@ -14,7 +14,8 @@ const options = new URLSearchParams(location.search);
 const rows = [
   { name: 'Alicia Ejemplo', number: '+12025550100' },
   { name: 'Alicia Ejemplo', number: '+12025550101' },
-  { name: 'Bruno Ejemplo', number: '2025550102' },
+  { name: 'Bruno Ejemplo', number: '011 15-2345-6789' },
+  { name: 'Otro alias', number: '+5491123456789' },
 ];
 delete providers.google;
 delete providers.picker;
@@ -34,7 +35,7 @@ const api = new ApiClient(async (url, init) => {
   if (path === '/me') return json({ id: 'me', status: 'ACTIVE' });
   if (path === '/me/home') return json(emptyHome());
   if (path === '/me/home/status') return json(homeStatus());
-  if (path === '/me/profile') return json({ id: 'p', userId: 'me', status: 'ACTIVE', displayName: 'Ejemplo' });
+  if (path === '/me/profile') return json({ id: 'p', userId: 'me', status: 'ACTIVE', displayName: 'Ejemplo', countryCode: 'AR' });
   if (path === '/reference/affinity-questions') return json({ catalogVersion: 'synthetic', categories: [], questions: [] });
   if (path === '/me/profile/affinity-answers') return json({ answers: [] });
   if (path === '/matches/m') return json({ id: 'm', userAId: 'me', userBId: 'them', state: 'CHAT_ACTIVE' });

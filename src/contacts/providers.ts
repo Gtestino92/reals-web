@@ -8,7 +8,7 @@ const oversized = () => new ProviderError('La agenda supera el límite de lectur
 function append(rows: ContactRow[], name: unknown, number: unknown) {
   if (typeof number !== 'string' || !number.trim()) return;
   if (rows.length >= 4000) throw oversized();
-  rows.push({ name: typeof name === 'string' ? name.slice(0, 200) : '', number: number.trim().slice(0, 65) });
+  rows.push({ name: typeof name === 'string' ? name.slice(0, 200) : '', number: number.trim().length > 64 ? 'Teléfono demasiado largo (más de 64 caracteres)' : number.trim() });
 }
 
 export async function preparePicker(): Promise<PickContacts | null> {

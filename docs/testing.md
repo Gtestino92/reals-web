@@ -161,6 +161,7 @@ Run `npm run dev -- --port 5177 --strictPort` and then `node tools/shared-contac
 
 | Synthetic Chromium screenshots | Mobile / light | Desktop / dark |
 |---|---|---|
+| Home invitation | [Mobile invitation](shared-contacts/chromium-mobile-light-invitation.png) | [Desktop invitation](shared-contacts/chromium-desktop-dark-invitation.png) |
 | Selection | [Mobile selection](shared-contacts/chromium-mobile-light-selection.png) | [Desktop selection](shared-contacts/chromium-desktop-dark-selection.png) |
 | First Chat | [Mobile chat](shared-contacts/chromium-mobile-light-chat.png) | [Desktop chat](shared-contacts/chromium-desktop-dark-chat.png) |
 
