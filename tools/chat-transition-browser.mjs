@@ -83,7 +83,7 @@ async function checkSecond(page) {
 }
 
 for (const [engine, launcher] of Object.entries({ chromium, webkit })) {
-  const browser = await launcher.launch(engine === 'chromium' ? { channel: 'chrome' } : {});
+  const browser = await launcher.launch(engine === 'chromium' ? { channel: 'chrome', ignoreDefaultArgs: ['--hide-scrollbars'] } : {});
   try {
     for (const [width, colorScheme] of (before ? [[360,'light'],[1280,'dark']] : [[320,'dark'],[360,'light'],[1280,'light'],[1280,'dark']])) {
       const page = await browser.newPage({ viewport: { width, height: 800 }, colorScheme });
@@ -122,8 +122,11 @@ for (const [engine, launcher] of Object.entries({ chromium, webkit })) {
       await page.getByText('Continuar con Google').waitFor();
       await page.evaluate(() => {
         window.samples = [];
+        const backdropWidth = () => getComputedStyle(document.body, '::before').width;
+        window.loginBackdropWidths = new Set([backdropWidth()]);
         const visible = node => !!node?.getClientRects().length;
         requestAnimationFrame(function sample(t) {
+          window.loginBackdropWidths.add(backdropWidth());
           const all = selector => [...document.querySelectorAll(selector)].filter(visible);
           window.samples.push({ t, status:all('[role=status]').map(n=>n.textContent).join(' '), exit:all('button').some(n=>n.textContent==='Cerrar sesión'), heading:all('h2')[0]?.textContent, chrome:visible(document.querySelector('.first-chat')), ready:!!document.querySelector('.chat-composer textarea:enabled') });
           requestAnimationFrame(sample);
@@ -132,6 +135,9 @@ for (const [engine, launcher] of Object.entries({ chromium, webkit })) {
       await page.getByText('Continuar con Google').click();
       try { await page.getByRole('heading',{name:'Buscando chat'}).waitFor({timeout:12000}); }
       catch (error) { console.log(reads, await page.locator('body').innerText()); throw error; }
+      if (!before && width >= 842) {
+        assert.equal(await page.evaluate(() => window.loginBackdropWidths.size), 1, 'Desktop backdrop shifted during Google login');
+      }
       const seal = await page.locator('.search-screen img').elementHandle();
       matched = true;
       await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
@@ -190,11 +196,12 @@ for (const [engine, launcher] of Object.entries({ chromium, webkit })) {
         assert.equal(prep.homeFrames,0); assert.equal(prep.signOutFrames,0); assert.equal(prep.incompleteFrames,0);
         assert.deepEqual(init.sort(),['/chats/c/exit-requests','/chats/c/messages','/matches/m','/matches/m/chat']);
         const dismiss = page.getByRole('button',{name:'Descartar indicador de contactos en común'});
-        assert.equal((await dismiss.locator('svg').boundingBox()).width,18);
+        assert.equal((await dismiss.locator('svg').boundingBox()).width,14);
         const bounds = await page.locator('.contact-indicator').boundingBox();
         assert.ok(bounds.x >= 0 && bounds.x+bounds.width <= width);
         const trigger = await info.boundingBox();
         const cross = await dismiss.boundingBox();
+        assert.ok(cross.width >= 28 && cross.height >= 28);
         assert.ok(trigger.x+trigger.width <= cross.x+0.1);
         await dismiss.focus(); await page.keyboard.press('Enter');
         assert.ok(await page.getByRole('heading',{name:'María'}).evaluate(node=>node===document.activeElement));

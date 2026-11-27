@@ -27,6 +27,29 @@ beforeEach(()=>{
 afterEach(()=>vi.unstubAllGlobals());
 const mount=()=>render(<StrictMode><FirstChat controller={controller} matchId="m" chatId="c" onHome={home}/></StrictMode>);
 const ready=async()=>{await screen.findByRole('heading',{name:'María'});await waitFor(()=>expect(screen.getByRole('textbox',{name:'Mensaje'})).toBeEnabled());};
+it('keeps the confirmed contact range and its popup mounted across ordinary tab switches', async () => {
+  Object.assign(chat, { sharedContactRange: 'ONE_TO_FIVE' });
+  mount();
+  await ready();
+  const indicator = screen.getByRole('button', { name: 'Entre 1 y 5 contactos en común' });
+  fireEvent.click(indicator);
+  const visibility = vi.spyOn(document, 'visibilityState', 'get');
+  for (let cycle = 0; cycle < 2; cycle++) {
+    visibility.mockReturnValue('hidden');
+    fireEvent(document, new Event('visibilitychange'));
+    expect(indicator).toBeInTheDocument();
+    let complete!: (value: unknown) => void;
+    vi.mocked(controller.request).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    visibility.mockReturnValue('visible');
+    fireEvent(document, new Event('visibilitychange'));
+    expect(indicator).toBeVisible();
+    await act(async () => complete({ id: 'm', userAId: 'me', userBId: 'them', state: 'CHAT_ACTIVE' }));
+    expect(indicator).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(/Ambas personas eligieron/)).toBeVisible();
+  }
+  fireEvent(window, new Event('pagehide'));
+  expect(indicator).not.toBeInTheDocument();
+});
 it('works under StrictMode and renders safe chronological messages without photos',async()=>{messages[0]!.content='<img src=x onerror=bad>';mount();await ready();expect(screen.getByText('<img src=x onerror=bad>')).toBeVisible();expect(document.querySelector('img')).toBeNull();expect(screen.getByRole('list',{name:'Mensajes'})).toBeVisible();});
 it('clears only a confirmed draft and preserves the next draft on incoming polling',async()=>{mount();await ready();const input=screen.getByRole('textbox',{name:'Mensaje'});fireEvent.change(input,{target:{value:'¡Hola!'}});fireEvent.click(screen.getByRole('button',{name:'Enviar mensaje'}));await waitFor(()=>expect(input).toHaveValue(''));fireEvent.change(input,{target:{value:'Nuevo borrador'}});messages.push(messageFixture('3'));fireEvent(window,new Event('online'));await waitFor(()=>expect(screen.getAllByText('Hola, ¿cómo estás?')).toHaveLength(2));expect(input).toHaveValue('Nuevo borrador');});
 it('uses immutable question identity for direct replies',async()=>{mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Responder pregunta'}));fireEvent.change(screen.getByRole('textbox',{name:'Mensaje'}),{target:{value:'La música'}});fireEvent.click(screen.getByRole('button',{name:'Enviar mensaje'}));await waitFor(()=>expect(controller.request).toHaveBeenCalledWith('/chats/c/messages',expect.any(AbortSignal),'POST',expect.objectContaining({replyTo:{type:'GUIDANCE_QUESTION',targetId:'question-1'}})));});

@@ -58,7 +58,7 @@ export function FirstChat({ controller, matchId, chatId, onHome, preparing = fal
       if (document.visibilityState === 'visible' && (snapshot.chat || !snapshot.error)) void session.refresh(false,true);
     },5000);
     const tick = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.checkExitTimeout(); },1000);
-    const resume = () => { if (document.visibilityState === 'visible') void session.resume(); else session.concealContacts(); };
+    const resume = () => { if (document.visibilityState === 'visible') void session.resume(); else session.invalidateForeground(); };
     window.addEventListener('pagehide', session.concealContacts); document.addEventListener('visibilitychange',resume); window.addEventListener('online',resume);
     return () => { live = false; owner?.removeEventListener('abort', retire); session.dispose(); clearInterval(timer); clearInterval(tick); window.removeEventListener('pagehide', session.concealContacts); document.removeEventListener('visibilitychange',resume); window.removeEventListener('online',resume); };
   }, [session, controller]);

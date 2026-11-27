@@ -112,8 +112,10 @@ export class ChatSession {
     const merged = this.history.finishRead(messages, !cursor);
     const outgoing = this.state.outgoing;
     const confirmed = outgoing && merged.some(m => m.clientMessageId === outgoing.clientMessageId && m.senderId === this.me);
-    if (epoch !== this.disclosureEpoch || document.visibilityState === 'hidden' || this.history.access === 'RESTRICTED') delete chat.sharedContactRange;
-    this.install({ foregroundVerified: epoch === this.disclosureEpoch && document.visibilityState === 'visible', chat, messages: merged, exits, offset: Date.parse(chat.serverTime) - (started + received) / 2, blocked: false,
+    const foregroundVerified = epoch === this.disclosureEpoch && document.visibilityState === 'visible';
+    // An older or background read may retain an existing range, but cannot grant a new one.
+    if (this.history.access === 'RESTRICTED' || (!foregroundVerified && chat.sharedContactRange !== this.state.chat?.sharedContactRange)) delete chat.sharedContactRange;
+    this.install({ foregroundVerified, chat, messages: merged, exits, offset: Date.parse(chat.serverTime) - (started + received) / 2, blocked: false,
       ...(confirmed ? { outgoing: null, confirmed: outgoing.content, confirmedReply: outgoing.replyTo, confirmedFile: outgoing.file, confirmationVersion: this.state.confirmationVersion + 1 } : {}), historyLimited: this.state.historyLimited || (!cursor && messages.length >= 500) });
     if (chat.myDecision !== 'PENDING') this.finish('', false);
   }
@@ -138,8 +140,12 @@ export class ChatSession {
     this.disclosureEpoch++;
     this.hideContactRange(true);
   };
+  invalidateForeground = () => {
+    this.disclosureEpoch++;
+    if (this.state.foregroundVerified) this.install({ foregroundVerified: false });
+  };
   resume = () => {
-    this.concealContacts();
+    this.invalidateForeground();
     if (this.terminal || this.writing || !this.current(this.serial)) return;
     // A foreground snapshot supersedes an older read, never an uncertain write.
     this.read?.abort(); this.read = null;
@@ -159,7 +165,12 @@ export class ChatSession {
     read.signal.addEventListener('abort', () => clearTimeout(deadline), { once: true });
     this.install({ busy: !this.state.chat });
     try { await this.load(signal, serial, full); if (this.current(serial) && (initial || !silent)) this.install({ error: '', reactionFeedback: null, messageError: false }); }
-    catch (error) { if (this.current(serial) && !signal.aborted && !this.terminalError(error)) this.install({ blocked: true, error: 'No pudimos actualizar el chat. Revisá tu conexión y usá Reintentar conexión.' }); }
+    catch (error) {
+      if (this.current(serial) && !signal.aborted && !this.terminalError(error)) {
+        this.hideContactRange();
+        this.install({ blocked: true, error: 'No pudimos actualizar el chat. Revisá tu conexión y usá Reintentar conexión.' });
+      }
+    }
     finally { clearTimeout(deadline); if (this.current(serial)) { this.read = null; this.install({ busy: false }); } }
   };
   private async write(path: string, method: string, body: unknown, outgoing?: Outgoing, reactionId: string | null = null) {

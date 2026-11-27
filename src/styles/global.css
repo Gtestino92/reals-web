@@ -35,6 +35,9 @@ html {
 }
 
 @media (hover: hover) and (pointer: fine) {
+  /* Keep the backdrop centered as Login, startup and Home exchange scrollable content. */
+  html:has(.login-page) { scrollbar-gutter: stable; }
+
   body::before {
     content: "";
     position: fixed;
