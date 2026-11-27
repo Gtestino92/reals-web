@@ -12,7 +12,7 @@ it.each(['CHAT_ACTIVE', 'VISUAL_PHASE'])('uses private decision feedback with au
   await session.refresh();
   chat.myDecision = 'APPROVED'; matchState = state;
   await session.refresh();
-  expect(home).toHaveBeenCalledWith(state === 'CHAT_ACTIVE' ? 'Tu decisión quedó registrada.' : 'El chat terminó.', state !== 'CHAT_ACTIVE');
+  expect(home).toHaveBeenCalledWith(state === 'CHAT_ACTIVE' ? '' : 'El chat terminó.', state !== 'CHAT_ACTIVE');
   expect(JSON.stringify(home.mock.calls)).not.toMatch(/Ambas|Actividad|mutu/);
 });
 it('keeps quick approval pending for presentation only and excludes duplicates', async () => {
@@ -30,7 +30,7 @@ it('keeps quick approval pending for presentation only and excludes duplicates',
     await vi.advanceTimersByTimeAsync(100);
     expect(session.getSnapshot().decisionPending).toBe('approve'); expect(home).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(200); await pending;
-    expect(home).toHaveBeenCalledWith('Tu decisión quedó registrada.', false); expect(writes()).toHaveLength(1);
+    expect(home).toHaveBeenCalledWith('', false); expect(writes()).toHaveLength(1);
   } finally { vi.useRealTimers(); }
 });
 it.each(['dispose', 'hidden'])('releases presentation ownership on %s', async outcome => {

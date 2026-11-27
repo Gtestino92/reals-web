@@ -21,7 +21,7 @@ export class SecondChatEntryIntent {
 }
 type ResolutionAction = 'no-show' | 'completion' | 'inactivity' | 'ACCEPTED' | 'REJECTED';
 type ChatAction = ResolutionAction | 'safety' | 'block';
-interface State {
+interface State { pendingReaction: string | null;
   audioAccess: CounterpartAudioAccess;
   returnHome: string | null; status: SecondStatus | null; receivedAt: number; messages: Message[]; partnerId: string; partnerName: string;
   retryBlocked: boolean; busy: boolean; blocked: boolean; error: string; outgoing: Outgoing | null; confirmed: Outgoing | null; confirmationVersion: number; historyLimited: boolean;
@@ -46,7 +46,7 @@ const terminal = (status: SecondStatus | null) => !!status && ['FINISHED','ABAND
 const audioConflictCodes = new Set(['CHAT_AUDIO_FEATURE_DISABLED','CHAT_AUDIO_GUIDANCE_REQUIRED','CHAT_AUDIO_GUIDANCE_NOT_AVAILABLE','CHAT_AUDIO_LIMIT_REACHED','CHAT_AUDIO_WAITING_FOR_BOTH','CHAT_AUDIO_NOT_AVAILABLE_YET','CHAT_NOT_AVAILABLE','SECOND_CHAT_EXPIRED','SECOND_CHAT_ALREADY_RESOLVED','SECOND_CHAT_CONVERSATION_ALREADY_RESOLVED','SECOND_CHAT_JOIN_REQUIRED','CHAT_MUTUAL_CANCELLATION_PENDING']);
 /** Owns one connection and one authenticated lifetime. Reads never release mutation ownership. */
 export class SecondChatSession {
-  private state: State = { audioAccess: 'UNKNOWN', returnHome: null, status: null, receivedAt: 0, messages: [], partnerId: '', partnerName: '', retryBlocked: false, busy: false, blocked: true, error: '', diagnostic: null, notice: '', outgoing: null, confirmed: null, confirmationVersion: 0, historyLimited: false, historyReady: false, entryPending: false, pendingAction: null };
+  private state: State = { pendingReaction: null, audioAccess: 'UNKNOWN', returnHome: null, status: null, receivedAt: 0, messages: [], partnerId: '', partnerName: '', retryBlocked: false, busy: false, blocked: true, error: '', diagnostic: null, notice: '', outgoing: null, confirmed: null, confirmationVersion: 0, historyLimited: false, historyReady: false, entryPending: false, pendingAction: null };
   private readonly history: ParticipantHistory;
   get eligible() { return this.history.eligible; }
   private observeAccess = (access: CounterpartAudioAccess) =>
@@ -70,7 +70,7 @@ export class SecondChatSession {
   getSnapshot = () => this.state;
   private install(p: Partial<State>) { if (!this.lifetime.signal.aborted) { this.state = { ...this.state, ...p }; this.listeners.forEach(f => f()); } }
   start() { if (this.retired || !this.identityCurrent()) return; if (this.lifetime.signal.aborted) { this.lifetime = new AbortController(); this.generation++; this.read = null; this.writing = false; this.entering = false; this.install({ partnerName: this.homePartnerName }); } }
-  dispose() { this.history.clear(); this.lifetime.abort(); this.read?.abort(); this.generation++; this.state = { ...this.state, returnHome: null, status: null, partnerId: '', partnerName: '', outgoing: null, confirmed: null, messages: [], busy: false, blocked: true, historyReady: false, entryPending: false, pendingAction: null }; this.listeners.forEach(f => f()); }
+  dispose() { this.history.clear(); this.lifetime.abort(); this.read?.abort(); this.generation++; this.state = { ...this.state, pendingReaction: null, returnHome: null, status: null, partnerId: '', partnerName: '', outgoing: null, confirmed: null, messages: [], busy: false, blocked: true, historyReady: false, entryPending: false, pendingAction: null }; this.listeners.forEach(f => f()); }
   get now() { return this.state.status ? Date.parse(this.state.status.serverTime) + Math.max(0, Date.now() - this.state.receivedAt) : Date.now(); }
   get rules() { return secondPolicy(this.state.status,this.now); }
   get canReturnHome() { return !this.state.busy && !this.attendanceUncertain && (this.state.status ? this.rules.canReturn : !!this.state.diagnostic && [403,404].includes(this.state.diagnostic.httpStatus)); }
@@ -181,12 +181,12 @@ export class SecondChatSession {
     return fresh !== previous ? fresh?.audio?.url ?? null : null;
   };
   resume = () => { if (this.writing || this.entering) return; this.read?.abort(); this.read = null; return this.refresh(); };
-  private async write(path: string, method: string, body?: unknown, outgoing?: Outgoing, pendingAction: ChatAction | null = null) {
+  private async write(path: string, method: string, body?: unknown, outgoing?: Outgoing, pendingAction: ChatAction | null = null, reactionId: string | null = null) {
     if (this.writing || this.lifetime.signal.aborted) return;
     this.writing = true; this.read?.abort(); this.read = null;
     if (path.endsWith('/join')) this.attendanceUncertain = true;
     const g = ++this.generation, signal = this.lifetime.signal;
-    this.install({ busy: true, pendingAction, error: '', diagnostic: null, notice: '', ...(outgoing ? { confirmed: null, outgoing: { ...outgoing, phase: 'pending' } } : {}) });
+    this.install({ pendingReaction: reactionId, busy: true, pendingAction, error: '', diagnostic: null, notice: '', ...(outgoing ? { confirmed: null, outgoing: { ...outgoing, phase: 'pending' } } : {}) });
     let errorText = '';
     const safety = path.endsWith('/safety-cancellations') || path.endsWith('/block');
     try {
@@ -210,12 +210,12 @@ export class SecondChatSession {
       if (outgoing || method === 'PUT') {
         const message = parseMessage(result,this.state.status?.chatId ?? '',[this.me,this.state.partnerId]);
         if (outgoing && (message.senderId !== this.me || message.clientMessageId !== outgoing.clientMessageId)) throw new ApiError('invalid');
-        this.install({ messages: outgoing ? this.history.merge([message]) : this.history.mergeReaction(path, message), ...(outgoing ? { outgoing: null, confirmed: outgoing, confirmationVersion: this.state.confirmationVersion + 1 } : {}) });
+        this.install({ pendingReaction: null, messages: outgoing ? this.history.merge([message]) : this.history.mergeReaction(path, message), ...(outgoing ? { outgoing: null, confirmed: outgoing, confirmationVersion: this.state.confirmationVersion + 1 } : {}) });
       }
     } catch (e) {
       if (!this.current(g,signal)) return;
       if (pairBlocked(e)) this.observeAccess('RESTRICTED');
-      this.install({ diagnostic: diagnostic(e) });
+      this.install({ pendingReaction: null, diagnostic: diagnostic(e) });
       if (outgoing?.file) this.audioLifecycleConflict = e instanceof ApiError && e.status === 409 && audioConflictCodes.has(e.code);
       const ambiguous = !(e instanceof ApiError) || e.status === 0 || e.status >= 500 || e.kind === 'invalid';
       errorText = 'No pudimos confirmar la acción. Actualizamos el estado antes de permitir otro intento.';
@@ -289,7 +289,7 @@ export class SecondChatSession {
   discardFailed = () => { if (!this.writing && this.state.outgoing?.phase === 'failed') this.install({ outgoing: null, retryBlocked: false }); };
   react = (id: string) => {
     if (!this.allowed || !this.rules.writable || this.state.outgoing || !this.eligible.has(id)) return;
-    return this.write(`/chats/${this.state.status?.chatId}/messages/${encodeURIComponent(id)}/reaction`,'PUT',{ type: 'HEART' });
+    return this.write(`/chats/${this.state.status?.chatId}/messages/${encodeURIComponent(id)}/reaction`,'PUT',{ type: 'HEART' }, undefined, null, id);
   };
   action = (kind: ChatAction, body?: unknown) => {
     if (!this.allowed || (this.state.outgoing && kind !== 'safety' && kind !== 'block')) return;

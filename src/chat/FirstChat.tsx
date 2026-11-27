@@ -1,3 +1,4 @@
+import { OutgoingMessage } from './OutgoingMessage';
 import { useChatDraftHeight, useChatViewport } from './useChatViewport';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useStartupDestination } from '../SessionLoading';
@@ -21,7 +22,7 @@ type DialogAction = 'mutual' | 'cancel' | 'safety' | 'block';
 export function FirstChat({ controller, matchId, chatId, onHome }: { controller: SessionController; matchId: string; chatId: string; onHome: (message?: string, closed?: boolean) => void }) {
   const dirty = useRef(false), knownClosed = useRef(false), terminalMessage = useRef('');
   const [terminalNotice,setTerminalNotice] = useState(''), [audioDirty,setAudioDirty] = useState(false), [audioEpoch,setAudioEpoch] = useState(0);
-  const [session] = useState(() => new ChatSession(controller,matchId,chatId,controller.snapshot.account?.id ?? '',(message, closed) => { knownClosed.current = closed; terminalMessage.current = message; if (dirty.current) setTerminalNotice(message + ' Conservamos tu borrador hasta que vuelvas a Inicio.'); else onHome(message,closed); }));
+  const [session] = useState(() => new ChatSession(controller,matchId,chatId,controller.snapshot.account?.id ?? '',(message, closed) => { knownClosed.current = closed; terminalMessage.current = message; if (dirty.current) setTerminalNotice((message ? message + ' ' : '') + 'Conservamos tu borrador hasta que vuelvas a Inicio.'); else onHome(message,closed); }));
   const state = useSyncExternalStore(session.subscribe,session.getSnapshot);
   const starting = useStartupDestination(!!state.chat || !!state.error);
   const [draft,setDraft] = useState(''), [reply,setReply] = useState<NonNullable<Message['replyTo']> | null>(null), [dialog,setDialog] = useState<DialogAction | null>(null), [now,setNow] = useState(Date.now()), [unseen,setUnseen] = useState(false);
@@ -50,7 +51,7 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
   useEffect(() => {
     const list = timeline.current;
     if (nearBottom.current && list) { list.scrollTop = list.scrollHeight; setUnseen(false); } else setUnseen(true);
-  }, [state.messages.length]);
+  }, [state.messages.length + Number(!!state.outgoing)]);
   useEffect(() => { const warn = (e: BeforeUnloadEvent) => { if (dirty.current) { e.preventDefault(); } }; window.addEventListener('beforeunload',warn); return () => window.removeEventListener('beforeunload',warn); }, [draft,state.outgoing]);
   const chat = state.chat, p = policy(chat,state.exits,now+state.offset), me = session.me, eligible = session.eligible, g = chat?.guidance;
   usePresentedActivity(root, chat?.status === 'ACTIVE' && !knownClosed.current ? activityId('FIRST_CHAT', matchId, chatId) : null);
@@ -113,9 +114,9 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
         {m.messageType === 'TEXT' && m.content ? <p>{m.content}</p> : m.messageType === 'AUDIO' && m.audio ? <MessageAudio source={m.audio.url} durationMillis={m.audio.durationMillis} refresh={() => session.renewAudio(m.id)}/> : <p>Mensaje no compatible.</p>}
         <time dateTime={m.sentAt}>{new Date(m.sentAt).toLocaleTimeString('es-AR',{ hour: '2-digit',minute:'2-digit' })}</time>
         </article></ReplySwipe>
-        {m.senderId === me ? m.reactionType && <span className="chat-received-heart" role="img" aria-label={(partner || 'La otra persona') + ' reaccionó con corazón'}>♥</span> : <ReactionLane confirmed={m.reactionType === 'HEART'} eligible={eligible.has(m.id)} disabled={!ordinary || audioDirty} react={() => session.react(m.id)}/>}
+        {m.senderId === me ? m.reactionType && <span className="chat-received-heart" role="img" aria-label={(partner || 'La otra persona') + ' reaccionó con corazón'}><ChatIcon name="heart"/></span> : <ReactionLane pending={state.pendingReaction === m.id} confirmed={m.reactionType === 'HEART'} eligible={eligible.has(m.id)} disabled={!ordinary || audioDirty} react={() => session.react(m.id)}/>}
       </li>)}
-      {state.outgoing && <li className="chat-message outgoing"><p>{state.outgoing.content ?? 'Audio pendiente'}</p><p role="status">{state.outgoing.phase === 'pending' ? 'Enviando…' : state.outgoing.phase === 'uncertain' ? 'Sin confirmar' : 'Falló el envío'}</p>{state.outgoing.phase !== 'pending' && <button disabled={disabled || !p.ordinary} onClick={() => void session.retry()}>Reconciliar y reintentar el mismo envío</button>}{state.outgoing.phase === 'failed' && <button disabled={disabled} onClick={session.editFailed}>Editar borrador</button>}</li>}
+      {state.outgoing && <OutgoingMessage message={state.outgoing} continuation={state.messages.at(-1)?.senderId === me} quote={reply && state.outgoing.replyTo?.targetId === reply.targetId ? replyPreview(reply,me,chat?.partner.userId,partner) : null}>{state.outgoing.phase !== 'pending' && <button disabled={disabled || !p.ordinary} onClick={() => void session.retry()}>Reconciliar y reintentar el mismo envío</button>}{state.outgoing.phase === 'failed' && <button disabled={disabled} onClick={session.editFailed}>Editar borrador</button>}</OutgoingMessage>}
     </ol>
     {unseen && <button className="chat-new-messages" onClick={() => { const l = timeline.current; if (l) l.scrollTop=l.scrollHeight; nearBottom.current=true; setUnseen(false); }}>Ver mensajes nuevos</button>}
     </div>

@@ -170,10 +170,14 @@
 .chat-message-row.outgoing > .reply-swipe { max-width:min(560px, 85%); }
 .chat-message-row .chat-message { max-width:100%; box-sizing:border-box; padding:4px 10px; }
 .chat-message-row .chat-message p { margin:0; }
-.chat-message-row time { display:block; text-align:right; }
+.chat-message-row.outgoing time, .chat-delivery { min-inline-size:10ch; font-size:.8rem; font-variant-numeric:tabular-nums; }
+.chat-audio-pending { min-height:68px; display:grid; align-content:center; }
+.chat-message-row time, .chat-delivery { display:block; text-align:right; }
 .chat-reaction-lane { flex:0 0 48px; width:48px; display:flex; align-items:center; justify-content:center; }
 .first-chat .chat-heart { width:48px; height:48px; padding:0; border:0; background:transparent; font-size:24px; }
 .chat-given-heart { width:48px; height:48px; display:grid; place-items:center; color:var(--color-primary); font-size:24px; animation:chat-heart-arrive 150ms ease-out; }
+.first-chat .chat-heart, .chat-given-heart { display:grid; place-items:center start; padding-inline-start:6px; box-sizing:border-box; }
+.chat-received-heart svg { width:20px; height:20px; }
 .chat-received-heart { position:absolute; bottom:0; right:16px; width:24px; height:24px; display:grid; place-items:center; color:var(--color-primary); font-size:20px; }
 @keyframes chat-heart-arrive { from { transform:scale(.86); } to { transform:scale(1); } }
 @media (prefers-reduced-motion:reduce) { .reply-swipe { transition:none; } .chat-given-heart, .chat-guidance-next::after, .chat-guidance-complete::after, .chat-spinner { animation:none; } }

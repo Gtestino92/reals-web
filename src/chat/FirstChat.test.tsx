@@ -121,7 +121,7 @@ it('locks a pending reaction and installs only the confirmed HEART response',asy
   vi.mocked(controller.request).mockImplementation((path,signal,method,body)=>path.endsWith('/reaction')?new Promise(r=>{resolve=r;}):original(path,signal,method,body));
   mount();await ready();const heart=screen.getByRole('button',{name:'Reaccionar con corazón'});
   expect(heart.closest('.chat-message')).toBeNull();fireEvent.click(heart);fireEvent.click(heart);
-  expect(screen.getByRole('button',{name:'Guardando corazón'})).toBeDisabled();
+  expect(screen.getByRole('img',{name:'Guardando corazón'})).toHaveAttribute('aria-busy','true');
   expect(vi.mocked(controller.request).mock.calls.filter(c=>c[0].endsWith('/reaction'))).toHaveLength(1);
   messages[0]={...messages[0]!,reactionType:'HEART'};await act(async()=>resolve?.(messages[0]));
   expect(await screen.findByRole('img',{name:'Reaccionaste con corazón'})).toBeVisible();
