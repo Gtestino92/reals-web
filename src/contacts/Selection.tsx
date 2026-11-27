@@ -26,10 +26,10 @@ function review(rows: ContactRow[], country: CountryCode | undefined) {
   return { groups: [...groups.values()], invalid };
 }
 
-export type RegisterContactRegion = (close: () => void) => () => void;
+export type RegisterContactDialog = (close: () => void) => () => void;
 
-export function Selection({ rows, countryCode, updating, disabled, pending = false, registerContactRegion, confirm, cancel }: {
-  registerContactRegion?: RegisterContactRegion | undefined; pending?: boolean; disabled: boolean; rows: ContactRow[]; countryCode: string | null | undefined; updating: boolean;
+export function Selection({ rows, countryCode, updating, disabled, pending = false, registerContactDialog, confirm, cancel }: {
+  registerContactDialog?: RegisterContactDialog | undefined; pending?: boolean; disabled: boolean; rows: ContactRow[]; countryCode: string | null | undefined; updating: boolean;
   confirm: (numbers: string[]) => void; cancel: () => void;
 }) {
   const [region, setRegion] = useState(() => countries.find(code => code === countryCode) ?? '');
@@ -45,14 +45,14 @@ export function Selection({ rows, countryCode, updating, disabled, pending = fal
     const resize = () => node?.style.setProperty('--country-viewport', viewport?.height + 'px');
     if (viewport) resize();
     viewport?.addEventListener('resize', resize);
-    const release = registerContactRegion?.(() => setAdjusting(false));
+    const release = registerContactDialog?.(() => setAdjusting(false));
     return () => {
       release?.();
       viewport?.removeEventListener('resize', resize);
       node?.close();
       trigger.current?.focus({ preventScroll: true });
     };
-  }, [adjusting, registerContactRegion]);
+  }, [adjusting, registerContactDialog]);
   function closeSelector() { setAdjusting(false); }
   const [excluded, setExcluded] = useState({ rows: new Set<number>(), numbers: new Set<string>() });
   const country = countries.find(code => code === region);

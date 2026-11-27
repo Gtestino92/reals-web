@@ -136,7 +136,7 @@ it.each(['home', 'account'] as const)('consumes dialog Back on the Contacts entr
   act(() => result.current.open('contacts'));
   const before = { state: history.state, length: history.length };
   const close = vi.fn();
-  const release = result.current.registerContactRegion(close);
+  const release = result.current.registerContactDialog(close);
   act(() => history.back());
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect({ state: history.state, length: history.length }).toEqual(before);
@@ -154,14 +154,14 @@ it('retires the contact selector without traversing history or claiming a foreig
   act(() => result.current.open('account'));
   act(() => result.current.open('contacts'));
   const close = vi.fn();
-  const release = result.current.registerContactRegion(close);
+  const release = result.current.registerContactDialog(close);
   release();
   act(() => history.back());
   await waitFor(() => expect(result.current.destination).toBe('account'));
   expect(close).not.toHaveBeenCalled();
   act(() => history.forward());
   await waitFor(() => expect(result.current.destination).toBe('contacts'));
-  result.current.registerContactRegion(close);
+  result.current.registerContactDialog(close);
   act(() => window.dispatchEvent(new PopStateEvent('popstate', { state: { owner: 'old', trail: ['home', 'account'] } })));
   expect(result.current.destination).toBe('home');
   expect(close).not.toHaveBeenCalled();
@@ -173,7 +173,7 @@ it('ignores a retired selector callback when a pending Back restoration settles'
   act(() => result.current.open('contacts'));
   const entry = history.state;
   const close = vi.fn();
-  const release = result.current.registerContactRegion(close);
+  const release = result.current.registerContactDialog(close);
   const traversal = vi.fn(release);
   window.addEventListener('popstate', traversal);
   try {

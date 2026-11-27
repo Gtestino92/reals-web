@@ -70,11 +70,74 @@ async function checkRegionHistory(browser) {
   }
   if (failures.length) throw new AggregateError(failures, 'Country selector history regressions');
 }
+async function checkPickerTransitions(browser) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.route('**/*', route => new URL(route.request().url()).origin === new URL(url).origin ? route.continue() : route.abort());
+    await page.addInitScript(() => {
+      const picker = { calls: 0 };
+      window.syntheticPicker = picker;
+      Object.defineProperty(navigator, 'contacts', { value: {
+        getProperties: async () => ['name', 'tel'],
+        select: () => new Promise((resolve, reject) => {
+          picker.calls++;
+          picker.finish = outcome => {
+            if (outcome === 'cancel') reject(new DOMException('', 'AbortError'));
+            else resolve(outcome === 'empty' ? [] : [{ name: ['Ejemplo'], tel: ['+12025550100'] }]);
+          };
+        }),
+      } });
+    });
+    await page.goto(url + '?transitions');
+    const button = name => page.getByRole('button', { name, exact: true });
+    for (const name of ['Cuenta', 'Contactos', 'Acepto participar']) await button(name).click();
+    const trigger = button('Elegir del dispositivo');
+    const controls = page.locator('.contacts button, .contacts [role=status]');
+    const layout = () => controls.evaluateAll(nodes => nodes.map(node => {
+      const { x, y, width, height } = node.getBoundingClientRect();
+      return [node.textContent, x, y, width, height];
+    }));
+    await trigger.scrollIntoViewIfNeeded();
+    const before = await layout();
+    for (const outcome of ['empty', 'cancel', 'selected']) {
+      await trigger.click();
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await page.waitForLoadState('networkidle');
+      assert.deepEqual(await layout(), before);
+      assert.equal(await trigger.isDisabled(), true);
+      await page.evaluate(outcome => {
+        const trigger = [...document.querySelectorAll('.contacts button')].find(b => b.textContent === 'Elegir del dispositivo');
+        const root = document.querySelector('.contacts');
+        if (outcome === 'selected') {
+          window.managementFlash = false;
+          new MutationObserver(() => {
+            if (trigger.isConnected && !trigger.disabled) window.managementFlash = true;
+          }).observe(root, { childList: true, subtree: true, attributes: true });
+        }
+        window.syntheticPicker.finish(outcome);
+      }, outcome);
+      if (outcome === 'selected') {
+        await page.getByRole('heading', { name: 'Revisá tus contactos' }).waitFor();
+        assert.equal(await trigger.count(), 0);
+        assert.equal(await page.evaluate(() => window.managementFlash), false);
+      } else {
+        await page.waitForFunction(() => [...document.querySelectorAll('.contacts button')].some(b => b.textContent === 'Elegir del dispositivo' && !b.disabled));
+        assert.deepEqual(await layout(), before);
+      }
+    }
+    assert.equal(await page.evaluate(() => window.syntheticPicker.calls), 3);
+  } finally { await page.close(); }
+}
 for (const [name, engine, options] of [
   ['chromium', chromium, { channel: 'chrome' }], ['webkit', webkit, {}],
 ]) {
   const browser = await engine.launch(options);
   try {
+    if (process.argv.includes('--picker-transitions')) {
+      await checkPickerTransitions(browser);
+      console.log(name, 'picker transitions passed');
+      continue;
+    }
     if (process.argv.includes('--region-history')) {
       await checkRegionHistory(browser);
       console.log(name, 'region history passed');
@@ -113,8 +176,8 @@ for (const [name, engine, options] of [
       await press('Actualizar contactos'); await page.getByText(/El estado de tus contactos cambió/).waitFor();
       await press('Elegir del dispositivo'); await press('Actualizar contactos');
       await page.getByText('Sincronizaste 3 teléfonos.').waitFor();
-      page.once('dialog', dialog => dialog.accept()); await press('Deshabilitar contactos en común');
-      await button('Acepto participar').waitFor(); await press('Volver a Cuenta');
+      await press('Deshabilitar contactos en común'); await press('Deshabilitar');
+      await button('Contactos').waitFor();
       assert.equal(await button('Contactos').evaluate(b => b === document.activeElement), true);
       await page.goForward(); await button('Acepto participar').waitFor();
       await page.goto(url + '?google'); await press('Cuenta'); await press('Contactos'); await press('Acepto participar');

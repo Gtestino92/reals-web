@@ -1,10 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ApiError } from '../auth/api';
 import type { SessionController } from '../auth/session';
 import { contactStatus, importResult, ownerPath, type ContactStatus } from './contracts';
 import { ProviderError, providers, syntheticContacts, type Providers, type PickContacts, type ContactRow } from './providers';
 import { ContactHeader, ContactSkeleton } from './ContactLoading';
-import { Selection, type RegisterContactRegion } from './Selection';
+import { Selection, type RegisterContactDialog } from './Selection';
 import './contacts.css';
 
 const changed = 'El estado de tus contactos cambió. Revisalo y volvé a elegir si querés continuar.';
@@ -21,13 +21,29 @@ function writeError(error: unknown) {
     default: return 'No pudimos confirmar el resultado. Consultá el estado actualizado antes de decidir si querés repetir la acción.';
   }
 }
-interface Intent { revision: string; rows: ContactRow[] }
-export default function Contacts({ controller, onBack, registerContactRegion, sources = providers }: {
-  controller: SessionController; onBack: () => void; sources?: Providers; registerContactRegion?: RegisterContactRegion;
+interface Intent { native: boolean; revision: string; rows: ContactRow[] }
+export default function Contacts({ controller, onBack, registerContactDialog, sources = providers }: {
+  controller: SessionController; onBack: () => void; sources?: Providers; registerContactDialog?: RegisterContactDialog;
 }) {
+  const [confirmation, setConfirmation] = useState<'selection' | 'consent' | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const title = useId(), description = useId();
+  useLayoutEffect(() => {
+    if (!confirmation) return;
+    const node = dialog.current;
+    node?.showModal();
+    node?.querySelector('button')?.focus();
+    const unregister = registerContactDialog?.(() => setConfirmation(null));
+    return () => {
+      unregister?.();
+      node?.close();
+      opener.current?.focus({ preventScroll: true });
+    };
+  }, [confirmation, registerContactDialog]);
   const [status, setStatus] = useState<ContactStatus | null>(null);
   const [intent, setIntent] = useState<Intent | null>(null);
-  const [phase, setPhase] = useState<'idle' | 'provider' | 'writing'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'native' | 'provider' | 'writing'>('idle');
   const [stale, setStale] = useState(false);
   const [notice, setNotice] = useState('');
   const [picker, setPicker] = useState<PickContacts | null>(null);
@@ -43,6 +59,7 @@ export default function Contacts({ controller, onBack, registerContactRegion, so
   const revision = useRef('');
   const installedRevision = useRef('');
   function install(next: ContactStatus | null) {
+    if (installedRevision.current !== next?.mutationRevision) setConfirmation(null);
     installedRevision.current = next?.mutationRevision ?? '';
     setStatus(next);
   }
@@ -108,28 +125,35 @@ export default function Contacts({ controller, onBack, registerContactRegion, so
     }, fail).finally(() => window.clearTimeout(timeout));
     return () => { live = false; window.clearTimeout(timeout); };
   }, [available, sources]);
-  function begin(next: 'writing' | 'provider') {
+  function begin(next: 'writing' | 'provider' | 'native') {
     if (!lifetime.current || lifetime.current.aborted || operation.current) return null;
     read.current?.abort();
     const task = new AbortController();
     operation.current = task; writing.current = next === 'writing';
-    setPhase(next); setNotice('');
+    setPhase(next);
+    if (next !== 'native') setNotice('');
     return AbortSignal.any([lifetime.current, task.signal]);
   }
-  async function pick(source: PickContacts) {
+  async function pick(source: PickContacts, native = false) {
     if (!status || !available || status.acceptedConsentVersion !== status.requiredConsentVersion) return;
-    const signal = begin('provider');
+    const signal = begin(native ? 'native' : 'provider');
     if (!signal) return;
     revision.current = status.mutationRevision;
     try {
       const rows = await source(signal);
       signal.throwIfAborted();
-      if (rows.length) setIntent({ rows, revision: status.mutationRevision });
-      else { revision.current = ''; setNotice('No se eligieron teléfonos. Tu selección anterior sigue vigente.'); }
+      if (rows.length) {
+        setIntent({ rows, revision: status.mutationRevision, native });
+        if (native) setNotice(current => current === notice ? '' : current);
+      } else {
+        revision.current = '';
+        if (!native) setNotice('No se eligieron teléfonos. Tu selección anterior sigue vigente.');
+      }
     } catch (e) {
       if (!signal.aborted) {
         revision.current = '';
         const cancelled = e instanceof DOMException && e.name === 'AbortError';
+        if (native && cancelled) return;
         const denied = e instanceof DOMException && (e.name === 'SecurityError' || e.name === 'NotAllowedError');
         setNotice(e instanceof ProviderError ? e.message : cancelled ? 'Cancelaste la selección.' : denied ?
           'El navegador no permitió el acceso a tus contactos.' : 'No se completó la selección. Podés volver a abrir el proveedor.');
@@ -153,11 +177,11 @@ export default function Contacts({ controller, onBack, registerContactRegion, so
     if (submitted === undefined) setIntent(null);
     setMutation(method + path);
     let message = '';
-    let reconcile = false;
+    let reconcile = false, returnToAccount = false;
     try {
       const raw = await controller.request(ownerPath + '/' + path, signal, method, body, undefined, expected);
       signal.throwIfAborted();
-      if (method === 'DELETE') { reconcile = true; message = path === 'consent' ? 'Deshabilitaste los contactos en común.' : 'Borraste los contactos compartidos. Tu consentimiento sigue vigente.'; }
+      if (method === 'DELETE') { reconcile = true; returnToAccount = path === 'consent'; message = path === 'consent' ? 'Deshabilitaste los contactos en común.' : 'Borraste los contactos compartidos. Tu consentimiento sigue vigente.'; }
       else if (submitted !== undefined) {
         const result = importResult(raw, submitted); install(result.status);
         message = `Sincronizaste ${result.distinctCount} ${result.distinctCount === 1 ? 'teléfono' : 'teléfonos'}.`;
@@ -171,6 +195,7 @@ export default function Contacts({ controller, onBack, registerContactRegion, so
       if (!signal.aborted) {
         release(); setNotice(message);
         if (reconcile) { install(null); void refresh(message); }
+        if (returnToAccount) onBack();
       }
     }
   }
@@ -179,12 +204,12 @@ export default function Contacts({ controller, onBack, registerContactRegion, so
   const busy = phase !== 'idle';
   const discovering = available && probing && !sources.google;
   const initialLoading = (!status && !notice) || (discovering && status?.acceptedConsentVersion === null);
-  return <section ref={root} className="home-account contacts"><ContactHeader onBack={onBack}/>
+  return <section ref={root} className="home-account contacts"><ContactHeader onBack={() => { if (phase === 'native') release(); onBack(); }}/>
     {initialLoading && <ContactSkeleton/>}
     {notice && <p role="status">{notice}</p>}
     {status && stale && <button onClick={() => void refresh('')}>Consultar estado</button>}
     {!status && notice && <button onClick={() => void refresh('')}>Consultar estado</button>}
-    {status && !initialLoading && <><section className="home-card">
+    {status && !initialLoading && <>{!intent?.native && <section className="home-card">
       <h3>{status.acceptedConsentVersion === null ? 'Compartí tus contactos' : status.state === 'SYNCED' ? 'Contactos sincronizados' :
         status.state === 'RESYNC_REQUIRED' ? 'Necesitás volver a sincronizar' : 'Todavía no importaste contactos'}</h3>
       {status.syncedAt && <p>Última sincronización: <time dateTime={status.syncedAt}>{new Date(status.syncedAt).toLocaleString('es-AR')}</time></p>}
@@ -198,14 +223,25 @@ export default function Contacts({ controller, onBack, registerContactRegion, so
       {canImport && <button className="contact-primary" aria-busy={mutation === 'PUTconsent'} disabled={busy} onClick={() => void mutate('consent', 'PUT', { version: status.requiredConsentVersion }, status.mutationRevision)}>Acepto participar</button>}
       <button disabled={busy} onClick={onBack}>Ahora no</button></>}
       {consent && canImport && !intent && <><p>{status.state === 'NOT_CONFIGURED' ? 'Elegí de dónde importar tus contactos. Después podés revisar los teléfonos.' : 'Al confirmar una nueva importación, los teléfonos elegidos reemplazarán los que compartiste antes.'}</p>
-        {picker && <button disabled={busy} onClick={() => void pick(picker)}>{syntheticContacts ? 'Elegir contactos sintéticos' : 'Elegir del dispositivo'}</button>}
+        {picker && <button disabled={busy} onClick={() => void pick(picker, true)}>{syntheticContacts ? 'Elegir contactos sintéticos' : 'Elegir del dispositivo'}</button>}
         {sources.google && <><p>Google muestra los contactos guardados en la cuenta que elijas. Tu dispositivo o iCloud pueden tener otros contactos.</p>
         <button disabled={busy} onClick={() => google ? void pick(google) : void loadGoogle()}>{google ? 'Elegir cuenta de Google' : 'Preparar Google Contacts'}</button></>}</>}
       {phase === 'provider' && <button onClick={release}>Cancelar</button>}
-    </section>
-    {intent && <Selection registerContactRegion={registerContactRegion} pending={phase === 'writing'} disabled={stale || busy} rows={intent.rows} countryCode={controller.snapshot.profile?.countryCode} updating={status.state !== 'NOT_CONFIGURED'} cancel={release} confirm={numbers => void mutate('selection', 'PUT', { numbers }, intent.revision, numbers.length)}/>}
+    </section>}
+    {intent && <Selection registerContactDialog={registerContactDialog} pending={phase === 'writing'} disabled={stale || busy} rows={intent.rows} countryCode={controller.snapshot.profile?.countryCode} updating={status.state !== 'NOT_CONFIGURED'} cancel={release} confirm={numbers => void mutate('selection', 'PUT', { numbers }, intent.revision, numbers.length)}/>}
     {status.acceptedConsentVersion !== null && <section className="home-card"><h3>Administrar participación</h3>
-      {status.state !== 'NOT_CONFIGURED' && <button aria-busy={mutation === 'DELETEselection'} disabled={busy} onClick={() => { if (window.confirm('¿Borrar la selección actual y conservar tu consentimiento?')) void mutate('selection', 'DELETE'); }}>Borrar contactos compartidos</button>}
-      <button aria-busy={mutation === 'DELETEconsent'} disabled={busy} onClick={() => { if (window.confirm('¿Querés deshabilitar los contactos en común? Se borrarán los teléfonos compartidos y retirarás tu consentimiento para priorizar encuentros y mostrar coincidencias. Para volver a usar la función tendrás que aceptar e importar tus contactos nuevamente.')) void mutate('consent', 'DELETE'); }}>Deshabilitar contactos en común</button></section>}</>}
+      {status.state !== 'NOT_CONFIGURED' && <button aria-busy={mutation === 'DELETEselection'} disabled={busy} onClick={e => { opener.current = e.currentTarget; setConfirmation('selection'); }}>Borrar contactos compartidos</button>}
+      <button aria-busy={mutation === 'DELETEconsent'} disabled={busy} onClick={e => { opener.current = e.currentTarget; setConfirmation('consent'); }}>Deshabilitar contactos en común</button></section>}</>}
+    {confirmation && <dialog ref={dialog} className="reals-sign-out-dialog" aria-labelledby={title} aria-describedby={description}
+      onCancel={event => { event.preventDefault(); setConfirmation(null); }}>
+      <h2 id={title}>{confirmation === 'selection' ? '¿Borrar los contactos compartidos?' : '¿Deshabilitar los contactos en común?'}</h2>
+      <p id={description}>{confirmation === 'selection' ? 'Se borrará la selección actual y conservarás tu consentimiento.' :
+        'Se borrarán los teléfonos compartidos y retirarás tu consentimiento para priorizar encuentros y mostrar coincidencias. Para volver a usar la función tendrás que aceptar e importar tus contactos nuevamente.'}</p>
+      <div className="sign-out-actions"><button onClick={() => setConfirmation(null)}>Cancelar</button>
+        <button className="contact-primary" onClick={() => {
+          setConfirmation(null);
+          void mutate(confirmation, 'DELETE');
+        }}>{confirmation === 'selection' ? 'Borrar contactos' : 'Deshabilitar'}</button></div>
+    </dialog>}
   </section>;
 }
