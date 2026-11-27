@@ -144,3 +144,7 @@ The message transaction can replay a committed clientMessageId before checking m
 | Polling and resume | Skip an interval tick in the first 500 ms after successful text reconciliation. Explicit refresh and foreground revalidation bypass that debounce. |
 
 Deferred technical debt: a bounded in-memory FIFO for text could accept a limited number of drafts, each with its own immutable reply and clientMessageId, while issuing one HTTP write at a time. It needs explicit handling for ambiguous delivery, user-visible recovery and retirement on terminal lifecycle or owner change. The current implementation retains only the submitted mutation.
+
+### First Chat exit ownership
+
+ChatSession validates exit acknowledgements, tracks the response window and serializes exit mutations. FirstChat owns the panel, tick and composer resources. Home owns account-scoped stale projection suppression and retires the interaction navigation entry. Absolute local expiry carries a provisional suppression reason. Confirmed server closure carries a permanent guard for the current mount. Details and mutation paths are in [the First Chat review](first-chat-review.md#mutual-exit-and-terminal-return).

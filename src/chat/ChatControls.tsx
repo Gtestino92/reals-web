@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { plainText } from './contracts';
 import { ChatIcon } from './ChatIcon';
-type DialogAction = 'mutual' | 'cancel' | 'safety' | 'block';
+type DialogAction = 'mutual' | 'safety' | 'block';
 
 export function submitChatOnEnter(event: KeyboardEvent<HTMLTextAreaElement>, composing: boolean, canSend: boolean) {
   // Use desktop input capabilities and a concrete key code as a conservative
@@ -31,11 +31,11 @@ export function ConfirmDialog({ kind, busy, pending = busy, disabled = false, fe
   const ref = useRef<HTMLDialogElement>(null), [details,setDetails] = useState(''), [reason,setReason] = useState('INAPPROPRIATE_BEHAVIOR'), [block,setBlock] = useState(false);
   useEffect(() => { const d = ref.current; d?.showModal(); return () => d?.close(); }, []);
   const safety = kind === 'safety';
-  return <dialog className="chat-confirm-dialog" ref={ref} aria-labelledby="chat-dialog-title" onCancel={e => { e.preventDefault(); if (!busy) close(); }}>
-    <h3 id="chat-dialog-title">{safety ? 'Reportar y cerrar chat' : kind === 'block' ? 'Bloquear a esta persona' : kind === 'mutual' ? 'Solicitar salida consensuada' : 'Cerrar chat'}</h3>
-    <p>{safety ? 'Describí qué pasó. Este reporte cerrará el chat por seguridad y será revisado.' : kind === 'block' ? 'Se cerrará la interacción y esta persona quedará bloqueada.' : kind === 'mutual' ? 'La conversación se pausa hasta resolver la solicitud. Tanto aceptar como rechazar la salida cierran el chat.' : 'Esta decisión cierra el chat. Una salida unilateral puede afectar tu confiabilidad según las reglas del servidor.'}</p>
+  return <dialog data-mutual={kind === 'mutual' || undefined} className="chat-confirm-dialog" ref={ref} aria-labelledby="chat-dialog-title" onCancel={e => { e.preventDefault(); if (!busy) close(); }}>
+    <h3 id="chat-dialog-title">{safety ? 'Reportar y cerrar chat' : kind === 'block' ? 'Bloquear a esta persona' : 'Solicitar salida consensuada'}</h3>
+    <p>{safety ? 'Describí qué pasó. Este reporte cerrará el chat por seguridad y será revisado.' : kind === 'block' ? 'Se cerrará la interacción y esta persona quedará bloqueada.' : 'La conversación se pausa hasta resolver la solicitud. Tanto aceptar como rechazar la salida cierran el chat.'}</p>
     {safety && <div className="chat-confirm-fields"><label>Motivo<select value={reason} onChange={e => setReason(e.target.value)} disabled={busy}><option value="INAPPROPRIATE_BEHAVIOR">Comportamiento inapropiado</option><option value="HARASSMENT">Acoso</option><option value="CHILD_SAFETY_CONCERN">Seguridad de menores</option><option value="OTHER">Otro</option></select></label><label>Detalle<textarea value={details} maxLength={1000} onChange={e => setDetails(e.target.value)} disabled={busy}/></label><label className="chat-confirm-checkbox"><input type="checkbox" checked={block} onChange={e => setBlock(e.target.checked)} disabled={busy}/>Bloquear también a esta persona</label></div>}
-    <ConfirmDialogActions busy={busy} disabled={disabled || (safety && !plainText(details.trim()))} feedback={feedback} close={close} confirm={() => confirm(safety ? { reason, details: details.trim(), blockUser: block } : undefined)} label="Confirmar" pendingLabel={pending ? safety ? 'Enviando reporte…' : kind === 'block' ? 'Bloqueando…' : 'Confirmando…' : undefined}/>
+    <ConfirmDialogActions busy={busy} disabled={disabled || (safety && !plainText(details.trim()))} feedback={feedback} close={close} confirm={() => confirm(safety ? { reason, details: details.trim(), blockUser: block } : undefined)} label={kind === 'mutual' && pending ? 'Solicitando salida…' : 'Confirmar'} pendingLabel={pending && kind !== 'mutual' ? safety ? 'Enviando reporte…' : kind === 'block' ? 'Bloqueando…' : 'Confirmando…' : undefined}/>
   </dialog>;
 }
 
@@ -46,7 +46,7 @@ export function ConfirmDialogActions({ busy, disabled, feedback, close, confirm,
     {feedback}
     <div className="chat-confirm-actions">
       <button type="button" disabled={busy} onClick={close}>{backLabel}</button>
-      <button type="button" className="chat-confirm-primary" disabled={busy || disabled} onClick={confirm}>{label}</button>
+      <button type="button" className="chat-confirm-primary" aria-live="polite" aria-busy={busy} disabled={busy || disabled} onClick={confirm}>{label}</button>
     </div>
     {pendingLabel && <p role="status">{pendingLabel}</p>}
   </>;
@@ -79,6 +79,6 @@ export function ChatMenu({ actions, decisionOnly }: { decisionOnly: boolean; act
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
         items[next]?.focus();
       }
-    }}>{actions.map(action => <button role="menuitem" key={action.label} disabled={action.disabled} onClick={() => { close(); action.run(); }}>{action.label}</button>)}</div>}
+    }}>{actions.map(action => <button role="menuitem" onMouseDown={event => { if (event.button === 0) event.preventDefault(); }} key={action.label} disabled={action.disabled} onClick={() => { close(); action.run(); }}>{action.label}</button>)}</div>}
   </div>;
 }

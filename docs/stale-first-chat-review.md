@@ -17,7 +17,7 @@ An authoritative Home without the stale action retires its currently-stale hidde
 | Auth/network failures | No terminal identity is recorded | Network and HTTP failure tests preserve Activity opening |
 | Account/session change | No old account's hidden IDs or response ownership survives | Auth replacement tests, existing session cancellation |
 | Other activity | Filter only FIRST_CHAT of affected match | Independent chat/Visual Review preserved and summary adjusted |
-| Draft present on terminal discovery | Existing draft-preservation screen retains terminal cause; explicit Home return carries closed identity | Existing draft guard remains; no messaging/audio rewrite |
+| Draft present on terminal discovery | Return immediately with the terminal cause and closed match identity | Unmount releases audio. Obsolete delivery callbacks cannot reinstall a message |
 
 No Home/Chat polling loop was added. HomeOverview still unmounts on chat opening; ChatSession still aborts requests and stops polling on terminal/unmount. This patch does not change audio, message mutation contracts, browser microphone behavior, Visual Review or Second Chat.
 
@@ -59,3 +59,5 @@ Observed final worktree (git status --short; git diff --stat, tracked files only
  src/home/Home.tsx            | 20 +++++++++++++++-----
  6 files changed, 68 insertions(+), 12 deletions(-)
 ```
+
+Absolute local expiry now adds temporary projection suppression while Home still advertises the match. Only confirmed closure enters the account-owned known-closed set. A clean Home retires temporary suppression. The existing chat-ID guard also prevents automatic re-entry. Inactivity estimates require a fresh server read.

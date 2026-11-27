@@ -13,7 +13,7 @@ Home reports its active conversation to SessionApp, which selects a dedicated sh
 | Mutual request / accept / reject / timeout | Existing request and pending panel retained; no local lifecycle inference. |
 | Unilateral / report / block | Existing confirmation, payload and error handling retained. Ordinary exits omitted in decision-only mode; safety remains policy controlled. |
 | Poll / retries / resume / obsolete responses | ChatSession response installation, cancellation and reconciliation unchanged. Retry appears within connection errors. |
-| Back / draft / uncertain send | Back keeps the mounted chat, never calls cancellation or adds history entries. Subsequent browser traversal can leave the document. Existing beforeunload protection remains; terminal draft notice offers explicit discard confirmation. |
+| Back / draft / uncertain send | Back keeps the mounted chat, never calls cancellation or adds history entries. Subsequent browser traversal can leave the document. Existing beforeunload protection remains; mandatory terminal return retires the presentation, including dirty drafts. |
 | Menu / dialogs | Local open state only; pointer listener cleanup, arrow/Home/End navigation, Escape restoration, Tab/outside dismissal. Native buttons provide Enter/Space. Confirmation still uses a modal dialog. |
 
 ## Validation

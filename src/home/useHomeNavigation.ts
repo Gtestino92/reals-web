@@ -204,12 +204,12 @@ export function useHomeNavigation(canLeave: (target?: HomeDestination) => boolea
     const value: Entry = { owner: initial.owner, trail: ['home'] };
     window.history.replaceState(value, '', '/'); current.current = value; setState(value);
   };
-  const finishVisualReview = (target: 'home' | 'activity') => {
+  const finishInteraction = (target: 'home' | 'activity') => {
     retiredActivity.current=target==='home';
     visualReview.current=null;afterMove.current=null;approvedVisualPop.current=false;moving.current=false;
     const value:Entry={owner:initial.owner,trail:target==='home'?['home']:['home','activity']};
     window.history.replaceState(value,'','/');current.current=value;setState(value);
   };
-  return { registerContactDialog, setSearchBack, registerVisualReview, finishVisualReview, registerSecondChat, openSecondChat, restoreSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
+  return { registerContactDialog, setSearchBack, registerVisualReview, finishInteraction, finishVisualReview: finishInteraction, registerSecondChat, openSecondChat, restoreSecondChat, closeSecondChat, trailIncludesScheduling: state.trail.includes('scheduling'), connectionId: state.connectionId, partnerName: state.partnerName, openScheduling, openPartnerProfile, trailIncludesActivity: state.trail.includes('activity'), matchId: state.matchId, openVisualReview, destination: state.trail.at(-1) ?? 'home', question: state.question, profileQuestionId: state.profileQuestionId, open, openProfileQuestion, backTo };
 }
 export type HomeNavigation = ReturnType<typeof useHomeNavigation>;

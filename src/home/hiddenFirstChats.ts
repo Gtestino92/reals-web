@@ -1,6 +1,6 @@
 import type { HomeData } from './contracts';
 
-// Account/profile mount owns this set. Only conclusive chat results add IDs;
+// Account/profile mount owns this set. Absolute local deadlines and conclusive chat results suppress stale projections;
 // a successful authoritative Home snapshot retires IDs it no longer advertises.
 export function reconcileHiddenFirstChats(home: HomeData, hidden: Set<string>, knownClosed: ReadonlySet<string> = hidden) {
   const advertised = new Set([...home.pendingActions, ...home.nextSteps]
