@@ -163,6 +163,8 @@ Run `npm run dev -- --port 5177 --strictPort` and then `node tools/shared-contac
 |---|---|---|
 | Home invitation | [Mobile invitation](shared-contacts/chromium-mobile-light-invitation.png) | [Desktop invitation](shared-contacts/chromium-desktop-dark-invitation.png) |
 | Selection | [Mobile selection](shared-contacts/chromium-mobile-light-selection.png) | [Desktop selection](shared-contacts/chromium-desktop-dark-selection.png) |
+| Country selector | [Mobile selector](shared-contacts/chromium-mobile-light-country.png) | [Desktop selector](shared-contacts/chromium-desktop-dark-country.png) |
+| Shared-contact explanation | [Narrow dark header](shared-contacts/narrow-dark-chat.png) | [Open explanation](shared-contacts/narrow-dark-explanation.png) |
 | First Chat | [Mobile chat](shared-contacts/chromium-mobile-light-chat.png) | [Desktop chat](shared-contacts/chromium-desktop-dark-chat.png) |
 
 For independent Backend coverage, run `./mvnw -Dtest=SharedContactsPostgresIT test` in a disposable checkout of Backend a1538817afe61be6805c719bb6917f3a8334ef8a with JDK 21 and Docker. It creates disposable PostgreSQL, exercises two owners with five fictional numbers in common, reads the new chat bucket via MockMvc, then verifies invalidation, quota and concurrency. On Docker Desktop 29 the local test needed JAVA_TOOL_OPTIONS=-Dapi.version=1.44 for Testcontainers. For a browser connected to local Backend with fictional entries see [local configuration](deployment.md#local-synthetic-backend).

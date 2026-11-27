@@ -39,8 +39,8 @@ it('requires separate consent and selection, advances the revision and submits o
   await click('Acepto participar');
   expect(request.mock.calls[1]?.slice(2)).toEqual(['PUT', { version: 3 }, undefined, initial.mutationRevision]);
   expect(pick).not.toHaveBeenCalled();
-  await click('Elegir del dispositivo'); await click('Seleccionar todos');
-  fireEvent.click(screen.getAllByRole('checkbox')[1]!);
+  await click('Elegir del dispositivo');
+  fireEvent.click((await screen.findAllByRole('checkbox'))[2]!);
   await click('Importar contactos');
   expect(await screen.findByText('Sincronizaste 1 teléfono.')).toBeVisible();
   expect(request.mock.calls[2]?.slice(2)).toEqual(['PUT', { numbers: [rows[0]!.number] }, undefined, accepted.mutationRevision]);
@@ -81,7 +81,7 @@ it('discards stale consent and requires a fresh decision', async () => {
   expect(await screen.findByText(/El estado de tus contactos cambió/)).toBeVisible();
   expect(request).toHaveBeenCalledTimes(3);
 });
-it.each([['Borrar selección', 'selection'], ['Retirar participación', 'consent']])('allows unconditional %s with imports disabled', async (button, path) => {
+it.each([['Borrar contactos compartidos', 'selection'], ['Deshabilitar contactos en común', 'consent']])('allows unconditional %s with imports disabled', async (button, path) => {
   const controller = controllerFixture();
   const request = vi.spyOn(controller, 'request').mockResolvedValueOnce({ ...synced, state: 'RESYNC_REQUIRED', importAvailable: false }).mockResolvedValueOnce(undefined).mockResolvedValue(initial);
   vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -136,7 +136,7 @@ it('preselects Google numbers and prevents an empty update', async () => {
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ google: async () => async () => rows }}/>);
   await click('Preparar Google Contacts'); await click('Elegir cuenta de Google');
   expect((await screen.findAllByRole('checkbox'))[0]).toBeChecked();
-  await click('Deseleccionar todos');
+  fireEvent.click(screen.getByRole('checkbox', { name: /Deseleccionar todos/ }));
   expect(screen.getByRole('button', { name: 'Actualizar contactos' })).toBeDisabled();
   expect(request).toHaveBeenCalledTimes(1);
 });
@@ -151,5 +151,69 @@ it.each([
   vi.spyOn(controller, 'request').mockResolvedValue({ ...synced, importAvailable });
   render(<Contacts controller={controller} onBack={vi.fn()} sources={sources}/>);
   expect(await screen.findByText(message)).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Retirar participación' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Deshabilitar contactos en común' })).toBeEnabled();
+});
+
+it('uses the same loading presentation through discovery, then keeps consent progress on the action', async () => {
+  const controller = controllerFixture();
+  let finishRead!: (value: unknown) => void, finishWrite!: (value: unknown) => void;
+  let ready!: () => void;
+  const request = vi.spyOn(controller, 'request')
+    .mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve; }))
+    .mockImplementationOnce(() => new Promise(resolve => { finishWrite = resolve; }));
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => {
+    await new Promise<void>(resolve => { ready = resolve; }); return async () => rows;
+  } }}/>);
+  const skeleton = screen.getByRole('status', { name: 'Cargando contactos' });
+  await act(async () => finishRead(initial));
+  expect(skeleton).toBeVisible();
+  await act(async () => ready());
+  const button = screen.getByRole('button', { name: 'Acepto participar' });
+  fireEvent.click(button); fireEvent.click(button);
+  expect(button).toHaveAttribute('aria-busy', 'true'); expect(button).toBeDisabled();
+  expect(screen.queryByText('Actualizando…')).toBeNull();
+  expect(request).toHaveBeenCalledTimes(2);
+  await act(async () => finishWrite(accepted));
+  expect(await screen.findByRole('button', { name: 'Elegir del dispositivo' })).toBeEnabled();
+});
+it('recovers an initial status failure and keeps a synced set through empty and rejected picks', async () => {
+  const controller = controllerFixture();
+  const request = vi.spyOn(controller, 'request').mockRejectedValueOnce(new Error()).mockResolvedValue(synced);
+  const source = vi.fn().mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError')).mockResolvedValueOnce([]);
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => source }}/>);
+  await click('Consultar estado'); await click('Elegir del dispositivo');
+  await screen.findByText(/no permitió/); await click('Elegir del dispositivo');
+  await screen.findByText(/No se eligieron teléfonos/);
+  expect(screen.getByRole('heading', { name: 'Contactos sincronizados' })).toBeVisible();
+  expect(request.mock.calls.every(call => call[2] === undefined)).toBe(true);
+});
+
+it('keeps privacy controls available during slow capability discovery and shows withdrawal progress in place', async () => {
+  const controller = controllerFixture();
+  let finish!: (value: unknown) => void;
+  const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(synced)
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue(initial);
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: () => new Promise(() => {}) }}/>);
+  const button = await screen.findByRole('button', { name: 'Deshabilitar contactos en común' });
+  expect(screen.getByRole('status', { name: 'Cargando contactos' })).toBeVisible();
+  fireEvent.click(button);
+  expect(button).toHaveAttribute('aria-busy', 'true');
+  expect(button).toBeDisabled();
+  await act(async () => finish(undefined));
+  expect(request.mock.calls[1]?.slice(2)).toEqual(['DELETE', undefined, undefined, undefined]);
+});
+it('keeps the confirmation button and its label while the selection write settles', async () => {
+  const controller = controllerFixture();
+  let finish!: (value: unknown) => void;
+  vi.spyOn(controller, 'request').mockResolvedValueOnce(accepted)
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => async () => rows }}/>);
+  await click('Elegir del dispositivo');
+  const button = await screen.findByRole('button', { name: 'Importar contactos' });
+  fireEvent.click(button);
+  expect(button).toHaveAttribute('aria-busy', 'true'); expect(button).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Cancelar selección' })).toBeDisabled();
+  await act(async () => finish({ status: synced, submittedCount: 2, distinctCount: 2 }));
+  expect(await screen.findByText('Sincronizaste 2 teléfonos.')).toBeVisible();
 });

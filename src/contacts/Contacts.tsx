@@ -3,7 +3,8 @@ import { ApiError } from '../auth/api';
 import type { SessionController } from '../auth/session';
 import { contactStatus, importResult, ownerPath, type ContactStatus } from './contracts';
 import { ProviderError, providers, syntheticContacts, type Providers, type PickContacts, type ContactRow } from './providers';
-import { Selection } from './Selection';
+import { ContactHeader, ContactSkeleton } from './ContactLoading';
+import { Selection, type RegisterContactRegion } from './Selection';
 import './contacts.css';
 
 const changed = 'El estado de tus contactos cambió. Revisalo y volvé a elegir si querés continuar.';
@@ -21,8 +22,8 @@ function writeError(error: unknown) {
   }
 }
 interface Intent { revision: string; rows: ContactRow[] }
-export default function Contacts({ controller, onBack, sources = providers }: {
-  controller: SessionController; onBack: () => void; sources?: Providers;
+export default function Contacts({ controller, onBack, registerContactRegion, sources = providers }: {
+  controller: SessionController; onBack: () => void; sources?: Providers; registerContactRegion?: RegisterContactRegion;
 }) {
   const [status, setStatus] = useState<ContactStatus | null>(null);
   const [intent, setIntent] = useState<Intent | null>(null);
@@ -33,7 +34,8 @@ export default function Contacts({ controller, onBack, sources = providers }: {
   const [google, setGoogle] = useState<PickContacts | null>(null);
   const [probeFailed, setProbeFailed] = useState(false);
   const [probing, setProbing] = useState(!!sources.picker);
-  const heading = useRef<HTMLHeadingElement>(null);
+  const root = useRef<HTMLElement>(null);
+  const [mutation, setMutation] = useState('');
   const lifetime = useRef<AbortSignal | null>(null);
   const read = useRef<AbortController | null>(null);
   const operation = useRef<AbortController | null>(null);
@@ -46,7 +48,7 @@ export default function Contacts({ controller, onBack, sources = providers }: {
   }
   function release() {
     operation.current?.abort(); operation.current = null;
-    writing.current = false; revision.current = '';
+    setMutation(''); writing.current = false; revision.current = '';
     setIntent(null); setPhase('idle');
   }
   async function refresh(message?: string) {
@@ -55,6 +57,11 @@ export default function Contacts({ controller, onBack, sources = providers }: {
     const request = new AbortController();
     read.current = request;
     const signal = AbortSignal.any([request.signal, lifetime.current]);
+    const timeout = !installedRevision.current ? window.setTimeout(() => {
+      if (!signal.aborted) {
+        request.abort(); setStale(true); setNotice('La consulta está demorando. Reintentá la consulta.');
+      }
+    }, 20000) : undefined;
     try {
       const next = contactStatus(await controller.request(ownerPath, signal));
       signal.throwIfAborted();
@@ -70,10 +77,10 @@ export default function Contacts({ controller, onBack, sources = providers }: {
         }
         setStale(true); setNotice([message, 'No pudimos consultar el estado. Reintentá la consulta.'].filter(Boolean).join(' '));
       }
-    }
+    } finally { window.clearTimeout(timeout); }
   }
   useLayoutEffect(() => {
-    heading.current?.focus({ preventScroll: true });
+    root.current?.querySelector('h2')?.focus({ preventScroll: true });
     const owner = new AbortController();
     const session = controller.sessionSignal;
     const signal = AbortSignal.any([owner.signal, session]);
@@ -91,12 +98,15 @@ export default function Contacts({ controller, onBack, sources = providers }: {
   }, [controller]);
   const available = !!status?.importAvailable;
   useEffect(() => {
-    if (!available || !sources.picker) { setPicker(null); setProbing(false); return; }
+    if (!available || !sources.picker) { setPicker(null); setProbing(!!sources.picker); return; }
     let live = true;
     setProbeFailed(false); setProbing(true);
-    sources.picker().then(result => { if (live) setPicker(() => result); }, () => { if (live) { setPicker(null); setProbeFailed(true); } })
-      .finally(() => { if (live) setProbing(false); });
-    return () => { live = false; };
+    const fail = () => { if (live) { setPicker(null); setProbeFailed(true); setProbing(false); live = false; } };
+    const timeout = window.setTimeout(fail, 10000);
+    Promise.resolve().then(() => sources.picker?.()).then(result => {
+      if (live) { setPicker(() => result ?? null); setProbing(false); }
+    }, fail).finally(() => window.clearTimeout(timeout));
+    return () => { live = false; window.clearTimeout(timeout); };
   }, [available, sources]);
   function begin(next: 'writing' | 'provider') {
     if (!lifetime.current || lifetime.current.aborted || operation.current) return null;
@@ -140,13 +150,14 @@ export default function Contacts({ controller, onBack, sources = providers }: {
   async function mutate(path: 'selection' | 'consent', method: 'PUT' | 'DELETE', body?: unknown, expected?: string, submitted?: number) {
     const signal = begin('writing');
     if (!signal) return;
-    setIntent(null);
+    if (submitted === undefined) setIntent(null);
+    setMutation(method + path);
     let message = '';
     let reconcile = false;
     try {
       const raw = await controller.request(ownerPath + '/' + path, signal, method, body, undefined, expected);
       signal.throwIfAborted();
-      if (method === 'DELETE') { reconcile = true; message = path === 'consent' ? 'Retiraste tu participación.' : 'Borraste la selección.'; }
+      if (method === 'DELETE') { reconcile = true; message = path === 'consent' ? 'Deshabilitaste los contactos en común.' : 'Borraste los contactos compartidos. Tu consentimiento sigue vigente.'; }
       else if (submitted !== undefined) {
         const result = importResult(raw, submitted); install(result.status);
         message = `Sincronizaste ${result.distinctCount} ${result.distinctCount === 1 ? 'teléfono' : 'teléfonos'}.`;
@@ -166,31 +177,35 @@ export default function Contacts({ controller, onBack, sources = providers }: {
   const consent = status && status.acceptedConsentVersion === status.requiredConsentVersion;
   const canImport = !stale && available && (!!picker || !!sources.google);
   const busy = phase !== 'idle';
-  return <section className="home-account contacts"><header className="home-heading"><h2 ref={heading} tabIndex={-1}>Contactos</h2><button className="login-button login-outlined" onClick={onBack}>Volver a Cuenta</button></header>
+  const discovering = available && probing && !sources.google;
+  const initialLoading = (!status && !notice) || (discovering && status?.acceptedConsentVersion === null);
+  return <section ref={root} className="home-account contacts"><ContactHeader onBack={onBack}/>
+    {initialLoading && <ContactSkeleton/>}
     {notice && <p role="status">{notice}</p>}
     {status && stale && <button onClick={() => void refresh('')}>Consultar estado</button>}
-    {!status && (notice ? <button onClick={() => void refresh('')}>Consultar estado</button> : <p role="status">Consultando contactos…</p>)}
-    {status && <><section className="home-card">
+    {!status && notice && <button onClick={() => void refresh('')}>Consultar estado</button>}
+    {status && !initialLoading && <><section className="home-card">
       <h3>{status.acceptedConsentVersion === null ? 'Compartí tus contactos' : status.state === 'SYNCED' ? 'Contactos sincronizados' :
         status.state === 'RESYNC_REQUIRED' ? 'Necesitás volver a sincronizar' : 'Todavía no importaste contactos'}</h3>
       {status.syncedAt && <p>Última sincronización: <time dateTime={status.syncedAt}>{new Date(status.syncedAt).toLocaleString('es-AR')}</time></p>}
-      {!stale && !canImport && !probing && <p>{!available ? 'Las importaciones están pausadas por el momento.' : !sources.picker && !sources.google ? 'Por ahora no hay fuentes de contactos habilitadas.' :
+      {!stale && !canImport && !discovering && <p>{!available ? 'Las importaciones están pausadas por el momento.' : !sources.picker && !sources.google ? 'Por ahora no hay fuentes de contactos habilitadas.' :
         probeFailed ? 'No pudimos comprobar el selector. Volvé a entrar en Contactos para reintentar.' : 'Este navegador no ofrece el selector de contactos del dispositivo.'}</p>}
+      {discovering && <ContactSkeleton/>}
+      {!canImport && !discovering && status.state === 'SYNCED' && <p>Tus contactos compartidos siguen sincronizados con tu cuenta. Podés borrarlos desde este dispositivo.</p>}
       {!consent && <><p>Participar es opcional. Los teléfonos que elijas ayudan a priorizar personas compatibles. Durante el primer chat ambas personas pueden ver un rango de contactos en común. Nadie ve los nombres ni los números de la otra agenda.</p>
       <p>Los nombres se usan solo en tu dispositivo. Los números seleccionados se envían a Reals y se transforman en identificadores protegidos. Reals no conserva los números originales. Podés reemplazar o borrar la selección y retirar tu consentimiento. Una coincidencia no verifica identidad ni garantiza seguridad.</p>
       <button onClick={() => controller.legalEvents.dispatchEvent(new Event('inspect'))}>Consultar los documentos vigentes de Reals</button>
-      {canImport && <button className="contact-primary" disabled={busy} onClick={() => void mutate('consent', 'PUT', { version: status.requiredConsentVersion }, status.mutationRevision)}>Acepto participar</button>}
+      {canImport && <button className="contact-primary" aria-busy={mutation === 'PUTconsent'} disabled={busy} onClick={() => void mutate('consent', 'PUT', { version: status.requiredConsentVersion }, status.mutationRevision)}>Acepto participar</button>}
       <button disabled={busy} onClick={onBack}>Ahora no</button></>}
       {consent && canImport && !intent && <><p>{status.state === 'NOT_CONFIGURED' ? 'Elegí de dónde importar tus contactos. Después podés revisar los teléfonos.' : 'Al confirmar una nueva importación, los teléfonos elegidos reemplazarán los que compartiste antes.'}</p>
         {picker && <button disabled={busy} onClick={() => void pick(picker)}>{syntheticContacts ? 'Elegir contactos sintéticos' : 'Elegir del dispositivo'}</button>}
         {sources.google && <><p>Google muestra los contactos guardados en la cuenta que elijas. Tu dispositivo o iCloud pueden tener otros contactos.</p>
         <button disabled={busy} onClick={() => google ? void pick(google) : void loadGoogle()}>{google ? 'Elegir cuenta de Google' : 'Preparar Google Contacts'}</button></>}</>}
       {phase === 'provider' && <button onClick={release}>Cancelar</button>}
-      {phase === 'writing' && <p role="status">Actualizando…</p>}
     </section>
-    {intent && <Selection disabled={stale} rows={intent.rows} countryCode={controller.snapshot.profile?.countryCode} updating={status.state !== 'NOT_CONFIGURED'} cancel={release} confirm={numbers => void mutate('selection', 'PUT', { numbers }, intent.revision, numbers.length)}/>}
+    {intent && <Selection registerContactRegion={registerContactRegion} pending={phase === 'writing'} disabled={stale || busy} rows={intent.rows} countryCode={controller.snapshot.profile?.countryCode} updating={status.state !== 'NOT_CONFIGURED'} cancel={release} confirm={numbers => void mutate('selection', 'PUT', { numbers }, intent.revision, numbers.length)}/>}
     {status.acceptedConsentVersion !== null && <section className="home-card"><h3>Administrar participación</h3>
-      {status.state !== 'NOT_CONFIGURED' && <button disabled={busy} onClick={() => { if (window.confirm('¿Borrar la selección actual y conservar tu consentimiento?')) void mutate('selection', 'DELETE'); }}>Borrar selección</button>}
-      <button disabled={busy} onClick={() => { if (window.confirm('¿Retirar el consentimiento y borrar toda tu selección?')) void mutate('consent', 'DELETE'); }}>Retirar participación</button></section>}</>}
+      {status.state !== 'NOT_CONFIGURED' && <button aria-busy={mutation === 'DELETEselection'} disabled={busy} onClick={() => { if (window.confirm('¿Borrar la selección actual y conservar tu consentimiento?')) void mutate('selection', 'DELETE'); }}>Borrar contactos compartidos</button>}
+      <button aria-busy={mutation === 'DELETEconsent'} disabled={busy} onClick={() => { if (window.confirm('¿Querés deshabilitar los contactos en común? Se borrarán los teléfonos compartidos y retirarás tu consentimiento para priorizar encuentros y mostrar coincidencias. Para volver a usar la función tendrás que aceptar e importar tus contactos nuevamente.')) void mutate('consent', 'DELETE'); }}>Deshabilitar contactos en común</button></section>}</>}
   </section>;
 }

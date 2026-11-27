@@ -51,7 +51,6 @@
 .login-header p { margin: 8px 0 26px; color: var(--color-on-surface-variant); }
 .session-loading { margin: 24px 0; text-align: center; color: var(--color-on-surface-variant); }
 .startup-loading .login-panel { position: relative; }
-.startup-actions { position: absolute; inset: 100% 0 auto; margin-top: 16px; text-align: center; }
 .startup-indicator {
   width: 18px;
   height: 18px;

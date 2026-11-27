@@ -5,7 +5,7 @@ import { SessionController } from '../src/auth/session';
 import { Home } from '../src/home/Home';
 import { FirstChat } from '../src/chat/FirstChat';
 import { emptyHome, homeStatus } from '../src/home/fixtures';
-import { providers } from '../src/contacts/providers';
+import { preparePicker, providers } from '../src/contacts/providers';
 import '../src/styles/tokens.css';
 import '../src/styles/global.css';
 import '../src/auth/login.css';
@@ -19,13 +19,25 @@ const rows = [
 ];
 delete providers.google;
 delete providers.picker;
-if (options.has('google')) providers.google = async () => async () => rows;
+if (options.has('recovery')) {
+  let attempts = 0;
+  Object.defineProperty(navigator, 'contacts', { configurable: true, value: {
+    getProperties: async () => ['name', 'tel'],
+    select: async () => {
+      if (++attempts <= 2) throw new TypeError('Unable to open a contact selector');
+      return [{ name: ['Ejemplo'], tel: ['+12025550100'] }];
+    },
+  } });
+  providers.picker = preparePicker;
+} else if (options.has('google')) providers.google = async () => async () => rows;
 else if (!options.has('unsupported')) providers.picker = async () => async () => rows;
 let status = { mutationRevision: crypto.randomUUID(), requiredConsentVersion: 1, acceptedConsentVersion: null as number | null,
   acceptedAt: null as string | null, syncedAt: null as string | null, state: 'NOT_CONFIGURED', importAvailable: true };
 let range: string | null = 'ONE_TO_FIVE';
 Object.assign(window, { contactsFixture: {
   invalidate() { status.mutationRevision = crypto.randomUUID(); },
+  endSession() { notifyIdentity(null); },
+  restartSession() { notifyIdentity(identity); },
   setRange(next: string | null) { range = next; window.dispatchEvent(new Event('online')); },
 } });
 const api = new ApiClient(async (url, init) => {
@@ -39,13 +51,14 @@ const api = new ApiClient(async (url, init) => {
   if (path === '/reference/affinity-questions') return json({ catalogVersion: 'synthetic', categories: [], questions: [] });
   if (path === '/me/profile/affinity-answers') return json({ answers: [] });
   if (path === '/matches/m') return json({ id: 'm', userAId: 'me', userBId: 'them', state: 'CHAT_ACTIVE' });
-  if (path === '/matches/m/chat') return json({ id: 'c', matchId: 'm', chatType: 'FIRST_CHAT', status: 'ACTIVE', partner: { userId: 'them', displayName: 'Alicia Ejemplo' },
+  if (path === '/matches/m/chat') return json({ id: 'c', matchId: 'm', chatType: 'FIRST_CHAT', status: 'ACTIVE', partner: { userId: 'them', displayName: options.has('long') ? 'Alicia del Valle Ejemplo Ficticio' : 'Alicia Ejemplo' },
     myDecision: 'PENDING', partnerDecision: 'PENDING', timeoutAt: new Date(Date.now()+600000), serverTime: new Date(), sharedContactRange: range,
     guidance: { question: { id: 'q', instanceId: 'q1', text: '¿Qué te gusta hacer en tu tiempo libre?' }, questionOrdinal: 1, maxQuestions: 3,
       requiredParticipationScore: 100, directQuestionReplyMultiplier: 2, progressionAction: 'NEXT_QUESTION', canRequestNext: false, myNextRequested: false, completed: false } });
   if (path === '/chats/c/messages' || path === '/chats/c/exit-requests') return json(path.endsWith('/messages') ? [{
     id: 'msg1', chatSessionId: 'c', senderId: 'them', sentAt: new Date().toISOString(), messageType: 'TEXT', content: '¡Hola! A mí me gusta caminar.',
   }] : [], { headers: { 'X-Reals-Counterpart-Audio-Access': 'ALLOWED' } });
+  if (options.has('recovery') && path.startsWith('/me/shared-contacts')) await new Promise(resolve => setTimeout(resolve, 800));
   if (path === '/me/shared-contacts') return json(status);
   if (!path.startsWith('/me/shared-contacts/')) throw Error('Unexpected synthetic route');
   if (method === 'PUT' && new Headers(init?.headers).get('X-Contact-Revision') !== status.mutationRevision)
@@ -63,7 +76,8 @@ const api = new ApiClient(async (url, init) => {
   return json({ status, submittedCount: body.numbers.length, distinctCount: new Set(body.numbers).size });
 });
 const identity = { uid: 'synthetic', emailVerified: true, getIdToken: async () => 'synthetic', reload: async () => {} };
-const controller = new SessionController({ observe: next => { next(identity); return () => {}; }, signIn: async () => identity, signUp: async () => identity, google: async () => identity, verify: async () => {}, signOut: async () => {} }, api, false);
+let notifyIdentity: (user: typeof identity | null) => void;
+const controller = new SessionController({ observe: next => { notifyIdentity = next; next(identity); return () => {}; }, signIn: async () => identity, signUp: async () => identity, google: async () => identity, verify: async () => {}, signOut: async () => {} }, api, false);
 const chat = options.has('chat');
 function Fixture() {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);

@@ -4,11 +4,11 @@ import './auth/login.css';
 
 const Startup = createContext<(() => void) | null>(null);
 
-export function StartupBoundary({ children, actions }: { children: ReactNode; actions?: ReactNode }) {
+export function StartupBoundary({ children }: { children: ReactNode }) {
   const [starting, setStarting] = useState(true);
   const finish = useCallback(() => setStarting(false), []);
   return <Startup.Provider value={starting ? finish : null}>
-    {starting && <StartupLoading actions={actions} />}
+    {starting && <StartupLoading />}
     <div hidden={starting}>{children}</div>
   </Startup.Provider>;
 }
@@ -20,7 +20,7 @@ export function useStartupDestination(ready: boolean) {
   return finish !== null;
 }
 
-export function StartupLoading({ actions }: { actions?: ReactNode }) {
+export function StartupLoading() {
   return <main className="login-page startup-loading"><section className="login-panel">
     <header className="login-header login-brand">
       <img className="login-seal" src={seal} alt="" width="54" height="54" />
@@ -29,7 +29,6 @@ export function StartupLoading({ actions }: { actions?: ReactNode }) {
     </header>
     <SessionLoading />
     <div className="startup-indicator" aria-hidden="true" />
-    {actions && <div className="startup-actions">{actions}</div>}
   </section></main>;
 }
 

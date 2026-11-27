@@ -7,14 +7,41 @@
 .contacts button:disabled { opacity: .6; cursor: default; }
 .contact-rows { display: grid; max-height: 44dvh; overflow-y: auto; }
 .contacts .contact-rows label { display: flex; align-items: center; gap: 8px; min-height: 44px; overflow-wrap: anywhere; }
-.contacts select { display: block; max-width: 100%; font: inherit; }
 .contact-indicator { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .contact-indicator button { font-size: .85rem; padding: 4px 8px; min-height: 28px; }
 .contact-indicator p { flex-basis: 100%; font-size: .85rem; margin: 0; }
 .contact-invite button { margin-inline-end: 8px; }
 
 .contacts button.contact-primary, .contact-invite button.contact-primary { background: var(--color-primary); color: var(--color-on-primary); font-weight: 600; }
-.contact-bulk { display: flex; flex-wrap: wrap; gap: 8px; }
 .contact-invite h3 { display: flex; align-items: center; gap: 8px; }
 .contact-invite h3 svg { color: var(--color-secondary); flex: none; }
-.contacts button.contact-region { background: transparent; border: 0; text-decoration: underline; text-underline-offset: 3px; padding-inline: 0; font-size: .9rem; }
+
+.contacts button[aria-busy] { position: relative; padding-inline: 2rem; }
+.contacts button[aria-busy=true]::after {
+  content: ''; position: absolute; right: .65rem; top: calc(50% - .5rem); width: 1rem; height: 1rem;
+  box-sizing: border-box; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: auth-spin 800ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .contacts button[aria-busy=true]::after { animation: none; } }
+.contacts button.contact-region { width:100%; display:flex; align-items:center; justify-content:space-between; text-align:start; padding:10px 12px; text-decoration:none; border:1px solid var(--color-outline-variant); }
+.contact-region small,.contact-region strong { display:block; }
+.contact-region strong { font-size:1rem; }
+.contacts .contact-hint { margin-top:5px; font-size:.875rem; }
+.contacts .contact-bulk { display:flex; align-items:center; min-height:44px; gap:8px; border-bottom:1px solid var(--color-outline-variant); }
+.contact-bulk small { margin-inline-start:auto; }
+.contacts input[type=checkbox] { accent-color:var(--color-primary); }
+.contacts .country-dialog { box-sizing:border-box; width:min(28rem,94vw); max-height:80dvh; padding:18px; border:1px solid var(--color-outline-variant); border-radius:var(--radius-card); color:var(--color-on-surface); background:var(--color-surface); }
+.country-dialog[open] { display:flex; flex-direction:column; gap:12px; }
+.country-dialog::backdrop { background:#0008; }
+.country-dialog header,.country-list button { display:flex; justify-content:space-between; align-items:center; }
+.country-dialog input { font:inherit; padding:10px; background:var(--color-surface); color:inherit; border:1px solid var(--color-outline); border-radius:var(--radius-row); }
+.country-list { overflow:auto; overscroll-behavior:contain; }
+.contacts .country-list button { width:100%; min-height:44px; border:0; border-radius:0; color:inherit; }
+.contacts .country-list button[aria-pressed=true] { font-weight:bold; color:var(--color-primary); background:var(--color-surface-variant); }
+@media(max-width:600px) {
+  .contacts .country-dialog { inset:0; margin:0; width:100vw; max-width:none; height:var(--country-viewport,100dvh); max-height:100dvh; border:0; border-radius:0; padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); }
+}
+.chat-identity .contact-indicator { position:relative; width:fit-content; max-width:100%; flex-wrap:nowrap; gap:0; }
+.chat-identity .contact-indicator button { display:inline-flex; align-items:center; justify-content:center; gap:4px; padding:4px; color:var(--color-primary); background:transparent; border:0; min-width:28px; font-size:.8rem; }
+.contact-indicator svg { flex:none; }
+.chat-identity .contact-indicator p { position:absolute; inset:100% auto auto 0; z-index:9; width:min(19rem,calc(100vw - 48px)); box-sizing:border-box; padding:12px; font-size:.9rem; font-weight:normal; line-height:1.45; color:var(--color-on-surface); background:var(--color-surface); border:1px solid var(--color-outline); border-radius:var(--radius-row); box-shadow:0 4px 16px #0003; }

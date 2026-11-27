@@ -40,7 +40,7 @@ export function OperationalApp({ firebase, api, ownership }: AppProps) {
 }
 function SessionApp({ controller }: { controller: SessionController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  return <StartupBoundary actions={state.phase === 'ready' && <SignOutButton onConfirm={controller.signOut} />}>
+  return <StartupBoundary>
     <SessionDestination state={state} controller={controller} />
   </StartupBoundary>;
 }

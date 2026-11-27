@@ -79,9 +79,8 @@ that status sample, so a marker-triggered reconciliation adds no status GET.
 boundary owns visibility only. Firebase and the session controller select the
 session state, the legal gate authorizes entry, and Home, Onboarding and the chat
 sessions report when their destination or actionable error can be shown. The
-boundary releases once, before paint, with no new request or deadline. The
-authenticated sign-out control remains available while the startup view is
-visible. Tab ownership uses the same presentation for acquisition before the
+boundary releases once, before paint, with no new request or deadline. Ordinary startup presents the brand and progress indicator.
+Account and actionable recovery screens own sign-out. Tab ownership uses the same presentation for acquisition before the
 operational tree exists, with explicit contention and failure feedback.
 
 See [startup and Home return](navigation-flicker.md#startup-and-home-return)

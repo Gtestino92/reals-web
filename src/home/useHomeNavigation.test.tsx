@@ -129,3 +129,59 @@ it('does not let a stale Second Chat entry bypass another screen navigation lock
 });
 
 it('rejects synchronous repeated Second Chat entry before React updates the external guard',()=>{const {result}=renderHook(()=>useHomeNavigation(()=>true));const push=vi.spyOn(history,'pushState');act(()=>{expect(result.current.openSecondChat('c','m')).toBe(true);expect(result.current.openSecondChat('c','m')).toBe(false);});expect(push).toHaveBeenCalledOnce();push.mockRestore();});
+
+it.each(['home', 'account'] as const)('consumes dialog Back on the Contacts entry from %s', async parent => {
+  const { result } = renderHook(() => useHomeNavigation(() => true));
+  if (parent === 'account') act(() => result.current.open('account'));
+  act(() => result.current.open('contacts'));
+  const before = { state: history.state, length: history.length };
+  const close = vi.fn();
+  const release = result.current.registerContactRegion(close);
+  act(() => history.back());
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect({ state: history.state, length: history.length }).toEqual(before);
+  expect(result.current.destination).toBe('contacts');
+  release();
+  act(() => result.current.backTo(parent));
+  await waitFor(() => expect(result.current.destination).toBe(parent));
+  act(() => history.forward());
+  await waitFor(() => expect(result.current.destination).toBe('contacts'));
+  expect(close).toHaveBeenCalledOnce();
+});
+
+it('retires the contact selector without traversing history or claiming a foreign owner', async () => {
+  const { result } = renderHook(() => useHomeNavigation(() => true));
+  act(() => result.current.open('account'));
+  act(() => result.current.open('contacts'));
+  const close = vi.fn();
+  const release = result.current.registerContactRegion(close);
+  release();
+  act(() => history.back());
+  await waitFor(() => expect(result.current.destination).toBe('account'));
+  expect(close).not.toHaveBeenCalled();
+  act(() => history.forward());
+  await waitFor(() => expect(result.current.destination).toBe('contacts'));
+  result.current.registerContactRegion(close);
+  act(() => window.dispatchEvent(new PopStateEvent('popstate', { state: { owner: 'old', trail: ['home', 'account'] } })));
+  expect(result.current.destination).toBe('home');
+  expect(close).not.toHaveBeenCalled();
+});
+
+it('ignores a retired selector callback when a pending Back restoration settles', async () => {
+  const { result } = renderHook(() => useHomeNavigation(() => true));
+  act(() => result.current.open('account'));
+  act(() => result.current.open('contacts'));
+  const entry = history.state;
+  const close = vi.fn();
+  const release = result.current.registerContactRegion(close);
+  const traversal = vi.fn(release);
+  window.addEventListener('popstate', traversal);
+  try {
+    act(() => history.back());
+    await waitFor(() => expect(traversal).toHaveBeenCalledTimes(2));
+    expect(history.state).toEqual(entry);
+    expect(close).not.toHaveBeenCalled();
+    act(() => result.current.backTo('account'));
+    await waitFor(() => expect(result.current.destination).toBe('account'));
+  } finally { window.removeEventListener('popstate', traversal); }
+});

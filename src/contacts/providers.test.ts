@@ -15,7 +15,7 @@ it('requires a secure supported picker and requests only available telephone/nam
   expect(await pick!(signal())).toEqual([{ name: 'Ana', number: '1' }, { name: 'Ana', number: '2' }]);
   expect(select).toHaveBeenCalledWith(['tel', 'name'], { multiple: true });
   select.mockRejectedValueOnce(new DOMException('Cancel', 'AbortError'));
-  await expect(pick!(signal())).rejects.toMatchObject({ name: 'AbortError' });
+  await expect(pick!(signal())).rejects.toThrow(/Cancelaste/);
 });
 it('limits fields, follows all pages, and discards partial results on page failure', async () => {
   const page = () => Response.json({ connections: [{ names: [{ displayName: 'A' }], phoneNumbers: [{ value: 'local', canonicalForm: '+12025550100' }] }], nextPageToken: 'next' });
@@ -58,4 +58,31 @@ it('ignores an OAuth callback arriving after operation retirement', async () => 
 it('rejects oversized People pages without offering an incomplete selection', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(' '.repeat(2 * 1024 * 1024 + 1))));
   await expect(peopleRows('synthetic', Infinity, signal())).rejects.toThrow(/2 MB/);
+});
+
+it('keeps the native slot until settlement even when the intent leaves and a new picker is prepared', async () => {
+  let settle!: (rows: unknown[]) => void;
+  const select = vi.fn().mockImplementationOnce(() => new Promise(resolve => { settle = resolve; }))
+    .mockImplementationOnce(() => { throw new TypeError('Unable to open a contact selector'); })
+    .mockRejectedValueOnce(new DOMException('Permission denied', 'NotAllowedError'))
+    .mockResolvedValueOnce([{ tel: ['+12025550100'] }]);
+  vi.stubGlobal('isSecureContext', true);
+  vi.stubGlobal('navigator', { contacts: { getProperties: async () => ['tel'], select } });
+  const owner = new AbortController();
+  const first = (await preparePicker())!(owner.signal);
+  owner.abort();
+  const pick = (await preparePicker())!;
+  await expect(pick(signal())).rejects.toThrow(/selector de contactos abierto/);
+  expect(select).toHaveBeenCalledTimes(1);
+  settle([]); await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+  await expect(pick(signal())).rejects.toThrow(/Chrome → Permisos → Contactos/);
+  await expect(pick(signal())).rejects.toThrow(/no permitió/);
+  await expect(pick(signal())).resolves.toEqual([{ name: '', number: '+12025550100' }]);
+});
+it('requests another gesture when transient activation is absent', async () => {
+  const select = vi.fn();
+  vi.stubGlobal('isSecureContext', true);
+  vi.stubGlobal('navigator', { userActivation: { isActive: false }, contacts: { getProperties: async () => ['tel'], select } });
+  await expect((await preparePicker())!(signal())).rejects.toThrow(/Tocá Elegir/);
+  expect(select).not.toHaveBeenCalled();
 });
