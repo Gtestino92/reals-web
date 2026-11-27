@@ -50,7 +50,7 @@ export class ApiClient {
     for (let attempt = 0; attempt < 2; attempt++) {
       signal.throwIfAborted();
       const headers: Record<string, string> = {};
-      if (contactRevision !== undefined && method === 'PUT' && (path === '/me/shared-contacts/consent' || path === '/me/shared-contacts/selection')) {
+      if (contactRevision !== undefined && method === 'PUT' && (path === '/me/shared-contacts/consent' || path === '/me/shared-contacts/selection' || path === '/me/shared-contacts/selection/additions')) {
         headers['X-Contact-Revision'] = contactRevision;
       }
       if (user) {

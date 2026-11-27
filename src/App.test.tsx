@@ -265,6 +265,24 @@ it('keeps the backend snapshot empty and recoverable on provisioning 429 despite
     expect(fetcher).toHaveBeenCalledTimes(2);
   } finally { dispose(); }
 });
+it('forwards the captured contact revision on the authenticated additive request and rejects redirects', async () => {
+  ready();
+  const controller = new SessionController(auth, new ApiClient(fetcher).withAppCheck(async () => 'fixture-check'), false);
+  const dispose = controller.subscribe(() => {});
+  try {
+    observer(user);
+    await waitFor(() => expect(controller.getSnapshot().phase).toBe('ready'));
+    const revision = crypto.randomUUID(), body = { numbers: ['+12025550100'] };
+    fetcher.mockRejectedValueOnce(new TypeError('Redirect rejected'));
+    await expect(controller.request('/me/shared-contacts/selection/additions', controller.sessionSignal, 'PUT', body, undefined, revision))
+      .rejects.toMatchObject({ kind: 'network' });
+    expect(fetcher.mock.calls.at(-1)).toEqual(['/api/me/shared-contacts/selection/additions', expect.objectContaining({
+      method: 'PUT', body: JSON.stringify(body), redirect: 'error', cache: 'no-store',
+      headers: expect.objectContaining({ 'X-Contact-Revision': revision, 'X-Firebase-AppCheck': 'fixture-check', Authorization: expect.stringMatching(/^Bearer /) }),
+    })]);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  } finally { dispose(); }
+});
 it.each(['RATE_LIMIT_EXCEEDED', 'ACCOUNT_PROVISIONING_LIMIT_EXCEEDED'])('ready-session 429 %s never invalidates auth or retries bootstrap', async code => {
   ready(); const controller = new SessionController(auth, new ApiClient(fetcher), false), dispose = controller.subscribe(() => {});
   try {

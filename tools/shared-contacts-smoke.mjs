@@ -128,11 +128,69 @@ async function checkPickerTransitions(browser) {
     assert.equal(await page.evaluate(() => window.syntheticPicker.calls), 3);
   } finally { await page.close(); }
 }
+async function checkAdditions(browser, engine) {
+  for (const mobile of [true, false]) for (const colorScheme of ['light', 'dark']) {
+    const viewport = mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 };
+    const page = await browser.newPage({ viewport, colorScheme });
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    const button = name => page.getByRole('button', { name, exact: true });
+    const click = name => button(name).click();
+    const shot = label => page.locator('section.contacts').screenshot({
+      path: directory + '/' + engine + '-' + (mobile ? 'mobile' : 'desktop') + '-' + colorScheme + '-' + label + '.png',
+    });
+    const add = 'Agregar contactos', replace = 'Reemplazar selección';
+    try {
+      await page.route('**/*', route => new URL(route.request().url()).origin === new URL(url).origin ? route.continue() : route.abort());
+      await page.goto(url + '?additions');
+      for (const name of ['Cuenta', 'Contactos', 'Acepto participar', 'Elegir del dispositivo']) await click(name);
+      const first = page.getByRole('checkbox', { name: /12025550100/ });
+      await first.uncheck();
+      await click('Importar contactos');
+      await page.getByText('Sincronizaste 2 teléfonos.').waitFor();
+      await click(add);
+      await first.waitFor();
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await shot('add-review');
+      await click(add);
+      await page.getByText('Agregaste 1 teléfono. Tenés 3 sincronizados.').waitFor();
+      await shot('add-result');
+      const syncedAt = await page.locator('.contacts time').getAttribute('datetime');
+      await click(add); await click(add);
+      await page.getByText('Todos los contactos seleccionados ya estaban sincronizados.').waitFor();
+      assert.equal(await page.locator('.contacts time').getAttribute('datetime'), syncedAt);
+      await click(replace); await first.uncheck(); await click(replace);
+      await page.getByText('Sincronizaste 2 teléfonos.').waitFor();
+      await click(add); await click('Cancelar selección');
+      await click(add); await page.evaluate(() => window.contactsFixture.invalidate()); await click(add);
+      await page.getByText(/El estado de tus contactos cambió/).waitFor();
+      await click(add); await page.evaluate(() => window.contactsFixture.requireReplacement()); await click(add);
+      await page.getByText(/selección completa antes de agregar/).waitFor();
+      await button(replace).waitFor();
+      assert.equal(await button(add).count(), 0);
+      await click(replace); await click(replace);
+      await page.getByText('Sincronizaste 3 teléfonos.').waitFor();
+      await click('Borrar contactos compartidos'); await page.keyboard.press('Escape');
+      await page.getByRole('dialog').waitFor({ state: 'detached' });
+      assert.equal(await button('Borrar contactos compartidos').evaluate(el => el === document.activeElement), true);
+      await click('Borrar contactos compartidos'); await click('Borrar contactos');
+      await button('Elegir del dispositivo').waitFor();
+      await click('Deshabilitar contactos en común'); await click('Deshabilitar');
+      await button('Contactos').waitFor();
+      assert.deepEqual(errors, []);
+      console.log(engine, mobile ? 'mobile' : 'desktop', colorScheme, 'additions passed');
+    } finally { await page.close(); }
+  }
+}
 for (const [name, engine, options] of [
   ['chromium', chromium, { channel: 'chrome' }], ['webkit', webkit, {}],
 ]) {
   const browser = await engine.launch(options);
   try {
+    if (process.argv.includes('--additions')) {
+      await checkAdditions(browser, name);
+      continue;
+    }
     if (process.argv.includes('--picker-transitions')) {
       await checkPickerTransitions(browser);
       console.log(name, 'picker transitions passed');
@@ -172,9 +230,9 @@ for (const [name, engine, options] of [
       await page.getByRole('checkbox').nth(1).uncheck();
       await shot('selection'); await press('Importar contactos');
       await page.getByText('Sincronizaste 2 teléfonos.').waitFor();
-      await press('Elegir del dispositivo'); await page.evaluate(() => window.contactsFixture.invalidate());
-      await press('Actualizar contactos'); await page.getByText(/El estado de tus contactos cambió/).waitFor();
-      await press('Elegir del dispositivo'); await press('Actualizar contactos');
+      await press('Reemplazar selección'); await page.evaluate(() => window.contactsFixture.invalidate());
+      await press('Reemplazar selección'); await page.getByText(/El estado de tus contactos cambió/).waitFor();
+      await press('Reemplazar selección'); await press('Reemplazar selección');
       await page.getByText('Sincronizaste 3 teléfonos.').waitFor();
       await press('Deshabilitar contactos en común'); await press('Deshabilitar');
       await button('Contactos').waitFor();

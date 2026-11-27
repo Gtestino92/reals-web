@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ApiError } from '../auth/api';
 import type { SessionController } from '../auth/session';
-import { contactStatus, importResult, ownerPath, type ContactStatus } from './contracts';
+import { additionResult, contactStatus, type ImportMode, importResult, ownerPath, type ContactStatus } from './contracts';
 import { ProviderError, providers, syntheticContacts, type Providers, type PickContacts, type ContactRow } from './providers';
 import { ContactHeader, ContactSkeleton } from './ContactLoading';
 import { Selection, type RegisterContactDialog } from './Selection';
@@ -14,14 +14,17 @@ function writeError(error: unknown) {
     case 'CONTACT_MUTATION_STALE': case 'CONTACT_REVISION_REQUIRED': return changed;
     case 'CONTACT_CONSENT_REQUIRED': return 'Revisá y aceptá la versión vigente del consentimiento.';
     case 'CONTACT_IMPORT_DISABLED': return 'La importación está deshabilitada temporalmente.';
-    case 'CONTACT_REPLACEMENT_LIMIT': return 'Alcanzaste el máximo de reemplazos en 24 horas. Probá más tarde.';
+    case 'CONTACT_FULL_REPLACEMENT_REQUIRED': return 'Necesitás volver a sincronizar tu selección completa antes de agregar contactos.';
+    case 'CONTACT_REPLACEMENT_LIMIT': return 'Alcanzaste el máximo compartido de adiciones y reemplazos en 24 horas. Probá más tarde.';
     case 'INVALID_CONTACT_SELECTION': return 'Revisá el país y excluí los teléfonos con formato inválido antes de volver a confirmar.';
-    case 'CONTACT_INPUT_LIMIT': case 'CONTACT_BODY_LIMIT': case 'CONTACT_SET_LIMIT': return 'La selección supera el límite. Elegí menos números.';
+    case 'CONTACT_SET_LIMIT': return 'La selección resultante superaría el total permitido de teléfonos sincronizados. Elegí menos números.';
+    case 'CONTACT_INPUT_LIMIT': case 'CONTACT_BODY_LIMIT': return 'La selección supera el límite. Elegí menos números.';
     case 'LEGAL_ACTION_REQUIRED': return 'Revisá los documentos vigentes para continuar.';
     default: return 'No pudimos confirmar el resultado. Consultá el estado actualizado antes de decidir si querés repetir la acción.';
   }
 }
-interface Intent { native: boolean; revision: string; rows: ContactRow[] }
+interface ImportChoice { mode: ImportMode; revision: string; consentVersion: number; state: ContactStatus['state'] }
+interface Intent extends ImportChoice { native: boolean; rows: ContactRow[] }
 export default function Contacts({ controller, onBack, registerContactDialog, sources = providers }: {
   controller: SessionController; onBack: () => void; sources?: Providers; registerContactDialog?: RegisterContactDialog;
 }) {
@@ -56,7 +59,8 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
   const read = useRef<AbortController | null>(null);
   const operation = useRef<AbortController | null>(null);
   const writing = useRef(false);
-  const revision = useRef('');
+  const activeChoice = useRef<ImportChoice | null>(null);
+  const [chooser, setChooser] = useState<ImportChoice | null>(null);
   const installedRevision = useRef('');
   function install(next: ContactStatus | null) {
     if (installedRevision.current !== next?.mutationRevision) setConfirmation(null);
@@ -65,7 +69,7 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
   }
   function release() {
     operation.current?.abort(); operation.current = null;
-    setMutation(''); writing.current = false; revision.current = '';
+    setMutation(''); writing.current = false; activeChoice.current = null; setChooser(null);
     setIntent(null); setPhase('idle');
   }
   async function refresh(message?: string) {
@@ -82,7 +86,9 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
     try {
       const next = contactStatus(await controller.request(ownerPath, signal));
       signal.throwIfAborted();
-      if (revision.current && (next.mutationRevision !== revision.current || !next.importAvailable || next.requiredConsentVersion !== next.acceptedConsentVersion)) {
+      const choice = activeChoice.current;
+      if (choice && (next.mutationRevision !== choice.revision || next.state !== choice.state || !next.importAvailable ||
+          next.requiredConsentVersion !== choice.consentVersion || next.acceptedConsentVersion !== choice.consentVersion)) {
         release(); setNotice(changed);
       } else if (message !== undefined) setNotice(message);
       else if (installedRevision.current && next.mutationRevision !== installedRevision.current) setNotice(changed);
@@ -134,24 +140,24 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
     if (next !== 'native') setNotice('');
     return AbortSignal.any([lifetime.current, task.signal]);
   }
-  async function pick(source: PickContacts, native = false) {
+  async function pick(choice: ImportChoice, source: PickContacts, native = false) {
     if (!status || !available || status.acceptedConsentVersion !== status.requiredConsentVersion) return;
     const signal = begin(native ? 'native' : 'provider');
     if (!signal) return;
-    revision.current = status.mutationRevision;
+    activeChoice.current = choice;
     try {
       const rows = await source(signal);
       signal.throwIfAborted();
       if (rows.length) {
-        setIntent({ rows, revision: status.mutationRevision, native });
+        setIntent({ ...choice, rows, native });
         if (native) setNotice(current => current === notice ? '' : current);
       } else {
-        revision.current = '';
+        activeChoice.current = chooser;
         if (!native) setNotice('No se eligieron teléfonos. Tu selección anterior sigue vigente.');
       }
     } catch (e) {
       if (!signal.aborted) {
-        revision.current = '';
+        activeChoice.current = chooser;
         const cancelled = e instanceof DOMException && e.name === 'AbortError';
         if (native && cancelled) return;
         const denied = e instanceof DOMException && (e.name === 'SecurityError' || e.name === 'NotAllowedError');
@@ -160,18 +166,29 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
       }
     } finally { if (!signal.aborted) { operation.current = null; setPhase('idle'); } }
   }
-  async function loadGoogle() {
+  async function loadGoogle(choice: ImportChoice) {
     if (!sources.google || !status) return;
     const signal = begin('provider');
     if (!signal) return;
-    revision.current = status.mutationRevision;
+    activeChoice.current = choice;
     try {
       const select = await sources.google();
       signal.throwIfAborted(); setGoogle(() => select);
     } catch { if (!signal.aborted) setNotice('No se pudo cargar Google. Volvé a intentarlo.'); }
-    finally { if (!signal.aborted) release(); }
+    finally { if (!signal.aborted) { operation.current = null; setPhase('idle'); } }
   }
-  async function mutate(path: 'selection' | 'consent', method: 'PUT' | 'DELETE', body?: unknown, expected?: string, submitted?: number) {
+  function choiceFor(mode: ImportMode, owner: ContactStatus): ImportChoice {
+    return { mode, revision: owner.mutationRevision, state: owner.state, consentVersion: owner.requiredConsentVersion };
+  }
+  function chooseMode(mode: ImportMode) {
+    if (!status) return;
+    const choice = choiceFor(mode, status);
+    if (picker && !sources.google) { void pick(choice, picker, true); return; }
+    activeChoice.current = choice;
+    setChooser(choice);
+    if (!probing && !picker && sources.google && !google) void loadGoogle(choice);
+  }
+  async function mutate(path: 'selection' | 'selection/additions' | 'consent', method: 'PUT' | 'DELETE', body?: unknown, expected?: string, submitted?: number) {
     const signal = begin('writing');
     if (!signal) return;
     if (submitted === undefined) setIntent(null);
@@ -182,7 +199,13 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
       const raw = await controller.request(ownerPath + '/' + path, signal, method, body, undefined, expected);
       signal.throwIfAborted();
       if (method === 'DELETE') { reconcile = true; returnToAccount = path === 'consent'; message = path === 'consent' ? 'Deshabilitaste los contactos en común.' : 'Borraste los contactos compartidos. Tu consentimiento sigue vigente.'; }
-      else if (submitted !== undefined) {
+      else if (submitted !== undefined && path === 'selection/additions') {
+        const result = additionResult(raw, submitted);
+        install(result.status);
+        const { addedDistinctCount: added, totalDistinctCount: total } = result;
+        message = added ? `Agregaste ${added} ${added === 1 ? 'teléfono' : 'teléfonos'}. Tenés ${total} ${total === 1 ? 'sincronizado' : 'sincronizados'}.` :
+          'Todos los contactos seleccionados ya estaban sincronizados.';
+      } else if (submitted !== undefined) {
         const result = importResult(raw, submitted); install(result.status);
         message = `Sincronizaste ${result.distinctCount} ${result.distinctCount === 1 ? 'teléfono' : 'teléfonos'}.`;
       } else {
@@ -212,23 +235,39 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
     {status && !initialLoading && <>{!intent?.native && <section className="home-card">
       <h3>{status.acceptedConsentVersion === null ? 'Compartí tus contactos' : status.state === 'SYNCED' ? 'Contactos sincronizados' :
         status.state === 'RESYNC_REQUIRED' ? 'Necesitás volver a sincronizar' : 'Todavía no importaste contactos'}</h3>
+      {status.state === 'SYNCED' && typeof status.totalDistinctCount === 'number' &&
+        <p><strong>{status.totalDistinctCount} {status.totalDistinctCount === 1 ? 'teléfono' : 'teléfonos'}</strong></p>}
       {status.syncedAt && <p>Última sincronización: <time dateTime={status.syncedAt}>{new Date(status.syncedAt).toLocaleString('es-AR')}</time></p>}
       {!stale && !canImport && !discovering && <p>{!available ? 'Las importaciones están pausadas por el momento.' : !sources.picker && !sources.google ? 'Por ahora no hay fuentes de contactos habilitadas.' :
         probeFailed ? 'No pudimos comprobar el selector. Volvé a entrar en Contactos para reintentar.' : 'Este navegador no ofrece el selector de contactos del dispositivo.'}</p>}
       {discovering && <ContactSkeleton/>}
       {!canImport && !discovering && status.state === 'SYNCED' && <p>Tus contactos compartidos siguen sincronizados con tu cuenta. Podés borrarlos desde este dispositivo.</p>}
       {!consent && <><p>Participar es opcional. Los teléfonos que elijas ayudan a priorizar personas compatibles. Durante el primer chat ambas personas pueden ver un rango de contactos en común. Nadie ve los nombres ni los números de la otra agenda.</p>
-      <p>Los nombres se usan solo en tu dispositivo. Los números seleccionados se envían a Reals y se transforman en identificadores protegidos. Reals no conserva los números originales. Podés reemplazar o borrar la selección y retirar tu consentimiento. Una coincidencia no verifica identidad ni garantiza seguridad.</p>
+      <p>Los nombres se usan solo en tu dispositivo. Los números seleccionados se envían a Reals y se transforman en identificadores protegidos. Reals no conserva los números originales. Podés agregar contactos, reemplazar o borrar la selección y retirar tu consentimiento. Una coincidencia no verifica identidad ni garantiza seguridad.</p>
       <button onClick={() => controller.legalEvents.dispatchEvent(new Event('inspect'))}>Consultar los documentos vigentes de Reals</button>
       {canImport && <button className="contact-primary" aria-busy={mutation === 'PUTconsent'} disabled={busy} onClick={() => void mutate('consent', 'PUT', { version: status.requiredConsentVersion }, status.mutationRevision)}>Acepto participar</button>}
       <button disabled={busy} onClick={onBack}>Ahora no</button></>}
-      {consent && canImport && !intent && <><p>{status.state === 'NOT_CONFIGURED' ? 'Elegí de dónde importar tus contactos. Después podés revisar los teléfonos.' : 'Al confirmar una nueva importación, los teléfonos elegidos reemplazarán los que compartiste antes.'}</p>
-        {picker && <button disabled={busy} onClick={() => void pick(picker, true)}>{syntheticContacts ? 'Elegir contactos sintéticos' : 'Elegir del dispositivo'}</button>}
-        {sources.google && <><p>Google muestra los contactos guardados en la cuenta que elijas. Tu dispositivo o iCloud pueden tener otros contactos.</p>
-        <button disabled={busy} onClick={() => google ? void pick(google) : void loadGoogle()}>{google ? 'Elegir cuenta de Google' : 'Preparar Google Contacts'}</button></>}</>}
+      {consent && canImport && !intent && <>
+        {status.state !== 'NOT_CONFIGURED' && !chooser ? <>
+          <p>{status.state === 'SYNCED' ? 'Agregar conserva los contactos sincronizados. Reemplazar quita los teléfonos que no incluyas en la nueva selección.' :
+            'Volvé a elegir todos los teléfonos que querés sincronizar.'}</p>
+          {status.state === 'SYNCED' && <button className="contact-primary" disabled={busy} onClick={() => chooseMode('ADD')}>Agregar contactos</button>}
+          <button className={status.state === 'SYNCED' ? undefined : 'contact-primary'} disabled={busy} onClick={() => chooseMode('REPLACE')}>Reemplazar selección</button>
+        </> : <>
+          {chooser && <h3>{chooser.mode === 'ADD' ? 'Agregar contactos' : 'Reemplazar selección'}</h3>}
+          <p>Elegí de dónde importar tus contactos. Después podés revisar los teléfonos.</p>
+          {picker && <button disabled={busy} onClick={() => void pick(chooser ?? choiceFor('REPLACE', status), picker, true)}>{syntheticContacts ? 'Elegir contactos sintéticos' : 'Elegir del dispositivo'}</button>}
+          {sources.google && <><p>Google muestra los contactos guardados en la cuenta que elijas. Tu dispositivo o iCloud pueden tener otros contactos.</p>
+          <button disabled={busy} onClick={() => {
+            const choice = chooser ?? choiceFor('REPLACE', status);
+            if (google) void pick(choice, google); else void loadGoogle(choice);
+          }}>{google ? 'Elegir cuenta de Google' : 'Preparar Google Contacts'}</button></>}
+          {chooser && <button disabled={busy} onClick={release}>Cambiar operación</button>}
+        </>}
+      </>}
       {phase === 'provider' && <button onClick={release}>Cancelar</button>}
     </section>}
-    {intent && <Selection registerContactDialog={registerContactDialog} pending={phase === 'writing'} disabled={stale || busy} rows={intent.rows} countryCode={controller.snapshot.profile?.countryCode} updating={status.state !== 'NOT_CONFIGURED'} cancel={release} confirm={numbers => void mutate('selection', 'PUT', { numbers }, intent.revision, numbers.length)}/>}
+    {intent && <Selection registerContactDialog={registerContactDialog} pending={phase === 'writing'} disabled={stale || busy} rows={intent.rows} countryCode={controller.snapshot.profile?.countryCode} initial={intent.state === 'NOT_CONFIGURED'} mode={intent.mode} cancel={release} confirm={numbers => void mutate(intent.mode === 'ADD' ? 'selection/additions' : 'selection', 'PUT', { numbers }, intent.revision, numbers.length)}/>}
     {status.acceptedConsentVersion !== null && <section className="home-card"><h3>Administrar participación</h3>
       {status.state !== 'NOT_CONFIGURED' && <button aria-busy={mutation === 'DELETEselection'} disabled={busy} onClick={e => { opener.current = e.currentTarget; setConfirmation('selection'); }}>Borrar contactos compartidos</button>}
       <button aria-busy={mutation === 'DELETEconsent'} disabled={busy} onClick={e => { opener.current = e.currentTarget; setConfirmation('consent'); }}>Deshabilitar contactos en común</button></section>}</>}

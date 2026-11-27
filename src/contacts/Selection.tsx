@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getCountries, parsePhoneNumberFromString } from 'libphonenumber-js/max';
 import type { CountryCode } from 'libphonenumber-js';
 import type { ContactRow } from './providers';
+import type { ImportMode } from './contracts';
 
 const countries = getCountries();
 const names = new Intl.DisplayNames(['es'], { type: 'region' });
@@ -28,8 +29,8 @@ function review(rows: ContactRow[], country: CountryCode | undefined) {
 
 export type RegisterContactDialog = (close: () => void) => () => void;
 
-export function Selection({ rows, countryCode, updating, disabled, pending = false, registerContactDialog, confirm, cancel }: {
-  registerContactDialog?: RegisterContactDialog | undefined; pending?: boolean; disabled: boolean; rows: ContactRow[]; countryCode: string | null | undefined; updating: boolean;
+export function Selection({ rows, countryCode, mode, initial, disabled, pending = false, registerContactDialog, confirm, cancel }: {
+  registerContactDialog?: RegisterContactDialog | undefined; pending?: boolean; disabled: boolean; rows: ContactRow[]; countryCode: string | null | undefined; mode: ImportMode; initial: boolean;
   confirm: (numbers: string[]) => void; cancel: () => void;
 }) {
   const [region, setRegion] = useState(() => countries.find(code => code === countryCode) ?? '');
@@ -69,8 +70,11 @@ export function Selection({ rows, countryCode, updating, disabled, pending = fal
   }
   const search = normalize(query);
   const matches = countryList.filter(item => normalize(item.name).includes(search) || item.code.toLowerCase() === search);
-  return <fieldset disabled={pending} className="home-card"><h3>Revisá tus contactos</h3>
-    <p>Cada teléfono cuenta una vez, aunque esté guardado con varios nombres.</p>
+  const action = initial ? 'Importar contactos' : mode === 'ADD' ? 'Agregar contactos' : 'Reemplazar selección';
+  return <fieldset disabled={pending} className="home-card"><h3>{initial ? 'Revisá tus contactos' : action}</h3>
+    {mode === 'ADD' && <p>Los contactos que ya compartiste siguen sincronizados. Los teléfonos repetidos se ignoran.</p>}
+    {!initial && mode === 'REPLACE' && <p>Se quitarán los teléfonos compartidos que no incluyas en esta selección.</p>}
+    {mode === 'REPLACE' && <p>Cada teléfono cuenta una vez, aunque esté guardado con varios nombres.</p>}
     {rows.some(row => !row.number.startsWith('+')) && <div>
       <button ref={trigger} className="contact-region" aria-haspopup="dialog" onClick={() => {
         setQuery('');
@@ -97,7 +101,7 @@ export function Selection({ rows, countryCode, updating, disabled, pending = fal
     {!!invalid.length && <details><summary>Teléfonos sin incluir ({invalid.length})</summary><p>Revisá el país o el formato en tu agenda.</p>
       {invalid.map((row, i) => <p key={i}>{row.name || 'Sin nombre'} · {row.number}</p>)}</details>}
     <p role="status">{numbers.size} {numbers.size === 1 ? 'teléfono seleccionado' : 'teléfonos seleccionados'}{numbers.size > 2000 && ' · Elegí hasta 2000 teléfonos.'}</p>
-    <button className="contact-primary" aria-busy={pending} disabled={disabled || !numbers.size || numbers.size > 2000} onClick={() => confirm([...numbers])}>{updating ? 'Actualizar contactos' : 'Importar contactos'}</button>
+    <button className="contact-primary" aria-busy={pending} disabled={disabled || !numbers.size || numbers.size > 2000} onClick={() => confirm([...numbers])}>{action}</button>
     <button onClick={cancel}>Cancelar selección</button>
   </fieldset>;
 }
