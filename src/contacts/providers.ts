@@ -20,7 +20,7 @@ const settings = 'Si rechazaste el permiso, revisá Ajustes de Android → Apps 
 function pickerFailure(error: unknown): Error {
   const name = object(error) && typeof error.name === 'string' ? error.name : '';
   const message = object(error) && typeof error.message === 'string' ? error.message : '';
-  if (name === 'AbortError') return new ProviderError('Cancelaste la selección.');
+  if (name === 'AbortError') return new DOMException('Cancelaste la selección.', 'AbortError');
   if (/user (activation|gesture)/i.test(message)) return new ProviderError(activation);
   if (/already (in use|open|active)|picker is already/i.test(message)) return new ProviderError(pickerBusy);
   if (name === 'InvalidStateError') return new ProviderError('No pudimos abrir tus contactos. Si hay otro selector abierto, cerralo. ' + settings);

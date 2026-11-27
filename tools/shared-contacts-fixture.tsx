@@ -29,7 +29,8 @@ if (options.has('recovery')) {
     },
   } });
   providers.picker = preparePicker;
-} else if (options.has('google')) providers.google = async () => async () => rows;
+} else if (options.has('transitions')) providers.picker = preparePicker;
+else if (options.has('google')) providers.google = async () => async () => rows;
 else if (!options.has('unsupported')) providers.picker = async () => async () => rows;
 let status = { mutationRevision: crypto.randomUUID(), requiredConsentVersion: 1, acceptedConsentVersion: null as number | null,
   acceptedAt: null as string | null, syncedAt: null as string | null, state: 'NOT_CONFIGURED', importAvailable: true };

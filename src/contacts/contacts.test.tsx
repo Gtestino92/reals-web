@@ -100,7 +100,7 @@ it.each(['cancel', 'pagehide', 'session', 'unmount'])('ignores late picker after
   const pending = new Promise<ContactRow[]>(done => { resolve = done; });
   const view = render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => () => pending }}/>);
   await click('Elegir del dispositivo');
-  if (reason === 'cancel') await click('Cancelar');
+  if (reason === 'cancel') await click('Volver a Cuenta');
   if (reason === 'unmount') view.unmount();
   if (reason === 'pagehide') fireEvent(window, new Event('pagehide'));
   if (reason === 'session') act(() => lease.abort());
@@ -183,7 +183,8 @@ it('recovers an initial status failure and keeps a synced set through empty and 
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => source }}/>);
   await click('Consultar estado'); await click('Elegir del dispositivo');
   await screen.findByText(/no permitió/); await click('Elegir del dispositivo');
-  await screen.findByText(/No se eligieron teléfonos/);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Elegir del dispositivo' })).toBeEnabled());
+  expect(screen.queryByText(/No se eligieron teléfonos/)).toBeNull();
   expect(screen.getByRole('heading', { name: 'Contactos sincronizados' })).toBeVisible();
   expect(request.mock.calls.every(call => call[2] === undefined)).toBe(true);
 });
@@ -216,4 +217,57 @@ it('keeps the confirmation button and its label while the selection write settle
   expect(screen.getByRole('button', { name: 'Cancelar selección' })).toBeDisabled();
   await act(async () => finish({ status: synced, submittedCount: 2, distinctCount: 2 }));
   expect(await screen.findByText('Sincronizaste 2 teléfonos.')).toBeVisible();
+});
+
+it.each(['empty', 'cancel', 'success', 'revision'])('preserves the native launch surface during resume and handles %s settlement', async outcome => {
+  const controller = controllerFixture();
+  const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(initial).mockResolvedValue(accepted);
+  let finish!: (rows: ContactRow[]) => void, fail!: (error: Error) => void;
+  const source = vi.fn(() => new Promise<ContactRow[]>((resolve, reject) => { finish = resolve; fail = reject; }));
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => source }}/>);
+  await click('Acepto participar');
+  const notice = await screen.findByText(/Consentimiento registrado/);
+  const trigger = screen.getByRole('button', { name: 'Elegir del dispositivo' });
+  fireEvent.click(trigger);
+  fireEvent.click(trigger);
+  expect(source).toHaveBeenCalledOnce();
+  expect(trigger).toBeDisabled();
+  expect(notice).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Cancelar' })).toBeNull();
+  if (outcome === 'revision') request.mockResolvedValueOnce({ ...accepted, mutationRevision: crypto.randomUUID() });
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  await act(async () => {
+    if (outcome === 'cancel') fail(new DOMException('', 'AbortError'));
+    else finish(outcome === 'empty' ? [] : rows);
+  });
+  if (outcome === 'success') {
+    expect(screen.getByText('Revisá tus contactos')).toBeVisible();
+    expect(trigger).not.toBeInTheDocument();
+  } else {
+    expect(trigger).toBeEnabled();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    if (outcome === 'revision') expect(screen.getByText(/El estado de tus contactos cambió/)).toBeVisible();
+    else expect(notice).toHaveTextContent('Consentimiento registrado');
+  }
+});
+
+it.each([true, false])('settles the picker before the foreground read (same revision: %s)', async compatible => {
+  const controller = controllerFixture();
+  const request = vi.spyOn(controller, 'request').mockResolvedValue(synced);
+  let settlePicker!: (rows: ContactRow[]) => void;
+  let settleRead!: (status: typeof synced) => void;
+  const pick = () => new Promise<ContactRow[]>(resolve => { settlePicker = resolve; });
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => pick }}/>);
+  await click('Elegir del dispositivo');
+  request.mockImplementationOnce(() => new Promise(resolve => { settleRead = resolve; }));
+  fireEvent(document, new Event('visibilitychange'));
+  await act(async () => settlePicker(rows));
+  const review = screen.getByText('Revisá tus contactos');
+  expect(review).toBeVisible();
+  await act(async () => settleRead(compatible ? synced : { ...synced, mutationRevision: crypto.randomUUID() }));
+  if (compatible) expect(screen.getByText('Revisá tus contactos')).toBe(review);
+  else {
+    expect(review).not.toBeInTheDocument();
+    expect(screen.getByText(/El estado de tus contactos cambió/)).toBeVisible();
+  }
 });
