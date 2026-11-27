@@ -44,6 +44,9 @@ else if (!options.has('unsupported')) providers.picker = async () => async () =>
 let status = { mutationRevision: crypto.randomUUID(), requiredConsentVersion: 1, acceptedConsentVersion: null as number | null,
   acceptedAt: null as string | null, syncedAt: null as string | null, state: 'NOT_CONFIGURED', importAvailable: true };
 let synchronized = new Set<string>();
+function ownerStatus() {
+  return { ...status, totalDistinctCount: status.state === 'RESYNC_REQUIRED' ? null : synchronized.size };
+}
 let range: string | null = 'ONE_TO_FIVE';
 Object.assign(window, { contactsFixture: {
   requireReplacement() { status.state = 'RESYNC_REQUIRED'; },
@@ -71,7 +74,7 @@ const api = new ApiClient(async (url, init) => {
     id: 'msg1', chatSessionId: 'c', senderId: 'them', sentAt: new Date().toISOString(), messageType: 'TEXT', content: '¡Hola! A mí me gusta caminar.',
   }] : [], { headers: { 'X-Reals-Counterpart-Audio-Access': 'ALLOWED' } });
   if (options.has('recovery') && path.startsWith('/me/shared-contacts')) await new Promise(resolve => setTimeout(resolve, 800));
-  if (path === '/me/shared-contacts') return json(status);
+  if (path === '/me/shared-contacts') return json(ownerStatus());
   if (!path.startsWith('/me/shared-contacts/')) throw Error('Unexpected synthetic route');
   if (method === 'PUT' && new Headers(init?.headers).get('X-Contact-Revision') !== status.mutationRevision)
     return json({ code: 'CONTACT_MUTATION_STALE' }, { status: 409 });
@@ -82,7 +85,7 @@ const api = new ApiClient(async (url, init) => {
     Object.assign(status, { syncedAt: null, state: 'NOT_CONFIGURED' });
     return new Response(null, { status: 204 });
   }
-  if (path.endsWith('/consent')) { Object.assign(status, { mutationRevision: crypto.randomUUID(), acceptedConsentVersion: 1, acceptedAt: new Date().toISOString() }); return json(status); }
+  if (path.endsWith('/consent')) { Object.assign(status, { mutationRevision: crypto.randomUUID(), acceptedConsentVersion: 1, acceptedAt: new Date().toISOString() }); return json(ownerStatus()); }
   const body: unknown = JSON.parse(String(init?.body));
   if (!object(body) || !Array.isArray(body.numbers) || Object.keys(body).some(k => !['numbers', 'defaultRegion'].includes(k))) throw Error('Unexpected synthetic selection');
   const numbers = new Set<string>();
@@ -97,12 +100,12 @@ const api = new ApiClient(async (url, init) => {
     for (const number of numbers) synchronized.add(number);
     const addedDistinctCount = synchronized.size - before;
     if (addedDistinctCount) Object.assign(status, { mutationRevision: crypto.randomUUID(), syncedAt: new Date().toISOString() });
-    return json({ status, submittedCount, addedDistinctCount, totalDistinctCount: synchronized.size });
+    return json({ status: ownerStatus(), submittedCount, addedDistinctCount, totalDistinctCount: synchronized.size });
   }
   if (!path.endsWith('/selection')) throw Error('Unexpected synthetic operation');
   synchronized = numbers;
   Object.assign(status, { mutationRevision: crypto.randomUUID(), syncedAt: new Date().toISOString(), state: 'SYNCED' });
-  return json({ status, submittedCount, distinctCount: synchronized.size });
+  return json({ status: ownerStatus(), submittedCount, distinctCount: synchronized.size });
 });
 const identity = { uid: 'synthetic', emailVerified: true, getIdToken: async () => 'synthetic', reload: async () => {} };
 let notifyIdentity: (user: typeof identity | null) => void;

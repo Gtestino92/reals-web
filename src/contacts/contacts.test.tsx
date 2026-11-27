@@ -26,6 +26,70 @@ it.each([{ mutationRevision: 'unknown' }, { syncedAt: 32 }, { acceptedAt: 'inval
 it('accepts omitted nullable status fields', () => {
   expect(contactStatus({ mutationRevision: initial.mutationRevision, requiredConsentVersion: 1, state: 'NOT_CONFIGURED', importAvailable: false }).acceptedAt).toBeNull();
 });
+it.each([
+  [synced, -1], [synced, 1.5], [synced, Number.MAX_SAFE_INTEGER + 1], [synced, null], [synced, '6'],
+  [initial, 1], [initial, null], [{ ...synced, state: 'RESYNC_REQUIRED' }, 0],
+] as const)('rejects counts incompatible with owner status', (status, totalDistinctCount) => {
+  expect(() => contactStatus({ ...status, totalDistinctCount })).toThrow();
+});
+
+it('validates both mutation totals against the nested owner snapshot when supplied', () => {
+  const result = { status: { ...synced, totalDistinctCount: 5 }, submittedCount: 2 };
+  expect(() => importResult({ ...result, distinctCount: 2 }, 2)).toThrow();
+  expect(() => additionResult({ ...result, addedDistinctCount: 1, totalDistinctCount: 4 }, 2)).toThrow();
+  expect(contactStatus(initial).totalDistinctCount).toBeUndefined();
+  expect(contactStatus({ ...initial, totalDistinctCount: 0 }).totalDistinctCount).toBe(0);
+});
+
+it('installs the current total on entry, foreground reconciliation and remount', async () => {
+  const controller = controllerFixture();
+  const request = vi.spyOn(controller, 'request').mockResolvedValue({ ...synced, importAvailable: false, totalDistinctCount: 0 });
+  const mount = () => render(<Contacts controller={controller} onBack={vi.fn()} sources={{}}/>);
+  const view = mount();
+  const count = await screen.findByText('0 teléfonos');
+  let finish!: (value: unknown) => void;
+  request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  fireEvent(window, new Event('pageshow'));
+  expect(count).toBeVisible();
+  await act(async () => finish({ ...synced, mutationRevision: crypto.randomUUID(), totalDistinctCount: 6 }));
+  expect(screen.getByText('6 teléfonos')).toBe(count);
+  request.mockResolvedValueOnce({ ...synced, state: 'RESYNC_REQUIRED', totalDistinctCount: null });
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+  expect(count).not.toBeInTheDocument();
+  view.unmount();
+  request.mockResolvedValueOnce({ ...synced, totalDistinctCount: 8 });
+  mount();
+  expect(await screen.findByText('8 teléfonos')).toBeVisible();
+  request.mockResolvedValueOnce(synced);
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+  expect(screen.queryByText(/^\d+ teléfonos?$/)).toBeNull();
+  expect(request.mock.calls.map(c => c[0])).toEqual(Array(5).fill(ownerPath));
+});
+it.each(['Borrar contactos', 'Deshabilitar'])('removes the synchronized total after %s', async confirm => {
+  const controller = controllerFixture(), back = vi.fn();
+  const request = vi.spyOn(controller, 'request').mockResolvedValueOnce({ ...synced, totalDistinctCount: 6 })
+    .mockResolvedValueOnce(undefined).mockResolvedValue({ ...(confirm === 'Deshabilitar' ? initial : accepted), totalDistinctCount: 0 });
+  render(<Contacts controller={controller} onBack={back} sources={{}}/>);
+  expect(await screen.findByText('6 teléfonos')).toBeVisible();
+  await click(confirm === 'Deshabilitar' ? 'Deshabilitar contactos en común' : 'Borrar contactos compartidos');
+  await click(confirm);
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+  expect(screen.queryByText(/^\d+ teléfonos?$/)).toBeNull();
+  expect(back).toHaveBeenCalledTimes(confirm === 'Deshabilitar' ? 1 : 0);
+});
+
+it('replaces the displayed total with the confirmed replacement size', async () => {
+  const controller = controllerFixture();
+  vi.spyOn(controller, 'request').mockResolvedValueOnce({ ...synced, totalDistinctCount: 6 }).mockResolvedValueOnce({
+    status: { ...synced, mutationRevision: crypto.randomUUID(), totalDistinctCount: 2 }, submittedCount: 2, distinctCount: 2,
+  });
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => async () => rows }}/>);
+  await click('Reemplazar selección');
+  await screen.findByRole('checkbox', { name: /Deseleccionar todos/ });
+  await click('Reemplazar selección');
+  expect(await screen.findByText('2 teléfonos')).toBeVisible();
+  expect(screen.queryByText('6 teléfonos')).toBeNull();
+});
 it('accepts confirmed empty selection and validates counts', () => {
   expect(importResult({ status: synced, submittedCount: 0, distinctCount: 0 }, 0).distinctCount).toBe(0);
   expect(() => importResult({ status: synced, submittedCount: 1, distinctCount: 2 }, 1)).toThrow();
@@ -33,7 +97,7 @@ it('accepts confirmed empty selection and validates counts', () => {
 it('requires separate consent and selection, advances the revision and submits only selected numbers', async () => {
   const controller = controllerFixture();
   const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(initial).mockResolvedValueOnce(accepted)
-    .mockResolvedValueOnce({ status: synced, submittedCount: 1, distinctCount: 1 });
+    .mockResolvedValueOnce({ status: { ...synced, totalDistinctCount: 1 }, submittedCount: 1, distinctCount: 1 });
   const pick = vi.fn(async () => rows);
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => pick }}/>);
   await click('Acepto participar');
@@ -43,6 +107,7 @@ it('requires separate consent and selection, advances the revision and submits o
   fireEvent.click((await screen.findAllByRole('checkbox'))[2]!);
   await click('Importar contactos');
   expect(await screen.findByText('Sincronizaste 1 teléfono.')).toBeVisible();
+  expect(screen.getByText('1 teléfono')).toBeVisible();
   expect(request.mock.calls[2]?.slice(2)).toEqual(['PUT', { numbers: [rows[0]!.number] }, undefined, accepted.mutationRevision]);
   expect(JSON.stringify(localStorage)).not.toContain(rows[0]!.number);
 });
@@ -309,7 +374,7 @@ it.each([
 ] as const)('uses authoritative counts for %i new numbers', async (addedDistinctCount, message) => {
   const controller = controllerFixture();
   const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(synced).mockResolvedValue({
-    status: addedDistinctCount ? { ...synced, mutationRevision: crypto.randomUUID() } : synced,
+    status: { ...synced, totalDistinctCount: 83, mutationRevision: addedDistinctCount ? crypto.randomUUID() : synced.mutationRevision },
     submittedCount: 2, addedDistinctCount, totalDistinctCount: 83,
   });
   const source = vi.fn(async () => rows);
@@ -319,6 +384,7 @@ it.each([
   await screen.findByRole('heading', { name: 'Agregar contactos' });
   await click('Agregar contactos');
   expect(await screen.findByText(message)).toBeVisible();
+  expect(screen.getByText('83 teléfonos')).toBeVisible();
   expect(request.mock.calls[1]?.[0]).toBe(ownerPath + '/selection/additions');
   expect(request.mock.calls[1]?.slice(2)).toEqual(['PUT', { numbers: rows.map(r => r.number) }, undefined, synced.mutationRevision]);
 });

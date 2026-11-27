@@ -16,12 +16,18 @@ export function contactStatus(raw: unknown) {
       (acceptedConsentVersion === null) !== (acceptedAt === null) ||
       !(state === 'NOT_CONFIGURED' || state === 'SYNCED' || state === 'RESYNC_REQUIRED') ||
       (state !== 'NOT_CONFIGURED' && (!syncedAt || !acceptedConsentVersion))) throw new ApiError('invalid');
-  return { mutationRevision, requiredConsentVersion, acceptedConsentVersion, acceptedAt, state, syncedAt, importAvailable };
+  const { totalDistinctCount } = raw;
+  if (totalDistinctCount !== undefined) {
+    if (totalDistinctCount !== null && !integer(totalDistinctCount)) throw new ApiError('invalid');
+    if ((state === 'RESYNC_REQUIRED') !== (totalDistinctCount === null) ||
+        (state === 'NOT_CONFIGURED' && totalDistinctCount !== 0)) throw new ApiError('invalid');
+  }
+  return { totalDistinctCount, mutationRevision, requiredConsentVersion, acceptedConsentVersion, acceptedAt, state, syncedAt, importAvailable };
 }
 export function importResult(raw: unknown, submitted: number) {
   if (!object(raw) || raw.submittedCount !== submitted || !integer(raw.distinctCount) || raw.distinctCount > submitted) throw new ApiError('invalid');
   const status = contactStatus(raw.status);
-  if (status.state !== 'SYNCED') throw new ApiError('invalid');
+  if (status.state !== 'SYNCED' || (status.totalDistinctCount !== undefined && status.totalDistinctCount !== raw.distinctCount)) throw new ApiError('invalid');
   return { status, distinctCount: raw.distinctCount };
 }
 export function additionResult(raw: unknown, submitted: number) {
@@ -29,7 +35,8 @@ export function additionResult(raw: unknown, submitted: number) {
       !integer(raw.addedDistinctCount) || !integer(raw.totalDistinctCount) ||
       raw.addedDistinctCount > submitted || raw.addedDistinctCount > raw.totalDistinctCount) throw new ApiError('invalid');
   const status = contactStatus(raw.status);
-  if (status.state !== 'SYNCED' || status.acceptedConsentVersion !== status.requiredConsentVersion) throw new ApiError('invalid');
+  if (status.state !== 'SYNCED' || status.acceptedConsentVersion !== status.requiredConsentVersion ||
+      (status.totalDistinctCount !== undefined && status.totalDistinctCount !== raw.totalDistinctCount)) throw new ApiError('invalid');
   return { status, addedDistinctCount: raw.addedDistinctCount, totalDistinctCount: raw.totalDistinctCount };
 }
 

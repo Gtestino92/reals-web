@@ -235,6 +235,8 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
     {status && !initialLoading && <>{!intent?.native && <section className="home-card">
       <h3>{status.acceptedConsentVersion === null ? 'Compartí tus contactos' : status.state === 'SYNCED' ? 'Contactos sincronizados' :
         status.state === 'RESYNC_REQUIRED' ? 'Necesitás volver a sincronizar' : 'Todavía no importaste contactos'}</h3>
+      {status.state === 'SYNCED' && typeof status.totalDistinctCount === 'number' &&
+        <p><strong>{status.totalDistinctCount} {status.totalDistinctCount === 1 ? 'teléfono' : 'teléfonos'}</strong></p>}
       {status.syncedAt && <p>Última sincronización: <time dateTime={status.syncedAt}>{new Date(status.syncedAt).toLocaleString('es-AR')}</time></p>}
       {!stale && !canImport && !discovering && <p>{!available ? 'Las importaciones están pausadas por el momento.' : !sources.picker && !sources.google ? 'Por ahora no hay fuentes de contactos habilitadas.' :
         probeFailed ? 'No pudimos comprobar el selector. Volvé a entrar en Contactos para reintentar.' : 'Este navegador no ofrece el selector de contactos del dispositivo.'}</p>}
