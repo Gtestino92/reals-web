@@ -827,7 +827,7 @@ it('does not refresh a stale identity token or publish a late check result', asy
   expect(screen.queryByText('Email verificado.')).toBeNull();
   expect(screen.queryByRole('alert')).toBeNull();
 });
-it('rejects stale domain results after sign-out', async () => { let finish: ((value: Response) => void) | undefined; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options)); mount(); await waitFor(() => expect(finish).toBeDefined()); confirmSignOut(); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => { finish?.(json({ requirementsSatisfied:true,documents:[document()] })); }); expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument(); });
+it('rejects stale domain results after external sign-out during startup', async () => { let finish: ((value: Response) => void) | undefined; const original = fetcher.getMockImplementation()!; fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options)); mount(); await waitFor(() => expect(finish).toBeDefined()); act(() => observer(null)); await screen.findByRole('button',{ name:'Ingresar' }); await act(async () => { finish?.(json({ requirementsSatisfied:true,documents:[document()] })); }); expect(screen.queryByRole('heading',{ name:'Crear perfil' })).not.toBeInTheDocument(); });
 it('shows a definitive backend rejection once by the creation submit and allows correction', async () => {
   const base = fetcher.getMockImplementation()!;
   let finish!: (response: Response) => void;
@@ -1257,7 +1257,7 @@ it.each([
     expect(screen.getByRole('status')).toBe(statusElement);
     await act(async () => finishBootstrap?.(json({ id:'u',status:'ACTIVE' })));
     await waitFor(() => expect(finishOnboarding).toBeDefined()); expectPreparing();
-    if (status !== 'ACTIVE') expect(screen.getByRole('button',{ name:'Cerrar sesión' })).toBeEnabled();
+    expect(screen.queryByRole('button',{ name:'Cerrar sesión' })).toBeNull();
     await act(async () => finishOnboarding?.(json({ requirementsSatisfied:satisfied,documents:[document()] })));
     await screen.findByRole('heading',{ name:heading });
     expect(screen.queryByText('Preparando Reals…')).not.toBeInTheDocument();
@@ -1298,11 +1298,21 @@ it('replaces initial onboarding loading with a recoverable error and restores lo
   await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[document()] })));
   await screen.findByRole('heading',{ name:'Crear perfil' });
 });
-it('keeps loading sign-out accessible and rejects a late initial onboarding response', async () => {
+it('allows sign-out during onboarding recovery and rejects the late retry response', async () => {
   let finish: ((response: Response) => void) | undefined;
   const original = fetcher.getMockImplementation()!;
-  fetcher.mockImplementation((input,options) => String(input).endsWith('/legal-status') ? new Promise(resolve => { finish = resolve; }) : original(input,options));
-  mount(); await waitFor(() => expect(finish).toBeDefined()); expectPreparing();
+  let offline = true;
+  fetcher.mockImplementation((input,options) => {
+    if (!String(input).endsWith('/legal-status')) return original(input,options);
+    if (offline) return Promise.reject(new TypeError('offline'));
+    return new Promise(resolve => { finish = resolve; });
+  });
+  mount();
+  await screen.findByRole('alert');
+  offline = false;
+  refreshView();
+  await waitFor(() => expect(finish).toBeDefined());
+  expectPreparing();
   confirmSignOut();
   await screen.findByRole('button',{ name:'Ingresar' });
   await act(async () => finish?.(json({ requirementsSatisfied:true,documents:[document()] })));
