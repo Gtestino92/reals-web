@@ -5,7 +5,7 @@ import { Selection } from './Selection';
 function mount(countryCode: string | undefined, numbers: string[]) {
   const confirm = vi.fn();
   render(<Selection countryCode={countryCode} rows={numbers.map((number, i) => ({ number, name: i === 1 ? 'Alias' : 'Ejemplo' }))}
-    updating={false} disabled={false} confirm={confirm} cancel={() => {}}/>);
+    mode="REPLACE" initial disabled={false} confirm={confirm} cancel={() => {}}/>);
   return confirm;
 }
 const button = (name: string | RegExp) => screen.getByRole('button', { name });
@@ -58,7 +58,7 @@ it('keeps unresolved rows excluded after clearing all, then selects eligible gro
 });
 it('locks the region and bulk controls during submission', () => {
   render(<Selection countryCode="AR" pending disabled rows={[{ name: 'Ejemplo', number: '011 4321-1234' }]}
-    updating confirm={vi.fn()} cancel={vi.fn()}/>);
+    mode="REPLACE" initial={false} confirm={vi.fn()} cancel={vi.fn()}/>);
   expect(button(/País de los números locales/)).toBeDisabled();
   expect(screen.getByRole('checkbox', { name: /Deseleccionar todos/ })).toBeDisabled();
 });

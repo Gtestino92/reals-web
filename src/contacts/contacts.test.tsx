@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import Contacts from './Contacts';
 import { ApiClient, ApiError } from '../auth/api';
 import { controllerFixture } from '../chat/fixtures';
-import { contactStatus, importResult, ownerPath } from './contracts';
+import { additionResult, contactStatus, importResult, ownerPath } from './contracts';
 import type { ContactRow } from './providers';
 
 const initial = { mutationRevision: crypto.randomUUID(), requiredConsentVersion: 3, acceptedConsentVersion: null,
@@ -15,10 +15,10 @@ const click = async (name: string) => fireEvent.click(await screen.findByRole('b
 it('sends the captured revision on protected PUTs and no contact header on other requests', async () => {
   const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({}));
   const api = new ApiClient(fetcher);
-  for (const [path, method] of [[ownerPath + '/consent', 'PUT'], [ownerPath + '/selection', 'DELETE'], ['/me', 'PUT']] as const) {
+  for (const [path, method] of [[ownerPath + '/consent', 'PUT'], [ownerPath + '/selection/additions', 'PUT'], [ownerPath + '/selection/additions?extra', 'PUT'], [ownerPath + '/selection/additions', 'POST'], [ownerPath + '/selection', 'DELETE'], ['/me', 'PUT']] as const) {
     await api.request(path, new AbortController().signal, undefined, method, undefined, undefined, true, undefined, undefined, initial.mutationRevision);
   }
-  expect(fetcher.mock.calls.map(([, options]) => new Headers(options?.headers).get('X-Contact-Revision'))).toEqual([initial.mutationRevision, null, null]);
+  expect(fetcher.mock.calls.map(([, options]) => new Headers(options?.headers).get('X-Contact-Revision'))).toEqual([initial.mutationRevision, initial.mutationRevision, null, null, null, null]);
 });
 it.each([{ mutationRevision: 'unknown' }, { syncedAt: 32 }, { acceptedAt: 'invalid' }, { state: 'OTHER' }, { importAvailable: null }])('rejects invalid owner data %o', patch => {
   expect(() => contactStatus({ ...initial, ...patch })).toThrow();
@@ -142,10 +142,10 @@ it('preselects Google numbers and prevents an empty update', async () => {
   const controller = controllerFixture();
   const request = vi.spyOn(controller, 'request').mockResolvedValue(synced);
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ google: async () => async () => rows }}/>);
-  await click('Preparar Google Contacts'); await click('Elegir cuenta de Google');
+  await click('Agregar contactos'); await click('Elegir cuenta de Google');
   expect((await screen.findAllByRole('checkbox'))[0]).toBeChecked();
   fireEvent.click(screen.getByRole('checkbox', { name: /Deseleccionar todos/ }));
-  expect(screen.getByRole('button', { name: 'Actualizar contactos' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Agregar contactos' })).toBeDisabled();
   expect(request).toHaveBeenCalledTimes(1);
 });
 
@@ -189,9 +189,9 @@ it('recovers an initial status failure and keeps a synced set through empty and 
   const request = vi.spyOn(controller, 'request').mockRejectedValueOnce(new Error()).mockResolvedValue(synced);
   const source = vi.fn().mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError')).mockResolvedValueOnce([]);
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => source }}/>);
-  await click('Consultar estado'); await click('Elegir del dispositivo');
-  await screen.findByText(/no permitió/); await click('Elegir del dispositivo');
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Elegir del dispositivo' })).toBeEnabled());
+  await click('Consultar estado'); await click('Agregar contactos');
+  await screen.findByText(/no permitió/); await click('Agregar contactos');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Agregar contactos' })).toBeEnabled());
   expect(screen.queryByText(/No se eligieron teléfonos/)).toBeNull();
   expect(screen.getByRole('heading', { name: 'Contactos sincronizados' })).toBeVisible();
   expect(request.mock.calls.every(call => call[2] === undefined)).toBe(true);
@@ -268,14 +268,14 @@ it.each([true, false])('settles the picker before the foreground read (same revi
   let settleRead!: (status: typeof synced) => void;
   const pick = () => new Promise<ContactRow[]>(resolve => { settlePicker = resolve; });
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => pick }}/>);
-  await click('Elegir del dispositivo');
+  await click('Agregar contactos');
   request.mockImplementationOnce(() => new Promise(resolve => { settleRead = resolve; }));
   fireEvent(document, new Event('visibilitychange'));
   await act(async () => settlePicker(rows));
-  const review = screen.getByText('Revisá tus contactos');
+  const review = screen.getByRole('heading', { name: 'Agregar contactos' });
   expect(review).toBeVisible();
   await act(async () => settleRead(compatible ? synced : { ...synced, mutationRevision: crypto.randomUUID() }));
-  if (compatible) expect(screen.getByText('Revisá tus contactos')).toBe(review);
+  if (compatible) expect(screen.getByRole('heading', { name: 'Agregar contactos' })).toBe(review);
   else {
     expect(review).not.toBeInTheDocument();
     expect(screen.getByText(/El estado de tus contactos cambió/)).toBeVisible();
@@ -292,4 +292,105 @@ it('stays in Contacts when the server cannot confirm withdrawal', async () => {
   expect(await screen.findByText(/No pudimos confirmar el resultado/)).toBeVisible();
   expect(request.mock.calls.filter(call => call[2] === 'DELETE')).toHaveLength(1);
   expect(onBack).not.toHaveBeenCalled();
+});
+
+it.each([
+  { submittedCount: 3 }, { submittedCount: -1 }, { addedDistinctCount: -1 }, { addedDistinctCount: 1.5 },
+  { addedDistinctCount: 3 }, { totalDistinctCount: 0 }, { totalDistinctCount: Number.MAX_SAFE_INTEGER + 1 },
+  { status: accepted }, { status: { ...synced, requiredConsentVersion: 4 } },
+])('rejects inconsistent addition results %o', patch => {
+  expect(() => additionResult({ status: synced, submittedCount: 2, addedDistinctCount: 1, totalDistinctCount: 5, ...patch }, 2)).toThrow();
+});
+
+it.each([
+  [0, 'Todos los contactos seleccionados ya estaban sincronizados.'],
+  [1, 'Agregaste 1 teléfono. Tenés 83 sincronizados.'],
+  [2, 'Agregaste 2 teléfonos. Tenés 83 sincronizados.'],
+] as const)('uses authoritative counts for %i new numbers', async (addedDistinctCount, message) => {
+  const controller = controllerFixture();
+  const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(synced).mockResolvedValue({
+    status: addedDistinctCount ? { ...synced, mutationRevision: crypto.randomUUID() } : synced,
+    submittedCount: 2, addedDistinctCount, totalDistinctCount: 83,
+  });
+  const source = vi.fn(async () => rows);
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => source }}/>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Agregar contactos' }));
+  expect(source).toHaveBeenCalledOnce();
+  await screen.findByRole('heading', { name: 'Agregar contactos' });
+  await click('Agregar contactos');
+  expect(await screen.findByText(message)).toBeVisible();
+  expect(request.mock.calls[1]?.[0]).toBe(ownerPath + '/selection/additions');
+  expect(request.mock.calls[1]?.slice(2)).toEqual(['PUT', { numbers: rows.map(r => r.number) }, undefined, synced.mutationRevision]);
+});
+
+it.each(['Agregar contactos', 'Reemplazar selección'])('retains %s in the provider chooser and review', async action => {
+  const controller = controllerFixture(), picker = vi.fn(async () => rows);
+  const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(synced).mockResolvedValue({
+    status: synced, submittedCount: 2, distinctCount: 2, addedDistinctCount: 0, totalDistinctCount: 3,
+  });
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => picker, google: async () => picker }}/>);
+  await click(action);
+  expect(await screen.findByRole('heading', { name: action })).toBeVisible();
+  expect(picker).not.toHaveBeenCalled();
+  await click('Elegir del dispositivo');
+  await screen.findByRole('checkbox', { name: /Deseleccionar todos/ });
+  await click(action);
+  expect(request.mock.calls[1]?.[0]).toBe(ownerPath + (action === 'Agregar contactos' ? '/selection/additions' : '/selection'));
+  expect(request.mock.calls[1]?.[5]).toBe(synced.mutationRevision);
+});
+
+it.each([
+  ['CONTACT_SET_LIMIT', /superaría el total permitido/], ['CONTACT_REPLACEMENT_LIMIT', /adiciones y reemplazos/],
+  ['CONTACT_FULL_REPLACEMENT_REQUIRED', /selección completa antes de agregar/], ['network', /No pudimos confirmar/],
+] as const)('reconciles rejected additions without replay or automatic replacement (%s)', async (code, message) => {
+  const controller = controllerFixture();
+  const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(synced)
+    .mockRejectedValueOnce(new ApiError(code === 'network' ? 'network' : 'backend', 409, code))
+    .mockResolvedValue(code === 'CONTACT_FULL_REPLACEMENT_REQUIRED' ? { ...synced, state: 'RESYNC_REQUIRED' } : synced);
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => async () => rows }}/>);
+  await click('Agregar contactos');
+  await screen.findByRole('checkbox', { name: /Deseleccionar todos/ });
+  await click('Agregar contactos');
+  expect(await screen.findByText(message)).toBeVisible();
+  expect(await screen.findByRole('button', { name: 'Reemplazar selección' })).toBeEnabled();
+  if (code === 'CONTACT_FULL_REPLACEMENT_REQUIRED') expect(screen.queryByRole('button', { name: 'Agregar contactos' })).toBeNull();
+  expect(request.mock.calls.map(c => c[0])).toEqual([ownerPath, ownerPath + '/selection/additions', ownerPath]);
+});
+
+it.each([
+  { requiredConsentVersion: 4, acceptedConsentVersion: 3 },
+  { requiredConsentVersion: 4, acceptedConsentVersion: 4 },
+  { state: 'RESYNC_REQUIRED' },
+])('retires the additive choice on incompatible status even at the same revision %o', async patch => {
+  const controller = controllerFixture();
+  const request = vi.spyOn(controller, 'request').mockResolvedValue(synced);
+  let finish!: (rows: ContactRow[]) => void;
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => () => new Promise(resolve => { finish = resolve; }) }}/>);
+  await click('Agregar contactos');
+  request.mockResolvedValue({ ...synced, ...patch });
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+  await act(async () => finish(rows));
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(await screen.findByText(/El estado de tus contactos cambió/)).toBeVisible();
+  expect(request.mock.calls.every(call => call[2] === undefined)).toBe(true);
+});
+
+it('locks an additive write and rejects its late result after session retirement', async () => {
+  const controller = controllerFixture(), session = new AbortController();
+  vi.spyOn(controller, 'sessionSignal', 'get').mockReturnValue(session.signal);
+  let finish!: (result: unknown) => void;
+  const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(synced)
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => async () => rows }}/>);
+  await click('Agregar contactos');
+  await screen.findByRole('checkbox', { name: /Deseleccionar todos/ });
+  const confirm = screen.getByRole('button', { name: 'Agregar contactos' });
+  fireEvent.click(confirm); fireEvent.click(confirm);
+  expect(confirm).toBeDisabled();
+  expect(confirm).toHaveAttribute('aria-busy', 'true');
+  act(() => session.abort());
+  await act(async () => finish({ status: synced, submittedCount: 2, addedDistinctCount: 2, totalDistinctCount: 3 }));
+  expect(screen.queryByText(/Agregaste/)).toBeNull();
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(request).toHaveBeenCalledTimes(2);
 });

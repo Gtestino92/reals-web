@@ -159,6 +159,8 @@ Run the focused suites in src/contacts plus src/chat/sharedContacts.test.tsx, th
 
 Run `npm run dev -- --port 5177 --strictPort` and then `node tools/shared-contacts-smoke.mjs`. The smoke uses an external Playwright installation, local Chrome and Playwright WebKit. For a temporary installation, run `npm install --prefix <temp-directory> --no-save playwright`, install WebKit with that installation's Playwright CLI, and set CONTACT_PLAYWRIGHT_ANCHOR to the absolute path of <temp-directory>/package.json. The script exercises Account navigation, native-style selection with region, select-all, deselection, replacement, stale revision, withdrawal, unavailable providers, and First Chat collapse/dismiss/reload. Screenshots are written to artifacts/shared-contacts.
 
+Run `node tools/shared-contacts-smoke.mjs --additions` for the focused import journey in Chromium and WebKit at 390×844 and 1280×800 in each light and dark theme. The synthetic owner holds its synchronized set in memory and calculates the union. The journey covers overlap, duplicate-only counts and timestamp, replacement, cancellation, stale revision, required resynchronization, deletion and withdrawal. Run `--picker-transitions` and `--region-history` separately for delayed picker settlement and country-dialog navigation. [Mobile additive review](shared-contacts/chromium-mobile-light-add-review.png) · [Desktop confirmed result](shared-contacts/webkit-desktop-dark-add-result.png).
+
 | Synthetic Chromium screenshots | Mobile / light | Desktop / dark |
 |---|---|---|
 | Home invitation | [Mobile invitation](shared-contacts/chromium-mobile-light-invitation.png) | [Desktop invitation](shared-contacts/chromium-desktop-dark-invitation.png) |

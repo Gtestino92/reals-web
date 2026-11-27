@@ -14,7 +14,7 @@ function append(rows: ContactRow[], name: unknown, number: unknown) {
 // The native operation has no AbortSignal. Keep only its occupancy across views.
 let nativePickerOpen = false;
 const pickerBusy = 'Ya hay un selector de contactos abierto. Cerralo antes de volver a intentar.';
-const activation = 'Tocá Elegir del dispositivo para abrir los contactos.';
+const activation = 'Volvé a tocar el botón de importación para abrir los contactos del dispositivo.';
 const settings = 'Si rechazaste el permiso, revisá Ajustes de Android → Apps → Chrome → Permisos → Contactos. Si usás Reals instalada, revisá también los permisos del navegador que la abre. Después volvé a intentar.';
 
 function pickerFailure(error: unknown): Error {

@@ -83,6 +83,6 @@ it('requests another gesture when transient activation is absent', async () => {
   const select = vi.fn();
   vi.stubGlobal('isSecureContext', true);
   vi.stubGlobal('navigator', { userActivation: { isActive: false }, contacts: { getProperties: async () => ['tel'], select } });
-  await expect((await preparePicker())!(signal())).rejects.toThrow(/Tocá Elegir/);
+  await expect((await preparePicker())!(signal())).rejects.toThrow(/Volvé a tocar/);
   expect(select).not.toHaveBeenCalled();
 });

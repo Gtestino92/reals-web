@@ -15,6 +15,7 @@ it.each([
   ['GET', '/me/shared-contacts', 'error'],
   ['PUT', '/me/shared-contacts/consent', 'error'],
   ['PUT', '/me/shared-contacts/selection', 'error'],
+  ['PUT', '/me/shared-contacts/selection/additions', 'error'],
   ['DELETE', '/me/shared-contacts/consent', 'error'],
   ['DELETE', '/me/shared-contacts/selection', 'error'],
   ['GET', '/me/profile', undefined],

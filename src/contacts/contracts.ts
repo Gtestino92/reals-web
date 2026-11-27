@@ -24,5 +24,15 @@ export function importResult(raw: unknown, submitted: number) {
   if (status.state !== 'SYNCED') throw new ApiError('invalid');
   return { status, distinctCount: raw.distinctCount };
 }
+export function additionResult(raw: unknown, submitted: number) {
+  if (!object(raw) || !integer(raw.submittedCount) || raw.submittedCount !== submitted ||
+      !integer(raw.addedDistinctCount) || !integer(raw.totalDistinctCount) ||
+      raw.addedDistinctCount > submitted || raw.addedDistinctCount > raw.totalDistinctCount) throw new ApiError('invalid');
+  const status = contactStatus(raw.status);
+  if (status.state !== 'SYNCED' || status.acceptedConsentVersion !== status.requiredConsentVersion) throw new ApiError('invalid');
+  return { status, addedDistinctCount: raw.addedDistinctCount, totalDistinctCount: raw.totalDistinctCount };
+}
+
+export type ImportMode = 'ADD' | 'REPLACE';
 export type ContactStatus = ReturnType<typeof contactStatus>;
 export const ownerPath = '/me/shared-contacts';
