@@ -52,11 +52,14 @@ function SessionDestination({ controller, state }: { controller: SessionControll
     if (state.phase === 'login' || state.phase === 'authenticating') window.history.replaceState(null, '', '/');
   }, [state.phase]);
   if (state.phase === 'ready') return <LegalSession key={state.account?.id} controller={controller}><ReadySession key={`${state.account?.id}/${state.profile?.id}`} controller={controller} /></LegalSession>;
-  if (starting && restoring) return null;
+  // Keep the manual login form mounted across a failed provider attempt.
+  // Recovery screens take focus on mount, after the boundary becomes visible.
+  const loginScreen = ['loading', 'login', 'authenticating'].includes(state.phase);
+  if (starting && (restoring || !loginScreen)) return null;
   // Manual authentication keeps its operation through backend bootstrap.
   // Restoration has no operation and must not expose an intermediate login form.
   if (restoring) return <AuthenticationLoading />;
-  if (['loading', 'login', 'authenticating'].includes(state.phase)) return <LoginScreen
+  if (loginScreen) return <LoginScreen
     sessionLoading={state.phase === 'loading'}
     loading={state.operation === 'signIn' || state.operation === 'signUp'}
     googleLoading={state.operation === 'google'} passwordResetLoading={state.operation === 'reset'}
