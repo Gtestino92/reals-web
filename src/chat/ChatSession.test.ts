@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { ApiError } from '../auth/api';
 import { ChatSession } from './ChatSession';
@@ -7,6 +7,7 @@ import type { Exit, Message } from './contracts';
 let chat:ReturnType<typeof chatFixture>, messages:ReturnType<typeof messageFixture>[], exits:Exit[], matchState:string;
 let controller:ReturnType<typeof controllerFixture>, session:ChatSession, home:ReturnType<typeof vi.fn<(message: string) => void>>;
 let request:MockInstance<typeof controller.request>;
+afterEach(() => vi.restoreAllMocks());
 const writes=()=>request.mock.calls.filter(([, ,method])=>method && method!=='GET');
 it.each(['CHAT_ACTIVE', 'VISUAL_PHASE'])('uses private decision feedback with authoritative %s', async state => {
   await session.refresh();
@@ -68,7 +69,7 @@ it('installs the next immutable guidance question and refreshed audio policy fro
     if(path.endsWith('/guidance/next-request')){chat.guidance={...chat.guidance,questionOrdinal:2,question:{...chat.guidance.question,instanceId:'question-2',text:'Segunda pregunta'}};return Promise.resolve(chat.guidance);}
     return base(path,signal,method,body);
   });
-  await session.action('guidance');expect(session.getSnapshot().chat?.guidance?.question.instanceId).toBe('question-2');expect(session.getSnapshot().blocked).toBe(false);
+  await session.action('guidance'); expect(session.getSnapshot().chat?.guidance?.question.instanceId).toBe('question-2');expect(session.getSnapshot().blocked).toBe(false);
 });
 beforeEach(()=>{
   chat=chatFixture();messages=[messageFixture()];exits=[];matchState='CHAT_ACTIVE';controller=controllerFixture();home=vi.fn();
@@ -121,15 +122,15 @@ it('drains cursor pages and merges changed messages without duplicates',async()=
 it('rejects nonadvancing malformed pagination',async()=>{const base=request.getMockImplementation()!;request.mockImplementation((...args)=>args[0].includes('after=')?Promise.resolve({messages:[],hasMore:true}):base(...args));await session.refresh();await session.refresh();await session.refresh();expect(session.getSnapshot().blocked).toBe(true);});
 it('installs canonical irreversible reactions immediately',async()=>{await session.refresh();await session.react('1');expect(session.getSnapshot().messages[0]?.reactionType).toBe('HEART');await session.react('1');expect(writes()).toHaveLength(1);});
 it('does not react to own messages',async()=>{messages=[messageFixture('1','me')];await session.refresh();await session.react('1');expect(writes()).toHaveLength(0);});
-it.each(['APPROVED','REJECTED'])('routes own %s decisions to Home',async value=>{chat.myDecision=value;await session.refresh();expect(home).toHaveBeenCalled();await session.refresh();expect(request).toHaveBeenCalledTimes(4);});
-it('decision-only blocks conversation but permits pending final decision and safety',async()=>{chat.partnerDecision='APPROVED';await session.refresh();await session.send('Hola',null);await session.action('guidance');await session.action('mutual');await session.action('cancel');await session.react('1');expect(writes()).toHaveLength(0);await session.action('approve');expect(writes()[0]?.[3]).toEqual({decision:'APPROVED'});});
+it.each(['APPROVED','REJECTED'])('routes own %s decisions to Home',async value=>{chat.myDecision=value;await session.refresh();expect(home).toHaveBeenCalled();await session.refresh();expect(request.mock.calls.map(([path]) => path)).toEqual(['/matches/m','/matches/m/chat']);});
+it('decision-only blocks conversation but permits pending final decision and safety',async()=>{chat.partnerDecision='APPROVED';await session.refresh();await session.send('Hola',null);await session.action('guidance');await session.action('mutual');await session.react('1');expect(writes()).toHaveLength(0);await session.action('approve');expect(writes()[0]?.[3]).toEqual({decision:'APPROVED'});});
 it.each(['canRequestNext','myNextRequested','completed'])('guards guidance using server field %s',async field=>{Object.assign(chat.guidance,{[field]:field!=='canRequestNext'});await session.refresh();await session.action('guidance');expect(writes()).toHaveLength(0);});
-it.each(['approve','reject','guidance','mutual','cancel','safety','block'] as const)('uses real endpoint for %s',async kind=>{await session.refresh();await session.action(kind,{reason:'HARASSMENT',details:'Detalle',blockUser:true});expect(writes()).toHaveLength(1);const expected={approve:'/matches/m/chat-decision',reject:'/matches/m/chat-decision',guidance:'/chats/c/guidance/next-request',mutual:'/chats/c/exit-requests',cancel:'/chats/c/cancellations',safety:'/chats/c/safety-cancellations',block:'/matches/m/block'};expect(writes()[0]?.[0]).toBe(expected[kind]);});
-it.each(['acceptance','rejection','timeout'] as const)('resolves incoming mutual %s',async kind=>{exits=[{id:'exit',requesterUserId:'them',responderUserId:'me',type:'MUTUAL_CANCEL',status:'PENDING',createdAt:new Date().toISOString()}];await session.refresh();await session.send('Hola',null);await session.action('guidance');expect(writes()).toHaveLength(0);await session.action(kind);expect(writes()[0]?.[0]).toBe(`/chats/c/exit-requests/exit/${kind}`);});
-it('cannot accept its own outgoing exit request',async()=>{exits=[{id:'exit',requesterUserId:'me',responderUserId:'them',type:'MUTUAL_CANCEL',status:'PENDING',createdAt:new Date().toISOString()}];await session.refresh();await session.action('acceptance');expect(writes()).toHaveLength(0);});
+it.each(['approve','reject','guidance','mutual','safety','block'] as const)('uses real endpoint for %s',async kind=>{await session.refresh();await session.action(kind,{reason:'HARASSMENT',details:'Detalle',blockUser:true});expect(writes()).toHaveLength(1);const expected={approve:'/matches/m/chat-decision',reject:'/matches/m/chat-decision',guidance:'/chats/c/guidance/next-request',mutual:'/chats/c/exit-requests',safety:'/chats/c/safety-cancellations',block:'/matches/m/block'};expect(writes()[0]?.[0]).toBe(expected[kind]);});
+it.each(['acceptance','rejection'] as const)('resolves incoming mutual %s',async kind=>{exits=[{id:'exit',requesterUserId:'them',responderUserId:'me',type:'MUTUAL_CANCEL',status:'PENDING',createdAt:new Date().toISOString()}];await session.refresh();await session.send('Hola',null);await session.action('guidance');expect(writes()).toHaveLength(0);await session.action(kind, undefined, 'exit');expect(writes()[0]?.[0]).toBe(`/chats/c/exit-requests/exit/${kind}`);});
+it('cannot accept its own outgoing exit request',async()=>{exits=[{id:'exit',requesterUserId:'me',responderUserId:'them',type:'MUTUAL_CANCEL',status:'PENDING',createdAt:new Date().toISOString()}];await session.refresh();await session.action('acceptance', undefined, 'exit');expect(writes()).toHaveLength(0);});
 it.each(['EXPIRED','ABANDONED'])('routes authoritative %s and stops polling',async status=>{chat.status=status;await session.refresh();expect(home).toHaveBeenCalled();const n=request.mock.calls.length;await session.refresh();expect(request).toHaveBeenCalledTimes(n);});
 it.each(['CHAT_EXPIRED','CHAT_ABANDONED'])('handles authoritative terminal conflict %s',async code=>{request.mockRejectedValue(new ApiError('backend',409,code));await session.refresh();expect(home).toHaveBeenCalled();});
-it('local expiry blocks ordinary actions without synthesizing terminal state',async()=>{chat.timeoutAt=new Date(Date.now()-1000).toISOString();await session.refresh();await session.send('Hola',null);expect(writes()).toHaveLength(0);expect(home).not.toHaveBeenCalled();});
+it('local expiry blocks ordinary actions without synthesizing terminal state',async()=>{chat.timeoutAt=new Date(Date.now()-1000).toISOString();await session.refresh();await session.send('Hola',null);expect(writes()).toHaveLength(0);expect(home).toHaveBeenCalledWith('El plazo del chat terminó.','local-expiry');});
 it('decision-only ignores inactivity advisory while awaiting final decision',async()=>{chat.partnerDecision='APPROVED';chat.inactivityExpiresAt=new Date(Date.now()-1000).toISOString();await session.refresh();await session.action('reject');expect(writes()).toHaveLength(1);});
 it.each(['approve','reject'] as const)('keeps %s pending metadata coupled to the write lock and reconciles authoritative closure',async kind=>{
   await session.refresh();const base=request.getMockImplementation()!;let complete:((value:unknown)=>void)|undefined;
@@ -182,6 +183,7 @@ it('never resends after a confirmed mutation whose follow-up read failed',async(
   await session.send('Confirmado',null);expect(session.getSnapshot().outgoing).toBeNull();expect(session.getSnapshot().error).toContain('acción fue confirmada');await session.retry();expect(writes()).toHaveLength(1);
 });
 it('automatically requests advisory mutual timeout at most once per request',async()=>{
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   exits=[{id:'exit',requesterUserId:'them',responderUserId:'me',type:'MUTUAL_CANCEL',status:'PENDING',createdAt:new Date(Date.now()-21000).toISOString()}];await session.refresh();await session.checkExitTimeout();await session.checkExitTimeout();expect(writes()).toHaveLength(1);expect(writes()[0]?.[0]).toContain('/timeout');expect(home).not.toHaveBeenCalled();
 });
 it('does not request timeout before the advisory delay',async()=>{
@@ -231,8 +233,235 @@ it.each(['decision','exit','expiry'])('installs %s and updated guidance before a
   if (transition === 'exit') exits = [{id:'exit', requesterUserId:'them', responderUserId:'me',
     type:'MUTUAL_CANCEL', status:'PENDING', createdAt:new Date().toISOString()}];
   await session.send('Primero',null);
-  expect(session.getSnapshot().chat?.guidance?.question.instanceId).toBe('question-2');
+  if (transition === 'expiry') expect(home).toHaveBeenCalledWith('El plazo del chat terminó.', 'local-expiry');
+  else expect(session.getSnapshot().chat?.guidance?.question.instanceId).toBe('question-2');
   expect(session.canSendText).toBe(false);
   await session.send('Segundo',null);
+  expect(writes()).toHaveLength(1);
+});
+
+const exitFixture = (own = true) => ({
+  id: '8ec99818-c357-4dd9-90ef-c7eb04ce42a2', chatId: 'c',
+  requesterUserId: own ? 'me' : 'them', responderUserId: own ? 'them' : 'me',
+  type: 'MUTUAL_CANCEL', status: 'PENDING', createdAt: new Date().toISOString(),
+});
+it.each([
+  {id:' '}, {chatId:'other'}, {requesterUserId:'them',responderUserId:'me'},
+  {type:'OTHER'}, {status:'ACCEPTED'}, {createdAt:'yesterday'},
+])('reconciles an invalid creation acknowledgement without installing it (%j)', async patch => {
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  request.mockImplementation((...args) => args[2] === 'POST'
+    ? Promise.resolve({...exitFixture(), ...patch}) : base(...args));
+  await session.action('mutual');
+  expect(session.getSnapshot().exits).toEqual([]);
+  expect(session.getSnapshot().error).toMatch(/Actualizá/);
+  expect(writes()).toHaveLength(1);
+});
+it('recovers the counterpart request after uncertain creation without replay', async () => {
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  request.mockImplementation((...args) => {
+    if (args[2] !== 'POST') return base(...args);
+    exits = [exitFixture(false)];
+    return Promise.reject(new ApiError('network'));
+  });
+  await session.action('mutual');
+  expect(session.getSnapshot()).toMatchObject({exits:[{responderUserId:'me'}],error:''});
+  expect(writes()).toHaveLength(1);
+});
+it.each(['early','network'] as const)('bounds %s timeout retries after checking the same pending request', async failure => {
+  vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');
+  let now = Date.now();
+  vi.spyOn(Date,'now').mockImplementation(() => now);
+  const exit = {...exitFixture(false), createdAt:new Date(now - 21_000).toISOString()};
+  exits = [exit];
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  request.mockImplementation((...args) => args[2] === 'POST'
+    ? Promise.reject(failure === 'early' ? new ApiError('backend',409,'CHAT_EXIT_REQUEST_NOT_AVAILABLE') : new ApiError('network'))
+    : base(...args));
+  const first = session.checkExitTimeout();
+  await session.checkExitTimeout();
+  await first;
+  await session.checkExitTimeout();
+  expect(writes()).toHaveLength(1);
+  now += 3000;
+  await session.checkExitTimeout();
+  now += 3000;
+  await session.checkExitTimeout();
+  expect(writes()).toHaveLength(2);
+  expect(session.getSnapshot().error).toMatch(/Actualizá/);
+  // A concurrent responder finished while this participant was disconnected.
+  matchState = 'CHAT_REJECTED';
+  await session.recover();
+  await session.checkExitTimeout();
+  expect(home).toHaveBeenCalledTimes(1);
+  expect(writes()).toHaveLength(2);
+});
+it('requires explicit successful recovery when timeout delivery and reconciliation both fail', async () => {
+  vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');
+  const exit = {...exitFixture(),createdAt:new Date(Date.now()-21_000).toISOString()};
+  exits = [exit];
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  request.mockRejectedValue(new ApiError('network'));
+  await session.checkExitTimeout();
+  expect(session.getSnapshot().blocked).toBe(true);
+  request.mockImplementation((...args) => args[2] === 'POST'
+    ? Promise.resolve({chat:{id:'c',matchId:'m',chatType:'FIRST_CHAT',status:'CANCELLED'},exitRequest:{...exit,status:'TIMED_OUT'}})
+    : base(...args));
+  await session.poll();
+  await session.checkExitTimeout();
+  expect(writes()).toHaveLength(1);
+  await session.recover();
+  await session.checkExitTimeout();
+  expect(home).toHaveBeenCalledWith('La conversación se cerró.',true);
+  expect(writes()).toHaveLength(2);
+});
+it.each(['POST','history'])('retires at the absolute deadline during a stalled %s', async delayed => {
+  let now = Date.now();
+  vi.spyOn(Date,'now').mockImplementation(() => now);
+  chat.timeoutAt = new Date(now + 5000).toISOString();
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  let release!: () => void;
+  request.mockImplementation(async (...args) => {
+    if (delayed === 'POST' ? args[2] === 'POST' : args[0].includes('/messages?'))
+      await new Promise<void>(resolve => {release = resolve;});
+    return base(...args);
+  });
+  const sending = session.send('Mensaje',null);
+  await vi.waitFor(() => expect(release).toBeDefined());
+  now += 6000;
+  await session.checkExitTimeout();
+  expect(home).toHaveBeenCalledWith('El plazo del chat terminó.', 'local-expiry');
+  const retired = session.getSnapshot();
+  release();
+  await sending;
+  expect(session.getSnapshot()).toBe(retired);
+  expect(home).toHaveBeenCalledTimes(1);
+});
+it('reconciles an elapsed inactivity deadline extended by a counterpart message', async () => {
+  chat.inactivityExpiresAt = new Date(Date.now()-2000).toISOString();
+  await session.refresh();
+  expect(session.canSendText).toBe(false);
+  messages.push(messageFixture('2'));
+  chat.inactivityExpiresAt = new Date(Date.now()+60_000).toISOString();
+  await session.poll();
+  expect(session.getSnapshot().messages).toHaveLength(2);
+  expect(session.canSendText).toBe(true);
+  expect(home).not.toHaveBeenCalled();
+});
+
+it('keeps the original response deadline through polls and resume, and lets absolute expiry supersede it', async () => {
+  vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');
+  let now = Date.now();
+  vi.spyOn(Date,'now').mockImplementation(() => now);
+  const exit = {...exitFixture(), createdAt:new Date(now-10_000).toISOString()};
+  exits = [exit];
+  chat.timeoutAt = new Date(now+7000).toISOString();
+  await session.refresh();
+  now += 5000;
+  chat.serverTime = new Date(now).toISOString();
+  await session.poll();
+  await session.resume();
+  expect(session.getSnapshot().exits[0]?.createdAt).toBe(exit.createdAt);
+  await session.checkExitTimeout();
+  expect(writes()).toHaveLength(0);
+  now += 2000;
+  await session.checkExitTimeout();
+  expect(home).toHaveBeenCalledWith('El plazo del chat terminó.', 'local-expiry');
+  expect(writes()).toHaveLength(0);
+});
+it('checks an inactivity extension and then an authoritative abandonment during a pending POST', async () => {
+  let now = Date.now();
+  vi.spyOn(Date,'now').mockImplementation(() => now);
+  chat.inactivityExpiresAt = new Date(now+2000).toISOString();
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  let release!: () => void;
+  request.mockImplementation(async (...args) => {
+    if (args[2] === 'POST') await new Promise<void>(resolve => { release=resolve; });
+    return base(...args);
+  });
+  const send = session.send('Mensaje',null);
+  now += 3000;
+  chat.serverTime = new Date(now).toISOString();
+  chat.inactivityExpiresAt = new Date(now+4000).toISOString();
+  await session.poll();
+  expect(session.getSnapshot().chat?.inactivityExpiresAt).toBe(chat.inactivityExpiresAt);
+  expect(home).not.toHaveBeenCalled();
+  now += 5000;
+  chat.status = 'ABANDONED';
+  await session.poll();
+  expect(home).toHaveBeenCalledWith('El chat se cerró por inactividad.',true);
+  release();
+  await send;
+  expect(session.getSnapshot().confirmed).toBeNull();
+});
+it('times out an acknowledged creation even when its complementary history is still pending', async () => {
+  vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');
+  let now = Date.now();
+  vi.spyOn(Date,'now').mockImplementation(() => now);
+  await session.refresh();
+  const exit = {...exitFixture(), createdAt:chat.serverTime}, base = request.getMockImplementation()!;
+  let release!: () => void;
+  request.mockImplementation(async (...args) => {
+    const [path,,method] = args;
+    if (path.endsWith('/timeout')) return {exitRequest:{...exit,status:'TIMED_OUT'},chat:{...chat,status:'CANCELLED'}};
+    if (method === 'POST') { exits=[exit]; return exit; }
+    if (path.includes('/messages?')) await new Promise<void>(resolve => {release=resolve;});
+    return base(...args);
+  });
+  const creation = session.action('mutual');
+  await vi.waitFor(() => expect(release).toBeDefined());
+  now += 21_000;
+  await session.checkExitTimeout();
+  expect(home).toHaveBeenCalledWith('La conversación se cerró.',true);
+  release();
+  await creation;
+  expect(home).toHaveBeenCalledTimes(1);
+  expect(writes()).toHaveLength(2);
+});
+
+it('observes an incoming pause during a stalled send without losing or replaying its POST', async () => {
+  let now = Date.now();
+  vi.spyOn(Date,'now').mockImplementation(() => now);
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  let release!: () => void;
+  request.mockImplementation(async (...args) => {
+    if (args[2] === 'POST') await new Promise<void>(resolve => {release=resolve;});
+    return base(...args);
+  });
+  const sent = session.send('Mensaje en curso',null);
+  now += 6000;
+  exits = [exitFixture(false)];
+  await session.poll();
+  expect(session.getSnapshot()).toMatchObject({exits:[{responderUserId:'me'}],outgoing:{phase:'pending'}});
+  expect(session.canSendText).toBe(false);
+  release();
+  await sent;
+  expect(session.getSnapshot()).toMatchObject({exits:[{responderUserId:'me'}],confirmed:'Mensaje en curso',outgoing:null});
+  expect(writes()).toHaveLength(1);
+});
+
+it.each(['ACCEPTED','REJECTED','TIMED_OUT'])('reconciles a competing %s resolution without another timeout POST', async status => {
+  vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');
+  const exit = {...exitFixture(false),createdAt:new Date(Date.now()-25_000).toISOString()};
+  exits = [exit];
+  await session.refresh();
+  const base = request.getMockImplementation()!;
+  request.mockImplementation(async (...args) => {
+    if (args[2] === 'POST') {
+      exits = [{...exit,status}];
+      throw new ApiError('backend',409,'CHAT_EXIT_REQUEST_NOT_AVAILABLE');
+    }
+    return base(...args);
+  });
+  await session.checkExitTimeout();
+  await session.checkExitTimeout();
+  expect(home).toHaveBeenCalledWith('La conversación se cerró.',true);
   expect(writes()).toHaveLength(1);
 });

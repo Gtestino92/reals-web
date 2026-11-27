@@ -874,6 +874,7 @@ it('an active chat reconciles terminal state and suppresses stale Activity',asyn
   installFirstChatBackend();const original=fetcher.getMockImplementation()!;let closed=false;
   fetcher.mockImplementation((url,options)=>closed&&url==='/api/matches/m/chat'?Promise.resolve(json({code:'CHAT_ABANDONED'},409)):original(url,options));
   home.pendingActions=[{type:'FIRST_CHAT',matchId:'m',chatId:'c'}];mount();await screen.findByRole('region',{name:'Primer chat'});
+  fireEvent.change(await screen.findByRole('textbox',{name:'Mensaje'}),{target:{value:'Borrador pendiente'}});
   closed=true;act(()=>window.dispatchEvent(new Event('online')));await screen.findByText('El chat se cerró por inactividad.');await ready();
   expect(screen.queryByRole('button',{name:'Cerrar sesión'})).toBeNull();
   expect(screen.queryByRole('region',{name:'Primer chat'})).toBeNull();
@@ -1002,7 +1003,7 @@ it('returns to the same first chat draft and safety controls after deferring a r
   expect(await screen.findByRole('textbox', { name: 'Mensaje' })).toBe(draft);
   expect(draft).toHaveValue('Borrador de prueba');
   fireEvent.click(screen.getByRole('button', { name: 'Opciones del chat' }));
-  await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Salir unilateralmente' })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Salida consensuada' })).toBeEnabled());
   expect(screen.getByRole('menuitem', { name: 'Reportar por seguridad' })).toBeEnabled();
   expect(fetcher.mock.calls.filter(([, options]) => options?.method === 'POST').map(([path]) => path)).toEqual(['/api/matches/m/chat-decision']);
 });

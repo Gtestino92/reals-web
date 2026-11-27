@@ -69,6 +69,15 @@ export function parseExits(v: unknown, chatId: string, participants: string[]): 
     return { id: str(e.id), requesterUserId: str(e.requesterUserId), responderUserId: str(e.responderUserId), status: str(e.status), createdAt: date(e.createdAt), type: str(e.type) };
   }).sort((a,b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 }
+export function parseMutualExitAcknowledgement(raw: unknown, chatId: string, requester: string, responder: string, latestCreation: number): Exit {
+  const [exit] = parseExits([raw], chatId, [requester, responder]);
+  if (!exit || exit.type !== 'MUTUAL_CANCEL' || exit.status !== 'PENDING' ||
+      exit.requesterUserId !== requester || exit.responderUserId !== responder ||
+      !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(exit.id) ||
+      !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(exit.createdAt) ||
+      Date.parse(exit.createdAt) > latestCreation) return invalid();
+  return exit;
+}
 export function mergeMessages(old: Message[], incoming: Message[]): Message[] {
   const map = new Map(old.map(m => [m.id,m]));
   for (const m of incoming) {
@@ -95,6 +104,9 @@ export function reactionCursor(messages: Message[]): string | undefined {
   return undefined;
 }
 export function plainText(s: string): boolean { return s.trim().length > 0 && s.length <= 1000 && !/[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f-\u009f<>]/.test(s); }
+export function mutualExitDeadline(exit: Exit) {
+  return Date.parse(exit.createdAt) + 20_000;
+}
 export function policy(chat: Chat | null, exits: Exit[], now: number) {
   const active = chat?.status === 'ACTIVE';
   const decisionOnly = !!chat && (chat.myDecision === 'APPROVED' || chat.partnerDecision === 'APPROVED');

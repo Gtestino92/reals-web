@@ -1,13 +1,15 @@
 import { ParticipantHistory, pairBlocked } from './participantHistory';
 import { ApiError, object, type CounterpartAudioAccess } from '../auth/api';
 import type { SessionController } from '../auth/session';
-import { mergeMessages, parseChat, parseGuidance, parseExits, parseMessage, plainText, policy, str } from './contracts';
+import { mergeMessages, parseChat, parseGuidance, parseExits, parseMutualExitAcknowledgement, parseMessage, plainText, policy, mutualExitDeadline, str } from './contracts';
 import type { Chat, Exit, Message, Reply } from './contracts';
 import { confirmsOutgoing, messageRequest, type Outgoing } from './messageRequest';
+export type FirstChatClosure = boolean | 'local-expiry';
 export type { Outgoing } from './messageRequest';
-interface State { textReady: boolean; foregroundVerified: boolean; pendingReaction: string | null; audioAccess: CounterpartAudioAccess; decisionPending: 'approve' | 'reject' | null; guidancePending: boolean; messageError: boolean; messagePending: boolean; confirmedReply: Reply | null; confirmedFile: Blob | null; reactionFeedback: 'pending' | 'error' | null; chat: Chat | null; messages: Message[]; exits: Exit[]; busy: boolean; error: string; blocked: boolean; outgoing: Outgoing | null; confirmed: string | null; confirmationVersion: number; offset: number; historyLimited: boolean }
+type ExitAction = 'mutual' | 'acceptance' | 'rejection' | 'timeout';
+interface State { exitAction: ExitAction | null; textReady: boolean; foregroundVerified: boolean; pendingReaction: string | null; audioAccess: CounterpartAudioAccess; decisionPending: 'approve' | 'reject' | null; guidancePending: boolean; messageError: boolean; messagePending: boolean; confirmedReply: Reply | null; confirmedFile: Blob | null; reactionFeedback: 'pending' | 'error' | null; chat: Chat | null; messages: Message[]; exits: Exit[]; busy: boolean; error: string; blocked: boolean; outgoing: Outgoing | null; confirmed: string | null; confirmationVersion: number; offset: number; historyLimited: boolean }
 export class ChatSession {
-  private state: State = { textReady: false, foregroundVerified: false, pendingReaction: null, audioAccess: 'UNKNOWN', decisionPending: null, guidancePending: false, messageError: false, messagePending: false, confirmedReply: null, confirmedFile: null, reactionFeedback: null, chat: null, messages: [], exits: [], busy: false, error: '', blocked: true, outgoing: null, confirmed: null, confirmationVersion: 0, offset: 0, historyLimited: false };
+  private state: State = { exitAction: null, textReady: false, foregroundVerified: false, pendingReaction: null, audioAccess: 'UNKNOWN', decisionPending: null, guidancePending: false, messageError: false, messagePending: false, confirmedReply: null, confirmedFile: null, reactionFeedback: null, chat: null, messages: [], exits: [], busy: false, error: '', blocked: true, outgoing: null, confirmed: null, confirmationVersion: 0, offset: 0, historyLimited: false };
   private readonly history: ParticipantHistory;
   get eligible() { return this.history.eligible; }
   private observeAccess = (access: CounterpartAudioAccess) => {
@@ -24,6 +26,10 @@ export class ChatSession {
   private interruptedCursor: { cursor: string | undefined } | null = null;
   private lastTextRefresh = 0;
   poll = () => {
+    if (this.checkAbsoluteDeadline()) return;
+    if (this.rules.expired && (this.writing || this.read)) return this.verifyInactivity();
+    if (this.state.outgoing?.phase === 'pending' && this.writing && Date.now() - this.decisionStarted >= 5000)
+      return this.verifyExitDuringSend(this.state.outgoing);
     if (Date.now() - this.lastTextRefresh >= 500) return this.refresh(false,true);
   };
   private writing = false;
@@ -32,8 +38,33 @@ export class ChatSession {
   private partner = '';
   private terminal = false;
   private terminalNotice: string | null = null;
-  private timedOutRequests = new Set<string>();
-  constructor(private controller: SessionController, readonly matchId: string, readonly chatId: string, readonly me: string, private onTerminal: (message: string, closed: boolean) => void) { this.history = new ParticipantHistory(me); }
+  private timeoutAttempt: { id: string; count: number; retryAt: number; recoverable: boolean } | null = null;
+  private absoluteDeadline = Infinity;
+  private clockUncertainty = 0;
+  private checkingInactivity = false;
+  private checkingSendExit = false;
+  private async verifyExitDuringSend(outgoing: Outgoing) {
+    if (this.checkingSendExit) return;
+    this.checkingSendExit = true;
+    const serial = this.serial;
+    try {
+      const raw = await this.request(`/chats/${this.chatId}/exit-requests`, this.lifetime.signal);
+      if (this.current(serial) && this.state.outgoing === outgoing)
+        this.install({ exits: this.readExits(raw) });
+    } catch (error) {
+      if (this.current(serial) && this.state.outgoing === outgoing && !this.terminalError(error))
+        this.install({ error: 'No pudimos verificar las solicitudes de salida mientras se entrega el mensaje.' });
+    } finally { this.checkingSendExit = false; }
+  }
+  private verifiedInactivity: Pick<Chat, 'serverTime' | 'inactivityExpiresAt'> | null = null;
+
+  private reconcileInactivity(chat: Chat) {
+    const verified = this.verifiedInactivity;
+    if (verified && Date.parse(verified.serverTime) > Date.parse(chat.serverTime))
+      return { ...chat, inactivityExpiresAt: verified.inactivityExpiresAt };
+    return chat;
+  }
+  constructor(private controller: SessionController, readonly matchId: string, readonly chatId: string, readonly me: string, private onTerminal: (message: string, closed: FirstChatClosure) => void) { this.history = new ParticipantHistory(me); }
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
   private install(patch: Partial<State>) { if (!this.lifetime.signal.aborted) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); } }
@@ -57,7 +88,44 @@ export class ChatSession {
       if (signal.aborted) done();
     });
   }
-  private finish(message: string, closed = true) { this.hideContactRange(); this.terminal = true; const messages = this.state.messages.filter(row => !row.audio); this.history.clear(); this.install({ pendingReaction: null, messages, blocked: true, busy: false }); this.onTerminal(this.terminalNotice ?? message, closed); }
+  private finish(message: string, closed: FirstChatClosure = true) {
+    if (this.terminal) return;
+    this.terminal = true;
+    this.install({ busy: false, decisionPending: null, exitAction: null, guidancePending: false, messagePending: false, outgoing: null, confirmedFile: null, chat: null, exits: [] });
+    this.dispose();
+    this.onTerminal(this.terminalNotice ?? message, closed);
+  }
+  private checkAbsoluteDeadline = () => {
+    if (this.terminal || !this.current(this.serial)) return true;
+    if (Date.now() < this.absoluteDeadline) return false;
+    // Home suppresses automatic re-entry by chat ID. Only a backend result marks a match closed.
+    this.finish('El plazo del chat terminó.', 'local-expiry');
+    return true;
+  };
+  private async verifyInactivity() {
+    if (this.checkingInactivity || this.terminal || !this.current(this.serial)) return;
+    const serial = this.serial, signal = this.lifetime.signal;
+    this.checkingInactivity = true;
+    try {
+      // The normal reconciliation may be waiting for an upload or a history body.
+      const raw = await this.request(`/matches/${this.matchId}/chat`, signal);
+      if (!this.current(serial)) return;
+      const chat = parseChat(raw, this.matchId, this.chatId, this.partner);
+      if (['CANCELLED','EXPIRED','ABANDONED','CLOSED','FINISHED'].includes(chat.status))
+        this.finish(chat.status === 'ABANDONED' ? 'El chat se cerró por inactividad.' : 'El chat terminó.');
+      else if (chat.status === 'ACTIVE') {
+        const displayed = this.state.chat;
+        if (displayed && Date.parse(chat.serverTime) >= Date.parse(displayed.serverTime) &&
+            chat.myDecision === displayed.myDecision && chat.partnerDecision === displayed.partnerDecision) {
+          this.verifiedInactivity = { serverTime: chat.serverTime, inactivityExpiresAt: chat.inactivityExpiresAt };
+          this.install({ chat: { ...displayed, inactivityExpiresAt: chat.inactivityExpiresAt } });
+        }
+      } else throw new ApiError('invalid');
+    } catch (error) {
+      if (this.current(serial) && !this.terminalError(error))
+        this.install({ error: 'No pudimos verificar el plazo de inactividad. Revisá tu conexión.' });
+    } finally { this.checkingInactivity = false; }
+  }
   private terminalError(error: unknown) {
     if (error instanceof ApiError && ['CHAT_EXPIRED','CHAT_ABANDONED'].includes(error.code)) {
       this.finish(error.code === 'CHAT_ABANDONED' ? 'El chat se cerró por inactividad.' : 'El chat venció.'); return true;
@@ -92,6 +160,14 @@ export class ChatSession {
       after = next;
       signal.throwIfAborted();
     }
+  }
+  private readExits(raw: unknown) {
+    const exits = parseExits(raw, this.chatId, [this.me, this.partner]);
+    const pending = this.rules.pending;
+    if (pending && !exits.some(exit => exit.id === pending.id)) throw new ApiError('invalid');
+    if (exits.some(exit => exit.type === 'MUTUAL_CANCEL' && ['ACCEPTED', 'REJECTED', 'TIMED_OUT'].includes(exit.status)))
+      this.finish('La conversación se cerró.');
+    return exits;
   }
   private async load(signal: AbortSignal, serial: number, full = false, sent?: { allowOverlap: boolean; cursor: string | undefined }) {
     const started = Date.now();
@@ -137,20 +213,33 @@ export class ChatSession {
     const cursor = sent ? sent.cursor : full ? undefined : this.history.cursor(this.reconcileReactions);
     if (!sent) this.reconcileReactions = !this.reconcileReactions;
     const offset = Date.parse(chat.serverTime) - (snapshotStarted + received) / 2;
+    this.clockUncertainty = Math.max(0, received - snapshotStarted) / 2 + 1;
+    this.absoluteDeadline = Date.parse(chat.timeoutAt) - offset;
+    if (this.checkAbsoluteDeadline()) return;
+    if (chat.myDecision !== 'PENDING') {
+      await this.presentDecision(signal);
+      if (this.current(serial)) this.finish('', false);
+      return;
+    }
     if (prefetched) {
-      const exits = parseExits(prefetched[1], this.chatId, [this.me, this.partner]);
+      const exits = this.readExits(prefetched[1]);
       const foregroundVerified = epoch === this.disclosureEpoch && document.visibilityState === 'visible';
       const provisional = { ...chat };
       if (!headerAllowed || !foregroundVerified || this.history.access !== 'ALLOWED') delete provisional.sharedContactRange;
-      this.install({ chat: provisional, exits, offset, foregroundVerified });
+      this.install({ chat: this.reconcileInactivity(provisional), exits, offset, foregroundVerified });
       lifecycleReady = true;
       updateTextLane();
     }
     const [messages, exits] = page ? [await page, this.state.exits] : await Promise.all([
-      this.messages(signal, serial, cursor), this.request(`/chats/${this.chatId}/exit-requests`, signal).then(v => parseExits(v, this.chatId, [this.me, this.partner])),
+      this.messages(signal, serial, cursor), this.request(exitsPath, signal).then(rawExits => {
+        if (!this.current(serial)) return [];
+        const exits = this.readExits(rawExits);
+        if (exits.some(exit => exit.type === 'MUTUAL_CANCEL' && exit.status === 'PENDING'))
+          this.install({ exits, offset });
+        return exits;
+      }),
     ]);
     if (!this.current(serial)) return;
-    if (chat.myDecision !== 'PENDING') { await this.presentDecision(signal); if (!this.current(serial)) return; }
     if (sent) this.reconcileReactions = !this.reconcileReactions;
     const merged = this.history.finishRead(messages, !cursor);
     const outgoing = this.state.outgoing;
@@ -158,9 +247,8 @@ export class ChatSession {
     const foregroundVerified = epoch === this.disclosureEpoch && document.visibilityState === 'visible';
     // An older or background read may retain an existing range, but cannot grant a new one.
     if (this.history.access === 'RESTRICTED' || (!foregroundVerified && chat.sharedContactRange !== this.state.chat?.sharedContactRange)) delete chat.sharedContactRange;
-    this.install({ foregroundVerified, chat, messages: merged, exits, offset, blocked: false,
+    this.install({ foregroundVerified, chat: this.reconcileInactivity(chat), messages: merged, exits, offset, blocked: false,
       ...(confirmed ? { outgoing: null, confirmed: outgoing.content, confirmedReply: outgoing.replyTo, confirmedFile: outgoing.file, confirmationVersion: this.state.confirmationVersion + 1 } : {}), historyLimited: this.state.historyLimited || (!cursor && messages.length >= 500) });
-    if (chat.myDecision !== 'PENDING') this.finish('', false);
   }
   private current(serial: number) {
     const owner = this.controller.getSnapshot();
@@ -191,6 +279,7 @@ export class ChatSession {
   };
   resume = () => {
     this.invalidateForeground();
+    if (this.checkAbsoluteDeadline()) return;
     if (this.terminal || this.writing || !this.current(this.serial)) return;
     // A foreground snapshot supersedes an older read, never an uncertain write.
     this.read?.abort(); this.read = null;
@@ -218,8 +307,12 @@ export class ChatSession {
     }
     finally { clearTimeout(deadline); if (this.current(serial)) { this.read = null; this.install({ busy: false }); } }
   };
-  private async write(path: string, method: string, body: unknown, outgoing?: Outgoing, reactionId: string | null = null) {
-    if (this.terminal || (this.writing && !(outgoing && !outgoing.file && this.state.textReady)) || !this.current(this.serial)) return;
+  private get acknowledgedExitRead() {
+    return this.postWriteRead !== null && (this.state.exitAction === 'mutual' ||
+      (this.state.messagePending && !this.state.outgoing && !!this.rules.pending));
+  }
+  private async write(path: string, method: string, body: unknown, outgoing?: Outgoing, reactionId: string | null = null, exitAction: ExitAction | null = null) {
+    if (this.terminal || (this.writing && !(outgoing && !outgoing.file && this.state.textReady) && !(exitAction === 'timeout' && this.acknowledgedExitRead)) || !this.current(this.serial)) return;
     const interrupted = this.state.textReady ? this.interruptedCursor : null;
     this.postWriteRead?.abort();
     this.postWriteRead = null;
@@ -231,7 +324,7 @@ export class ChatSession {
     const reconciliation = new AbortController();
     let accepted = false;
     this.decisionStarted = Date.now();
-    this.install({ textReady: false, pendingReaction: reactionId, busy: true, decisionPending: path.endsWith('/chat-decision') && object(body) ? body.decision==='APPROVED'?'approve':body.decision==='REJECTED'?'reject':null : null, guidancePending: path.endsWith('/guidance/next-request'), messageError: false, messagePending: !!outgoing, reactionFeedback: method === 'PUT' ? 'pending' : null, error: '', ...(outgoing ? { outgoing: { ...outgoing, phase: 'pending' } } : {}) });
+    this.install({ exitAction, textReady: false, pendingReaction: reactionId, busy: true, decisionPending: path.endsWith('/chat-decision') && object(body) ? body.decision==='APPROVED'?'approve':body.decision==='REJECTED'?'reject':null : null, guidancePending: path.endsWith('/guidance/next-request'), messageError: false, messagePending: !!outgoing, reactionFeedback: method === 'PUT' ? 'pending' : null, error: '', ...(outgoing ? { outgoing: { ...outgoing, phase: 'pending' } } : {}) });
     try {
       const result = await this.request(path, signal, method, body);
       if (!this.current(serial)) return;
@@ -239,6 +332,24 @@ export class ChatSession {
         const message = this.parseMessage(result);
         if (!confirmsOutgoing(message, outgoing, this.me)) throw new ApiError('invalid');
         this.install({ messages: this.history.merge([message]), outgoing: null, confirmed: outgoing.content, confirmedReply: outgoing.replyTo, confirmedFile: outgoing.file, confirmationVersion: this.state.confirmationVersion + 1 });
+      } else if (exitAction === 'mutual') {
+        const latestCreation = Math.min(Date.now() + this.state.offset + this.clockUncertainty,
+          this.absoluteDeadline + this.state.offset);
+        const exit = parseMutualExitAcknowledgement(result, this.chatId, this.me, this.partner, latestCreation);
+        if (this.state.exits.some(previous => previous.id === exit.id)) throw new ApiError('invalid');
+        this.install({ exits: [...this.state.exits, exit] });
+      } else if (exitAction) {
+        if (!object(result) || !object(result.chat) || result.chat.status !== 'CANCELLED' ||
+            result.chat.id !== this.chatId || result.chat.matchId !== this.matchId || result.chat.chatType !== 'FIRST_CHAT') throw new ApiError('invalid');
+        const [resolved] = parseExits([result.exitRequest], this.chatId, [this.me, this.partner]);
+        const pending = this.rules.pending;
+        const expected = { acceptance: 'ACCEPTED', rejection: 'REJECTED', timeout: 'TIMED_OUT' };
+        if (pending && resolved?.id === pending.id && resolved.type === pending.type &&
+            resolved.requesterUserId === pending.requesterUserId && resolved.status === expected[exitAction]) {
+          this.finish('La conversación se cerró.');
+          return;
+        }
+        throw new ApiError('invalid');
       } else if (method === 'PUT') {
         this.install({ pendingReaction: null, messages: this.history.mergeReaction(path, this.parseMessage(result)) });
       }
@@ -259,8 +370,23 @@ export class ChatSession {
       const code = error instanceof ApiError ? error.code : '';
       this.install({ pendingReaction: null, blocked: true, messageError: !!outgoing, reactionFeedback: method === 'PUT' ? 'error' : null, error: outgoing && ambiguous ? 'Envío sin confirmar. Actualizá antes de reintentar; conservamos el mismo mensaje.' : code === 'CHAT_APPROVAL_TOO_EARLY' || code.includes('PARTICIPATION') || code.includes('APPROVAL') ? 'Todavía no se cumplen los requisitos para aprobar. Seguí conversando y actualizá el estado.' : 'No pudimos completar la acción. Actualizá el estado antes de volver a intentar.',
         ...(outgoing && this.state.outgoing ? { outgoing: { ...outgoing, phase: ambiguous ? 'uncertain' : 'failed' } } : {}) });
-      try { await this.load(signal, serial, !!outgoing); } catch { /* Error remains visible; no mutation is replayed automatically. */ }
-    } finally { reconciliation.abort(); if (this.current(serial)) { this.postWriteRead = null; this.interruptedCursor = null; this.writing = false; this.install({ textReady: false, busy: false, decisionPending: null, guidancePending: false, messagePending: false, reactionFeedback: this.state.reactionFeedback === 'pending' ? null : this.state.reactionFeedback }); } }
+      const attempt = exitAction === 'timeout' ? this.timeoutAttempt : null;
+      if (attempt) attempt.recoverable = ambiguous || code === 'CHAT_EXIT_REQUEST_NOT_AVAILABLE';
+      try {
+        await this.load(signal, serial, !!outgoing);
+        if (!this.current(serial)) return;
+        if (attempt?.recoverable && attempt.count < 2 && this.rules.pending?.id === attempt.id) {
+          attempt.retryAt = Date.now() + 2000;
+          this.install({ error: '' });
+        } else if (attempt && this.rules.pending?.id === attempt.id) {
+          this.install({ error: code === 'CHAT_EXIT_REQUEST_NOT_AVAILABLE'
+            ? 'La solicitud sigue pendiente. Actualizá la conexión para verificar si ya se puede cerrar.'
+            : 'No pudimos confirmar el cierre. Actualizá la conexión para verificar el estado.' });
+        } else if (exitAction === 'mutual' && this.rules.pending) this.install({ error: '' });
+      } catch (readError) {
+        if (this.current(serial)) this.terminalError(readError);
+      }
+    } finally { reconciliation.abort(); if (this.current(serial)) { this.postWriteRead = null; this.interruptedCursor = null; this.writing = false; this.install({ textReady: false, busy: false, exitAction: null, decisionPending: null, guidancePending: false, messagePending: false, reactionFeedback: this.state.reactionFeedback === 'pending' ? null : this.state.reactionFeedback }); } }
   }
   private get rules() { return policy(this.state.chat, this.state.exits, Date.now() + this.state.offset); }
   get canSendText() {
@@ -296,27 +422,41 @@ export class ChatSession {
   };
   editFailed = () => { if (!this.writing && this.state.outgoing?.phase === 'failed') this.install({ outgoing: null }); };
   checkExitTimeout = () => {
+    if (this.checkAbsoluteDeadline()) return;
     const pending = this.rules.pending;
-    if (!pending || this.state.busy || this.state.blocked || this.writing || this.timedOutRequests.has(pending.id) || this.state.outgoing?.phase === 'uncertain') return;
-    // Same advisory delay as Android. The backend alone decides whether it expired.
-    if (Date.now() + this.state.offset < Date.parse(pending.createdAt) + 20000) return;
-    this.timedOutRequests.add(pending.id);
-    return this.action('timeout');
+    if (!pending || this.rules.expired || !this.state.foregroundVerified || this.state.blocked ||
+        ((this.state.busy || this.writing) && !this.acknowledgedExitRead)) return;
+    if (Date.now() + this.state.offset < mutualExitDeadline(pending)) return;
+    const previous = this.timeoutAttempt?.id === pending.id ? this.timeoutAttempt : null;
+    if (previous && Date.now() < previous.retryAt) return;
+    this.timeoutAttempt = { id: pending.id, count: (previous?.count ?? 0) + 1, retryAt: Infinity, recoverable: false };
+    return this.write(`/chats/${this.chatId}/exit-requests/${encodeURIComponent(pending.id)}/timeout`, 'POST', undefined, undefined, null, 'timeout');
   };
-  action = (kind: 'approve' | 'reject' | 'guidance' | 'mutual' | 'cancel' | 'safety' | 'block' | 'acceptance' | 'rejection' | 'timeout', body?: unknown) => {
+  recover = async () => {
+    if (this.writing || this.read) return;
+    const attempt = this.timeoutAttempt;
+    const task = this.refresh(true), serial = this.serial;
+    await task;
+    if (attempt && this.timeoutAttempt === attempt && this.current(serial) && !this.state.blocked && this.rules.pending?.id === attempt.id) {
+      if (attempt.recoverable) this.timeoutAttempt = null;
+      else this.install({ error: 'El servidor no permitió cerrar la conversación. Podés volver a consultar el estado.' });
+    }
+  };
+  action = (kind: 'approve' | 'reject' | 'guidance' | 'mutual' | 'safety' | 'block' | 'acceptance' | 'rejection', body?: unknown, requestId?: string) => {
     if (this.writing || this.state.busy || this.state.blocked) return;
     const p = this.rules;
     // Reconcile an ambiguous send before a different write; safety remains available.
-    if (this.state.outgoing?.phase === 'uncertain' && kind !== 'safety' && kind !== 'block') return;
+    if (this.state.outgoing?.phase === 'uncertain' && !['safety','block','acceptance','rejection'].includes(kind)) return;
     if ((kind === 'approve' || kind === 'reject') && !p.decide) return;
     if ((kind === 'guidance' || kind === 'mutual') && !p.ordinary) return;
-    if (kind === 'cancel' && (!p.safety || p.decisionOnly)) return;
     if ((kind === 'safety' || kind === 'block') && !p.safety) return;
     if (kind === 'safety' && (!object(body) || typeof body.reason !== 'string' || !['INAPPROPRIATE_BEHAVIOR','HARASSMENT','CHILD_SAFETY_CONCERN','OTHER'].includes(body.reason) || typeof body.details !== 'string' || !plainText(body.details) || typeof body.blockUser !== 'boolean')) return;
     if (kind === 'guidance' && (!this.state.chat?.guidance?.canRequestNext || this.state.chat.guidance.myNextRequested || this.state.chat.guidance.completed)) return;
-    if (['acceptance','rejection','timeout'].includes(kind) && (!p.pending || (kind !== 'timeout' && p.pending.responderUserId !== this.me))) return;
-    const path = kind === 'approve' || kind === 'reject' ? `/matches/${this.matchId}/chat-decision` : kind === 'block' ? `/matches/${this.matchId}/block` : `/chats/${this.chatId}/${kind === 'guidance' ? 'guidance/next-request' : kind === 'mutual' ? 'exit-requests' : kind === 'cancel' ? 'cancellations' : kind === 'safety' ? 'safety-cancellations' : `exit-requests/${p.pending?.id}/${kind}`}`;
-    return this.write(path, 'POST', kind === 'approve' || kind === 'reject' ? { decision: kind === 'approve' ? 'APPROVED' : 'REJECTED' } : kind === 'mutual' || kind === 'cancel' ? { reason: 'NO_LONGER_INTERESTED' } : body);
+    if ((kind === 'acceptance' || kind === 'rejection') && (!p.pending || p.pending.id !== requestId ||
+        p.pending.responderUserId !== this.me || p.expired || Date.now() + this.state.offset >= mutualExitDeadline(p.pending))) return;
+    const exitAction = kind === 'mutual' || kind === 'acceptance' || kind === 'rejection' ? kind : null;
+    const path = kind === 'approve' || kind === 'reject' ? `/matches/${this.matchId}/chat-decision` : kind === 'block' ? `/matches/${this.matchId}/block` : `/chats/${this.chatId}/${kind === 'guidance' ? 'guidance/next-request' : kind === 'mutual' ? 'exit-requests' : kind === 'safety' ? 'safety-cancellations' : `exit-requests/${encodeURIComponent(requestId ?? '')}/${kind}`}`;
+    return this.write(path, 'POST', kind === 'approve' || kind === 'reject' ? { decision: kind === 'approve' ? 'APPROVED' : 'REJECTED' } : kind === 'mutual' ? { reason: 'NO_LONGER_INTERESTED' } : body, undefined, null, exitAction);
   };
   react(id: string) {
     if (!this.rules.ordinary || this.state.busy || this.state.blocked || this.state.outgoing?.phase === 'uncertain' || !this.eligible.has(id)) return;

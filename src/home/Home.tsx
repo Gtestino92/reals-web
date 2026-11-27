@@ -25,6 +25,7 @@ import { Onboarding } from '../onboarding/Onboarding';
 import { useHome } from './useHome';
 import { activityPresentation } from './presentation';
 import { SearchingScreen, type PreparationFailure } from './SearchingScreen';
+import type { FirstChatClosure } from '../chat/ChatSession';
 import { FirstChat } from '../chat/FirstChat';
 import { ChatIcon } from '../chat/ChatIcon';
 import { reconcileHiddenFirstChats } from './hiddenFirstChats';
@@ -122,13 +123,17 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
   const knownClosed = useRef(new Set<string>());
   const openChat = (item: Activity, automatic = false) => {
     if (item.type.startsWith('SECOND_CHAT_') && item.connectionId && !automatic) { if (navigation.openSecondChat(item.connectionId,item.matchId)) { secondEntry.current = new SecondChatEntryIntent(controller,item.connectionId,item.matchId); setNotice(''); setChat(item); } return; }
-    if (!item.chatId || knownClosed.current.has(item.matchId) || (automatic && suppressed.current.has(item.chatId))) return;
+    if (!item.chatId || hidden.current.has(item.matchId) || knownClosed.current.has(item.matchId) || (automatic && suppressed.current.has(item.chatId))) return;
     setPreparingFirst(automatic); setPreparationFailure(null);
     setNotice(''); setChat(item);
   };
-  const closeChat = (message = '', closed = false) => {
+  const closeChat = (message = '', closed: FirstChatClosure = false) => {
     if (chat?.chatId) suppressed.current.add(chat.chatId);
-    if (closed && chat) { hidden.current.add(chat.matchId); knownClosed.current.add(chat.matchId); }
+    if (closed && chat) {
+      hidden.current.add(chat.matchId);
+      if (closed === true) knownClosed.current.add(chat.matchId);
+      if (chat.type === 'FIRST_CHAT' && navigation.destination === 'activity') navigation.finishInteraction('home');
+    }
     if (chat?.type.startsWith('SECOND_CHAT_')) navigation.closeSecondChat();
     restoredSecond.current = undefined;
     secondEntry.current = undefined;
@@ -235,7 +240,7 @@ function HomeOverview({ preparingFirst, preparationFailure, onAdminHomeState, re
   const returning = active && !wasActive.current;
   useLayoutEffect(() => { if (active && !wasActive.current) {if (!reconciledReturn.current || invalidated.current) refreshOnReturn(invalidated.current); invalidated.current = false; reconciledReturn.current = false;} wasActive.current = active; }, [active, refreshOnReturn]);
   const root = useRef<HTMLDivElement>(null);
-  const home = model ? visualHomeProjection(model.home,actedVisuals,knownClosed) : undefined, m = home?.matchmaking;
+  const home = model ? visualHomeProjection(model.home,actedVisuals,new Set([...knownClosed, ...hidden])) : undefined, m = home?.matchmaking;
   useEffect(() => { if (model && !busy && !blocked) reconcileHiddenFirstChats(model.home, hidden, knownClosed); }, [model, busy, blocked, hidden, knownClosed]);
   const pendingFirst = home?.pendingActions.find(item =>
     item.type === 'FIRST_CHAT' && item.chatId && !suppressed.has(item.chatId) && !knownClosed.has(item.matchId));

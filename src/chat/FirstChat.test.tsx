@@ -79,7 +79,7 @@ it('menu supports keyboard traversal, Escape, outside dismissal and focus restor
 });
 it.each([
   ['Salida consensuada','/chats/c/exit-requests'],
-  ['Salir unilateralmente','/chats/c/cancellations'],
+
   ['Bloquear','/matches/m/block'],
 ])('menu preserves confirmation and service for %s',async(label,path)=>{
   mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));fireEvent.click(screen.getByRole('menuitem',{name:label}));
@@ -105,7 +105,7 @@ it('keeps focus moves inside the boundary open and dismisses focus leaving it',a
   act(()=>screen.getByRole('textbox',{name:'Mensaje'}).focus());expect(screen.queryByRole('menu')).toBeNull();
 });
 it('disabled menu actions cannot open a confirmation or send a mutation',async()=>{
-  chat.myDecision='APPROVED';mount();await screen.findByRole('heading',{name:'María'});
+  chat.inactivityExpiresAt=new Date(Date.now()-2000).toISOString();mount();await screen.findByRole('heading',{name:'María'});
   fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));const reject=screen.getByRole('menuitem',{name:'Rechazar chat'});
   expect(reject).toBeDisabled();fireEvent.click(reject);expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('menu')).toBeVisible();
   expect(vi.mocked(controller.request).mock.calls.some(c=>c[2]==='POST')).toBe(false);
@@ -343,14 +343,23 @@ it('quiet foreground reconciliation preserves chat nodes, focus and the draft',a
   expect(input).toHaveFocus();expect(input).toHaveValue('Sigo escribiendo');expect(screen.getByRole('region',{name:'Primer chat'})).toBe(root);expect(screen.queryByText('Actualizando…')).toBeNull();
   await act(async()=>finish?.({id:'m',userAId:'me',userBId:'them',state:'CHAT_ACTIVE'}));expect(input).toHaveFocus();expect(screen.getByRole('region',{name:'Primer chat'})).toBe(root);
 });
-it('retains an audio draft during partner approval and explicitly discards it without uploading',async()=>{
+it.each(['decision','terminal'])('retires an audio draft without uploading on %s',async transition=>{
   let recorder:Recorder|undefined;const stop=vi.fn();
   class Recorder {static isTypeSupported=()=>true;state='inactive';mimeType='audio/mp4';ondataavailable:((event:{data:Blob})=>void)|null=null;onstop:(()=>void)|null=null;
     constructor(){recorder=this;}start(){this.state='recording';}stop(){this.state='inactive';this.ondataavailable?.({data:new Blob([admittedAudioFixture()])});this.onstop?.();}}
   vi.stubGlobal('MediaRecorder',Recorder);Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>({getTracks:()=>[{stop}]})}});
   const read=vi.spyOn(Blob.prototype,'arrayBuffer').mockResolvedValue(admittedAudioFixture());
   Object.defineProperty(URL,'createObjectURL',{configurable:true,value:vi.fn(()=> 'blob:synthetic-draft')});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});
-  try {mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await screen.findByRole('timer');expect(recorder).toBeDefined();fireEvent.click(screen.getByRole('button',{name:'Detener'}));await screen.findByLabelText('Vista previa del audio');
+  try {const view=mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Grabar audio'}));await screen.findByRole('timer');expect(recorder).toBeDefined();fireEvent.click(screen.getByRole('button',{name:'Detener'}));await screen.findByLabelText('Vista previa del audio');
+    if (transition === 'terminal') {
+      chat = {...chat,status:'ABANDONED'};
+      fireEvent(window,new Event('online'));
+      await waitFor(() => expect(home).toHaveBeenCalledWith('El chat se cerró por inactividad.',true));
+      view.unmount();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:synthetic-draft');
+      expect(vi.mocked(controller.request).mock.calls.some(c=>c[0].endsWith('/audio-messages'))).toBe(false);
+      return;
+    }
     chat={...chat,partnerDecision:'APPROVED'};fireEvent(window,new Event('online'));await screen.findByText('María aprobó el chat.');expect(screen.getByRole('button',{name:'Aprobar'})).toBeDisabled();expect(screen.queryByRole('textbox',{name:'Mensaje'})).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:'Descartar borrador de audio'}));await waitFor(()=>expect(screen.getByRole('button',{name:'Aprobar'})).toBeEnabled());expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:synthetic-draft');expect(vi.mocked(controller.request).mock.calls.some(c=>c[0].endsWith('/audio-messages'))).toBe(false);
   } finally {read.mockRestore();Reflect.deleteProperty(navigator,'mediaDevices');}
@@ -416,4 +425,81 @@ it('withdraws the playing reply target on resume and keeps the draft and own pla
   expect(input).toHaveValue('Synthetic draft');
   expect(screen.getByRole('button',{name:'Reproducir audio'})).toBe(own);
   expect(play).toHaveBeenCalledOnce();
+});
+
+it.each(['requester','responder'])('owns the paused presentation for the %s without replacing history or drafts', async role => {
+  const base = vi.mocked(controller.request).getMockImplementation()!;
+  const own = role === 'requester';
+  let acknowledge!: () => void, release!: () => void;
+  let pending = false;
+  const exit = {id:'f135edf8-8788-4026-a4ce-57923237fe08',chatId:'c',requesterUserId:own?'me':'them',
+    responderUserId:own?'them':'me',type:'MUTUAL_CANCEL',status:'PENDING',createdAt:new Date().toISOString()};
+  chat.timeoutAt = new Date(Date.now()+55_000).toISOString();
+  vi.mocked(controller.request).mockImplementation(async (...args) => {
+    if (args[0].endsWith('/exit-requests')) {
+      if (args[2] === 'POST') {
+        await new Promise<void>(resolve => {acknowledge=resolve;});
+        pending = true;
+        return exit;
+      }
+      return pending ? [exit] : [];
+    }
+    if (pending && args[0].includes('/messages?')) await new Promise<void>(resolve => {release=resolve;});
+    return base(...args);
+  });
+  mount(); await ready();
+  const list = screen.getByRole('list',{name:'Mensajes'}), draft = screen.getByRole('textbox',{name:'Mensaje'});
+  fireEvent.change(draft,{target:{value:'Borrador'}});
+  if (own) {
+    fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));
+    expect(screen.queryByRole('menuitem',{name:'Salir unilateralmente'})).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem',{name:'Salida consensuada'}));
+    fireEvent.click(screen.getByRole('button',{name:'Confirmar'}));
+    expect(screen.getByRole('button',{name:'Solicitando salida…'})).toBeDisabled();
+    expect(screen.queryByText('Conversación pausada')).toBeNull();
+    await act(async () => acknowledge());
+  } else {
+    pending = true;
+    fireEvent(window,new Event('online'));
+  }
+  await screen.findByRole('heading',{name:'Conversación pausada'});
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByText(/El plazo del chat termina|Actualizando…|Consultar vencimiento/)).toBeNull();
+  expect(screen.queryByRole('textbox',{name:'Mensaje'})).toBeNull();
+  expect(screen.queryByLabelText('Conversación guiada')).toBeNull();
+  expect(screen.queryByRole('button',{name:'Aprobar chat'})).toBeNull();
+  expect(draft).toHaveValue('Borrador');
+  expect(screen.getByRole('list',{name:'Mensajes'})).toBe(list);
+  expect(screen.getByText('Hola, ¿cómo estás?')).toBeVisible();
+  await act(async () => release());
+  expect(screen.queryByRole('button',{name:'Aceptar salida'}) !== null).toBe(!own);
+  fireEvent.click(screen.getByRole('button',{name:'Opciones del chat'}));
+  expect(screen.getAllByRole('menuitem').map(item=>item.textContent)).toEqual(['Reportar por seguridad','Bloquear']);
+});
+
+it.each([['Aceptar salida','Aceptando…'],['Rechazar salida','Rechazando…']])('owns delayed %s feedback and preserves the response window across resume and remount',async (button,label) => {
+  let now = Date.now();
+  const clock = vi.spyOn(Date,'now').mockImplementation(()=>now);
+  try {
+    const base = vi.mocked(controller.request).getMockImplementation()!;
+    const exit = {id:'exit',chatId:'c',requesterUserId:'them',responderUserId:'me',type:'MUTUAL_CANCEL',status:'PENDING',createdAt:new Date(now-6000).toISOString()};
+    vi.mocked(controller.request).mockImplementation(async (...args) => {
+      if (args[0].endsWith('/exit-requests')) return [exit];
+      if (args[2] === 'POST') return new Promise(()=>{});
+      if (args[0] === '/matches/m/chat') return {...chat,serverTime:new Date(now).toISOString()};
+      return base(...args);
+    });
+    const view=mount();
+    await screen.findByRole('heading',{name:'María'});
+    expect(screen.getByRole('timer')).toHaveTextContent('14 s');
+    now += 4000;
+    fireEvent(window,new Event('online'));
+    await waitFor(()=>expect(screen.getByRole('timer')).toHaveTextContent('10 s'));
+    view.unmount();
+    mount();await screen.findByRole('heading',{name:'María'});
+    expect(screen.getByRole('timer')).toHaveTextContent('10 s');
+    fireEvent.click(screen.getByRole('button',{name:button}));
+    expect(screen.getByRole('button',{name:label})).toHaveAttribute('aria-busy','true');
+    expect(screen.queryByText('Actualizando…')).toBeNull();
+  } finally {clock.mockRestore();}
 });

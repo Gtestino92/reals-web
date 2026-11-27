@@ -236,3 +236,34 @@ CHAT_HISTORY_BODY_MS=700 node tools/chat-send-timing.mjs
 node tools/mobile-chat-browser.mjs --geometry
 git diff --check
 ```
+
+### First Chat mutual exit
+
+Start Vite with `npm run dev -- --port 5187 --strictPort`. Set `CONTACT_PLAYWRIGHT_ANCHOR` to the external Playwright installation described above and run `node tools/first-chat-exit-browser.mjs`. The synthetic checks exercise requester creation, responder acceptance, elapsed timeout, delayed mutations and terminal return in Chrome and WebKit. A separate signed-in fixture exercises the actual Home owner with a dirty draft, absolute expiry and a stale Home projection. The screenshot cases pair 390 × 844 with light mode and 1280 × 900 with dark mode. Use the fixture's `--before` mode against the base revision for comparable baseline images.
+
+Session tests exercise malformed acknowledgements, concurrent reads, bounded retries and retirement. FirstChat, Home, audio, ownership and text-send tests cover their respective presentation and resource boundaries. These checks use synthetic accounts and media. Real mobile keyboards, assistive technology, hardware audio and authenticated two-device timing require device validation.
+
+Validation on the First Chat exit branch passed 479 tests in 14 files. TypeScript and production build passed. Architecture reported 115 production modules and zero runtime cycles. Vite issued its existing large-chunk advisory. Chromium and WebKit passed both roles and the Home return check. Eight PNGs cover the base and revised presentations. The full regression suite is reserved for CI.
+
+```powershell
+npm.cmd run test:focused -- src/chat/FirstChat.test.tsx src/chat/ChatSession.test.ts src/chat/contracts.test.ts src/chat/textSend.test.tsx src/chat/AudioComposer.test.tsx src/chat/MessageAudio.test.tsx src/chat/postBlockMedia.security.test.ts src/chat/sharedContacts.test.tsx src/home/Home.test.tsx src/home/hiddenFirstChats.test.ts src/home/useHomeNavigation.test.tsx src/App.ownership.test.tsx src/tabs/TabOwnershipManager.test.tsx src/chat/SecondChat.test.tsx
+npm.cmd run typecheck
+npm.cmd run check:architecture
+$env:VITE_REALS_ENVIRONMENT='prod'
+$env:VITE_API_BASE_URL='https://reals-web.pages.dev'
+$env:VITE_FIREBASE_API_KEY='synthetic-key'
+$env:VITE_FIREBASE_AUTH_DOMAIN='synthetic.firebaseapp.com'
+$env:VITE_FIREBASE_PROJECT_ID='synthetic'
+$env:VITE_FIREBASE_APP_ID='synthetic-app-id'
+$env:VITE_FIREBASE_APP_CHECK_PROVIDER='enterprise'
+$env:VITE_FIREBASE_APP_CHECK_SITE_KEY='synthetic-site-key'
+$env:VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION='false'
+$env:VITE_FIREBASE_APP_CHECK_DEBUG='false'
+npm.cmd run build
+npm.cmd run dev -- --port 5187 --strictPort
+# In a second shell with the external Playwright installation
+$env:CONTACT_PLAYWRIGHT_ANCHOR="$env:TEMP/reals-contacts-webkit-smoke/package.json"
+node tools/first-chat-exit-browser.mjs --before # run against the base
+node tools/first-chat-exit-browser.mjs
+git diff --check
+```
