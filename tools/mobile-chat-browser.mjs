@@ -109,7 +109,7 @@ try {
           await settle();
         }
         await evaluate('releaseTextSend()');
-        await until(`trackedInput.value === '' && [...document.querySelectorAll('.chat-message-row')].some(row => row.textContent.includes(${JSON.stringify(text)}))`);
+        await until(`trackedInput.value === '' && [...document.querySelectorAll('.chat-message-row')].some(row => !row.querySelector('.chat-delivery') && row.textContent.includes(${JSON.stringify(text)}))`);
         const confirmed = await focusState();
         console.log(JSON.stringify({ chat, width, send: i, before, pending, confirmed }));
         if (geometryOnly) {
@@ -120,7 +120,7 @@ try {
         if (focusBaseline) continue;
         const { events: pendingEvents, ...pendingState } = pending;
         const { events: confirmedEvents, ...confirmedState } = confirmed;
-        assert.deepEqual(pendingState, { same: true, active: 'draft', count: i, viewport: 320, draft: text });
+        assert.deepEqual(pendingState, { same: true, active: 'draft', count: i, viewport: 320, draft: '' });
         assert.ok(!pendingEvents.includes('blur') && pendingEvents.length <= 1);
         assert.deepEqual(confirmedState, i === 4
           ? { same: true, active: 'BODY', count: i, viewport: height, draft: '' }

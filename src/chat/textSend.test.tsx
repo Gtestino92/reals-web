@@ -118,7 +118,8 @@ it.each(['first', 'second'] as const)('%s keeps one focused field through consec
     tap();
     expect(chat.write).toHaveBeenCalledTimes(index + 1);
     expect(input).toHaveFocus();
-    expect(input).toHaveValue(draft);
+    expect(input).toHaveValue('');
+    expect(screen.getByText(draft)).toBeVisible();
     expect(submit()).toBeDisabled();
     fireEvent.submit(form);
     expect(chat.write).toHaveBeenCalledTimes(index + 1);
