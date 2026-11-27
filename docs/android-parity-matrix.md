@@ -2296,3 +2296,12 @@ Physical keyboards on mobile, device screen readers and visual comparison on a p
 |---|---|---|
 | Android HomeCoordinator.cancelMatchmakingSearch / leaveMatchmakingQueue, MatchmakingRepository.leaveQueue | Confirmed leave waits for a fresh Home. Web useHome retains Searching, Back handling, and the accessible pending control. Home tests cover re-entry, admission cancellation and the matched First Chat preparation transition. | COMPLETE for exercised confirmed-leave behavior |
 | Browser network and physical presentation | Chrome loopback exercised the existing mobile viewport and operational Home. The request schedule is browser-specific. Physical-device timing and visual comparison remain open. [Measurements](testing.md#synthetic-confirmed-cancellation) | PLATFORM-LIMITED |
+
+### Consecutive text sends
+
+| Android reference | Web behavior and evidence | Status |
+| --- | --- | --- |
+| FirstChatCoordinator.sendMessage, FirstChatSendTiming, FirstChatCoordinatorTest | Capture the cursor before POST and show the acknowledged bubble before reconciliation completes. Web additionally reads match and exit requests on every send. Browser stage timings use performance.now(). | COMPLETE for exercised acknowledgement and concurrent reads |
+| SecondChatCoordinator.sendMessage, RealsRootViewModel | Refresh attendance, inactivity and completion status. Reuse the initialized chat identity for a successful same-chat text write. | COMPLETE for exercised lifecycle and history paths |
+| ChatMessageActionHandler, First/Second Chat composers | Each submission owns its text, reply and UUID. Web can accept one subsequent text once lifecycle and access headers arrive, while the older history body is outstanding. The interrupted window must then complete. | COMPLETE for tested text interactions |
+| Compose IME, focus, scrolling, Back and bubble layout | RTL covers composition, repeated submit, blur and terminal navigation. Synthetic Chromium measures pending and confirmed geometry. Physical keyboards, mobile IMEs and device scrolling under hosted latency remain unmeasured. | PLATFORM-LIMITED |

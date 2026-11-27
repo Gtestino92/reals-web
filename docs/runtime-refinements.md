@@ -121,3 +121,23 @@ The client records the actual pre-projection status version. The backend capture
 The affinity owner retains previously loaded answers and catalog while the summary is hidden. Showing it again starts its normal parallel revalidation. These reads ran after the operational Home transition. The button and Home projection have no dependency on them.
 
 Local Chrome issued OPTIONS for each critical request with both browser cache settings despite a 3600-second max age. Authorization and deployed App Check headers require cross-origin permission, and DELETE independently requires preflight. Chromium keys permissions by origin, URL and network partition and considers method and headers. Its cache-bypass flags can also bypass preflight reuse, consistent with the private no-store requests in this fixture. The trace cannot isolate every hosted browser or network factor. [Chromium preflight controller](https://chromium.googlesource.com/chromium/src/+/main/services/network/cors/preflight_controller.cc)
+
+## Consecutive chat text sends
+
+Measured against development 497dd26 in synthetic Chromium and WebKit, four sends per engine per chat. The first send starts after initialization. The following three start as soon as the next valid draft can be submitted. All values below are median milliseconds with observed range. Each request incurs a combined 520 ms of simulated application/preflight latency. See [timing methodology](testing.md#measuring-post-send-responsiveness).
+
+| Chat and revision | Submit to POST | POST to confirmed bubble | POST to usable Send | Submit to usable Send | POST to last reconciliation response |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| First base | 527 (521-532) | 17 (8-39) | 1602 (1594-1612) | 2130 (2118-2140) | 1589 (1574-1601) |
+| First optimized | 530 (522-535) | 17 (12-47) | 542 (533-556) | 1071.5 (1065-1084) | 528 (521-538) |
+| Second base | 540.5 (528-555) | 10 (4-39) | 1628.5 (1605-1960) | 2171 (2140-2504) | 1616.5 (1594-1764) |
+| Second optimized | 539.5 (526-551) | 7.5 (6-22) | 1086 (1074-1114) | 1628 (1604-1655) | 1074.5 (1060-1107) |
+
+First Chat isolated submit-to-Send fell from 2138 (2136-2140) to 1069.5 (1068-1071) ms. Rapid sends fell from 2128 (2118-2138) to 1073 (1065-1084) ms. Second Chat isolated sends fell from 2180.5 (2164-2197) to 1628 (1623-1633) ms. Rapid sends fell from 2164.5 (2140-2504) to 1631.5 (1604-1655) ms.
+
+| Chat | Base dependency graph | Optimized dependency graph |
+| --- | --- | --- |
+| First | POST then match then chat then parallel history and exits | POST then parallel match, chat, history and exits. Five application requests in both versions. |
+| Second | POST then status then chat then history | POST then status then same-chat history. Four requests reduced to three. Status determines which chat is readable. |
+
+Each send initiated one targeted reconciliation. All normal samples required one history page. In the six-second idle window after each burst, each engine started four polling GETs for First Chat and six for Second Chat on both revisions. A separate 700 ms delayed-history-body run let every other rapid send interrupt a read. The following send completed the interrupted window before yielding again. Individual paginated responses and actual CORS preflights add variable overhead. Hosted measurements, real accounts and physical devices remain outstanding.

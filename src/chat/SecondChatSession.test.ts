@@ -119,3 +119,19 @@ it.each(['confirmed', 'malformed', 'rejected', 'ambiguous', 'disposed'])('owns o
   expect(h.session.getSnapshot().pendingReaction).toBeNull();
   expect(h.session.getSnapshot().messages[0]?.reactionType ?? null).toBe(outcome === 'confirmed' ? 'HEART' : null);
 });
+
+it.each(['inactivity','completion','absolute'])('observes the %s boundary before the next text', async boundary => {
+  const h = harness();
+  await h.session.refresh();
+  if (boundary === 'absolute') h.status.absoluteExpiresAt = h.status.serverTime;
+  if (boundary === 'inactivity') h.status.inactivityClosesAt = h.status.serverTime;
+  if (boundary === 'completion') h.status.activeResolutionRequest = {
+    id:'resolution',type:'MUTUAL_COMPLETION',status:'PENDING',requesterUserId:'them',responderUserId:'me',
+    referenceMessageId:null,createdAt:h.status.scheduledAt,expiresAt:h.status.serverTime,
+  };
+  await h.session.send('Primero',null);
+  expect(h.session.getSnapshot().confirmed?.content).toBe('Primero');
+  expect(h.session.canSendText).toBe(false);
+  await h.session.send('Segundo',null);
+  expect(writes(h)).toHaveLength(1);
+});

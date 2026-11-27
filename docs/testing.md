@@ -217,3 +217,22 @@ Start `npm run dev -- --host 127.0.0.1 --port 5174 --strictPort` with local owne
 | Optimized, disabled | 560 (547-563) | 587 (567-594) | 1141 (1130-1147) |
 
 Resource Timing measures DELETE and Home response completion. The first DOM commit exposing an enabled search button measures installed, operational Home. The internal assignment and display paint are not separately timestamped. Home response completed 1630-1650 ms after click before and 1088-1125 ms after. Critical application calls fell from five in three stages to four in two, plus five and four genuine Chrome preflights respectively. Two background affinity GETs followed every presentation. The next poll issued one status GET in all six baseline trials and five optimized trials. One optimized trial also fetched profile and Home after sampling the older version. All these follow-up GETs also preflighted. Hosted and physical-device timings remain unmeasured.
+
+### Measuring post-send responsiveness
+
+Start Vite on port 5187 and run `node tools/chat-send-timing.mjs` with an external Playwright installation and installed Chrome/WebKit. Set `CONTACT_PLAYWRIGHT_ANCHOR` to the package.json beside that installation's node_modules. `CHAT_TIMING_URL` selects the Vite origin. `CHAT_HISTORY_BODY_MS=700` delays the response body after the participant-access header to exercise the text-only lane.
+
+The runner mounts each real chat component with a synthetic controller. Every application request incurs 520 ms of delay to model 260 ms each for the application and preflight stages. Actual OPTIONS timing, token acquisition and hosted service latency are outside this model. Each engine sends once after initialization and three more times as soon as Send becomes usable. Each sample requires the next nonempty draft, an enabled Send button, and a confirmed bubble in the DOM. Timings use the first matching animation frame. Reconciliation measures the last application response completion relative to POST completion. A null measurement means a response was still outstanding when Send became usable. Following each burst, the runner counts poll reads started in six seconds. The normal fixture fits on one history page. Focused media/session tests exercise pagination separately.
+
+The send-change validation passed 448 focused tests in 18 files. The production build used the synthetic public settings from CI. The geometry run exercised both chats at 360, 430 and 1280 CSS pixels. Its diagnostic collector counted six failed resource loads across the six fixture navigations, which explicitly block the production entry module.
+
+```sh
+npm run test:focused -- src/chat/ChatSession.test.ts src/chat/SecondChatSession.test.ts src/chat/SecondChatSession.media.test.ts src/chat/SecondChatSession.terminalAudio.test.ts src/chat/FirstChat.test.tsx src/chat/SecondChat.test.tsx src/chat/SecondChat.contract.test.tsx src/chat/SecondChat.review.test.tsx src/chat/contracts.test.ts src/chat/secondContracts.test.ts src/chat/postBlockMedia.security.test.ts src/chat/textSend.test.tsx src/chat/AudioComposer.test.tsx src/chat/sharedContacts.test.tsx src/chat/MessageAudio.test.tsx src/chat/useChatViewport.test.tsx src/chat/ReplySwipe.test.tsx src/home/Home.secondRestoration.test.tsx
+npm run typecheck
+npm run check:architecture
+VITE_REALS_ENVIRONMENT=prod npm run build
+node tools/chat-send-timing.mjs
+CHAT_HISTORY_BODY_MS=700 node tools/chat-send-timing.mjs
+node tools/mobile-chat-browser.mjs --geometry
+git diff --check
+```
