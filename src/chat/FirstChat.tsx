@@ -16,6 +16,7 @@ import { replyPreview, ReplyQuote } from './ReplyQuote';
 import { ConfirmDialog, ChatMenu, submitChatOnEnter, TextSendButton } from './ChatControls';
 import { activityId } from '../notifications/activityPolicy';
 import { usePresentedActivity } from '../notifications/usePresentedActivity';
+import { SharedContactIndicator } from './SharedContactIndicator';
 type DialogAction = 'mutual' | 'cancel' | 'safety' | 'block';
 export function FirstChat({ controller, matchId, chatId, onHome }: { controller: SessionController; matchId: string; chatId: string; onHome: (message?: string, closed?: boolean) => void }) {
   const dirty = useRef(false), knownClosed = useRef(false), terminalMessage = useRef('');
@@ -29,13 +30,18 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
   const { attach: setText, resize: resizeInput } = useChatDraftHeight(text, draft);
   useChatViewport(root, timeline, nearBottom, observedHeight, true, resizeInput);
   useEffect(() => {
-    session.start(); void session.refresh();
+    const owner = controller.sessionSignal;
+    session.start();
+    const retire = () => session.dispose();
+    if (owner?.aborted) { retire(); return; }
+    owner?.addEventListener('abort', retire, { once: true });
+    void session.refresh();
     const timer = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.refresh(false,true); },5000);
     const tick = window.setInterval(() => { setNow(Date.now()); if (document.visibilityState === 'visible') void session.checkExitTimeout(); },1000);
-    const resume = () => { if (document.visibilityState === 'visible') void session.resume(); };
-    document.addEventListener('visibilitychange',resume); window.addEventListener('online',resume);
-    return () => { session.dispose(); clearInterval(timer); clearInterval(tick); document.removeEventListener('visibilitychange',resume); window.removeEventListener('online',resume); };
-  }, [session]);
+    const resume = () => { if (document.visibilityState === 'visible') void session.resume(); else session.concealContacts(); };
+    window.addEventListener('pagehide', session.concealContacts); document.addEventListener('visibilitychange',resume); window.addEventListener('online',resume);
+    return () => { owner?.removeEventListener('abort', retire); session.dispose(); clearInterval(timer); clearInterval(tick); window.removeEventListener('pagehide', session.concealContacts); document.removeEventListener('visibilitychange',resume); window.removeEventListener('online',resume); };
+  }, [session, controller]);
   useLayoutEffect(() => { if (!starting) heading.current?.focus(); }, [starting]);
   useEffect(() => {
     if (state.audioAccess === 'RESTRICTED' && !state.outgoing && reply?.type === 'MESSAGE' && reply.messageType === 'AUDIO' && reply.senderId !== session.me) setReply(null);
@@ -82,6 +88,7 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       { label: 'Reportar por seguridad', disabled: disabled || !p.safety, run: () => setDialog('safety') },
       { label: 'Bloquear', disabled: disabled || !p.safety, run: () => setDialog('block') },
     ]}/></header>
+    {chat?.sharedContactRange && !state.blocked && state.audioAccess !== 'RESTRICTED' && !p.decisionOnly && remaining > 0 && <SharedContactIndicator owner={me} chat={chatId} range={chat.sharedContactRange}/>}
     {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && dialog === null && state.reactionFeedback === null && !state.messagePending && !state.guidancePending && !state.decisionPending && <p className="chat-status" role="status">Actualizando…</p>}{state.error && !state.messageError && !dialog && <p className={state.reactionFeedback === 'error' ? 'chat-reaction-error' : undefined} role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
     {chat && remaining <= 60 && <p role="status">{remaining ? `El plazo del chat termina en ${remaining} s.` : 'El plazo local terminó. Consultando el estado del servidor…'}</p>}
     {decisionPanel && <aside className="chat-panel chat-decision-card" aria-labelledby="chat-decision-title">

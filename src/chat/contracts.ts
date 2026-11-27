@@ -20,6 +20,7 @@ export interface Guidance {
 }
 export interface AudioPolicy { enabled: boolean; unavailableReason: string | null; maxDurationMillis: number; maxFileSizeBytes: number; remainingMessages: number | null }
 export interface Chat {
+  sharedContactRange?: 'ONE_TO_FIVE' | 'SIX_TO_TEN' | 'MORE_THAN_TEN';
   id: string; matchId: string; status: string; partner: { userId: string; displayName: string };
   myDecision: string; partnerDecision: string; timeoutAt: string; inactivityExpiresAt: string | null;
   serverTime: string; guidance: Guidance | null; audioPolicy: AudioPolicy | null;
@@ -41,7 +42,8 @@ export function parseChat(v: unknown, matchId: string, chatId: string, partnerId
     const a = v.audioPolicy; if (!object(a)) return invalid();
     audioPolicy = { enabled: bool(a.enabled), unavailableReason: a.unavailableReason == null ? null : str(a.unavailableReason), maxDurationMillis: num(a.maxDurationMillis), maxFileSizeBytes: num(a.maxFileSizeBytes), remainingMessages: a.remainingMessages == null ? null : num(a.remainingMessages) };
   }
-  return { id: chatId, matchId, status: str(v.status), partner: { userId: partnerId, displayName: str(v.partner.displayName) }, myDecision: decision(v.myDecision), partnerDecision: decision(v.partnerDecision), timeoutAt: date(v.timeoutAt), inactivityExpiresAt: v.inactivityExpiresAt == null ? null : date(v.inactivityExpiresAt), serverTime: date(v.serverTime), guidance, audioPolicy };
+  const range = v.sharedContactRange;
+  return { ...(range === 'ONE_TO_FIVE' || range === 'SIX_TO_TEN' || range === 'MORE_THAN_TEN' ? { sharedContactRange: range } : {}), id: chatId, matchId, status: str(v.status), partner: { userId: partnerId, displayName: str(v.partner.displayName) }, myDecision: decision(v.myDecision), partnerDecision: decision(v.partnerDecision), timeoutAt: date(v.timeoutAt), inactivityExpiresAt: v.inactivityExpiresAt == null ? null : date(v.inactivityExpiresAt), serverTime: date(v.serverTime), guidance, audioPolicy };
 }
 export function parseMessage(v: unknown, chatId: string, participants: string[]): Message {
   if (!object(v) || v.chatSessionId !== chatId || !participants.includes(str(v.senderId))) return invalid();

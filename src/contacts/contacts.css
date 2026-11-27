@@ -1,0 +1,14 @@
+.contacts .home-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.contacts .home-card p, .contacts .home-card h3 { margin: 0; }
+.contacts button, .contact-indicator button, .contact-invite button {
+  background: var(--color-surface); color: var(--color-primary); border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-row); padding: 9px 12px; font: inherit; cursor: pointer;
+}
+.contacts button:disabled { opacity: .6; cursor: default; }
+.contact-rows { display: grid; max-height: 44dvh; overflow-y: auto; }
+.contacts .contact-rows label { display: flex; align-items: center; gap: 8px; min-height: 44px; overflow-wrap: anywhere; }
+.contacts select { display: block; max-width: 100%; font: inherit; }
+.contact-indicator { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.contact-indicator button { font-size: .85rem; padding: 4px 8px; min-height: 28px; }
+.contact-indicator p { flex-basis: 100%; font-size: .85rem; margin: 0; }
+.contact-invite button { margin-inline-end: 8px; }

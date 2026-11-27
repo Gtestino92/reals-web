@@ -10,12 +10,15 @@ export class ChatSession {
   private state: State = { audioAccess: 'UNKNOWN', decisionPending: null, guidancePending: false, messageError: false, messagePending: false, confirmedReply: null, confirmedFile: null, reactionFeedback: null, chat: null, messages: [], exits: [], busy: false, error: '', blocked: true, outgoing: null, confirmed: null, confirmationVersion: 0, offset: 0, historyLimited: false };
   private readonly history: ParticipantHistory;
   get eligible() { return this.history.eligible; }
-  private observeAccess = (access: CounterpartAudioAccess) =>
+  private observeAccess = (access: CounterpartAudioAccess) => {
+    if (access === 'RESTRICTED') this.hideContactRange();
     this.history.observe(access, messages => this.install({ messages, audioAccess: this.history.access }));
+  };
   private listeners = new Set<() => void>();
   private lifetime = new AbortController();
   private read: AbortController | null = null;
   private serial = 0;
+  private disclosureEpoch = 0;
   private writing = false;
   private decisionStarted = 0;
   private reconcileReactions = false;
@@ -28,7 +31,13 @@ export class ChatSession {
   getSnapshot = () => this.state;
   private install(patch: Partial<State>) { if (!this.lifetime.signal.aborted) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); } }
   start() { if (this.lifetime.signal.aborted) { this.lifetime = new AbortController(); this.read = null; this.writing = false; this.serial++; } }
-  dispose() { this.history.clear(); this.install({ messages: [], blocked: true }); this.lifetime.abort(); this.read?.abort(); }
+  dispose() { this.hideContactRange(); this.history.clear(); this.install({ messages: [], blocked: true }); this.lifetime.abort(); this.read?.abort(); }
+  private hideContactRange() {
+    if (this.state.chat?.sharedContactRange) {
+      const { sharedContactRange, ...chat } = this.state.chat;
+      this.install({ chat });
+    }
+  }
   private async presentDecision(signal: AbortSignal) {
     const remaining = 300 - (Date.now() - this.decisionStarted);
     if (!this.state.decisionPending || remaining <= 0 || document.visibilityState !== 'visible') return;
@@ -40,7 +49,7 @@ export class ChatSession {
       if (signal.aborted) done();
     });
   }
-  private finish(message: string, closed = true) { this.terminal = true; const messages = this.state.messages.filter(row => !row.audio); this.history.clear(); this.install({ messages, blocked: true, busy: false }); this.onTerminal(this.terminalNotice ?? message, closed); }
+  private finish(message: string, closed = true) { this.hideContactRange(); this.terminal = true; const messages = this.state.messages.filter(row => !row.audio); this.history.clear(); this.install({ messages, blocked: true, busy: false }); this.onTerminal(this.terminalNotice ?? message, closed); }
   private terminalError(error: unknown) {
     if (error instanceof ApiError && ['CHAT_EXPIRED','CHAT_ABANDONED'].includes(error.code)) {
       this.finish(error.code === 'CHAT_ABANDONED' ? 'El chat se cerró por inactividad.' : 'El chat venció.'); return true;
@@ -81,14 +90,16 @@ export class ChatSession {
     if (!this.current(serial)) return;
     this.partner = str(match.userAId === this.me ? match.userBId : match.userAId);
     if (match.state !== 'CHAT_ACTIVE' && !['VISUAL_PHASE','VISUAL_APPROVED','CHAT_REJECTED','VISUAL_REJECTED','EXPIRED'].includes(str(match.state))) throw new ApiError('invalid');
-    if (match.state !== 'CHAT_ACTIVE') { await this.presentDecision(signal); if (this.current(serial)) this.finish(this.state.decisionPending ? 'Tu decisión quedó registrada.' : 'El chat terminó.'); return; }
+    if (match.state !== 'CHAT_ACTIVE') { this.hideContactRange(); await this.presentDecision(signal); if (this.current(serial)) this.finish(this.state.decisionPending ? 'Tu decisión quedó registrada.' : 'El chat terminó.'); return; }
     const started = Date.now();
+    const epoch = this.disclosureEpoch;
     const raw = await this.request(`/matches/${this.matchId}/chat`, signal);
     if (!this.current(serial)) return;
     const received = Date.now();
     const chat = parseChat(raw, this.matchId, this.chatId, this.partner);
     if (chat.status !== 'ACTIVE' && !['CANCELLED','EXPIRED','ABANDONED','CLOSED','FINISHED'].includes(chat.status)) throw new ApiError('invalid');
     if (chat.status !== 'ACTIVE') { if (this.current(serial)) this.finish(chat.status === 'ABANDONED' ? 'El chat se cerró por inactividad.' : 'El chat terminó. Actualizamos Inicio.'); return; }
+    if (this.state.chat?.sharedContactRange !== chat.sharedContactRange) this.hideContactRange();
     const cursor = full ? undefined : this.history.cursor(this.reconcileReactions);
     this.reconcileReactions = !this.reconcileReactions;
     const [messages, exits] = await Promise.all([
@@ -99,6 +110,7 @@ export class ChatSession {
     const merged = this.history.finishRead(messages, !cursor);
     const outgoing = this.state.outgoing;
     const confirmed = outgoing && merged.some(m => m.clientMessageId === outgoing.clientMessageId && m.senderId === this.me);
+    if (epoch !== this.disclosureEpoch || document.visibilityState === 'hidden' || this.history.access === 'RESTRICTED') delete chat.sharedContactRange;
     this.install({ chat, messages: merged, exits, offset: Date.parse(chat.serverTime) - (started + received) / 2, blocked: false,
       ...(confirmed ? { outgoing: null, confirmed: outgoing.content, confirmedReply: outgoing.replyTo, confirmedFile: outgoing.file, confirmationVersion: this.state.confirmationVersion + 1 } : {}), historyLimited: this.state.historyLimited || (!cursor && messages.length >= 500) });
     if (chat.myDecision !== 'PENDING') this.finish('Tu decisión quedó registrada.', false);
@@ -120,7 +132,12 @@ export class ChatSession {
     const fresh = this.state.messages.find(row => row.id === id);
     return fresh !== previous ? fresh?.audio?.url ?? null : null;
   };
+  concealContacts = () => {
+    this.disclosureEpoch++;
+    this.hideContactRange();
+  };
   resume = () => {
+    this.concealContacts();
     if (this.terminal || this.writing || !this.current(this.serial)) return;
     // A foreground snapshot supersedes an older read, never an uncertain write.
     this.read?.abort(); this.read = null;

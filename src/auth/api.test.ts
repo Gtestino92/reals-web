@@ -11,6 +11,21 @@ function harness(...responses: Response[]) {
   responses.forEach(item => fetcher.mockResolvedValueOnce(item));
   return { fetcher, api: new ApiClient(fetcher), user: identity(), signal: new AbortController().signal };
 }
+it.each([
+  ['GET', '/me/shared-contacts', 'error'],
+  ['PUT', '/me/shared-contacts/consent', 'error'],
+  ['PUT', '/me/shared-contacts/selection', 'error'],
+  ['DELETE', '/me/shared-contacts/consent', 'error'],
+  ['DELETE', '/me/shared-contacts/selection', 'error'],
+  ['GET', '/me/profile', undefined],
+  ['GET', '/me/shared-contacts-preview', undefined],
+  ['GET', '/admin-auth/status', 'error'],
+])('applies the destination policy for %s %s', async (method, path, redirect) => {
+  const { api, fetcher, user, signal } = harness(response({}));
+  await api.request(path!, signal, user, method);
+  expect(fetcher.mock.calls[0]?.[0]).toBe('/api' + path);
+  expect(fetcher.mock.calls[0]?.[1]?.redirect).toBe(redirect);
+});
 it('delivers only history access on success after token refresh and keeps the JSON return contract', async () => {
   const success = Response.json([], {headers:{'X-Reals-Counterpart-Audio-Access':'RESTRICTED'}});
   const {api, user, fetcher, signal} = harness(failure(401,'INVALID_TOKEN'),success,response(account));

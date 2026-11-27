@@ -37,11 +37,12 @@ export class ApiClient {
   ) {}
   withOwnership(ownership?: TabOwnershipManager) { return new ApiClient(this.fetcher, ownership, this.appCheckToken, this.environment); }
   withAppCheck(provider?: AppCheckTokenProvider) { return new ApiClient(this.fetcher, this.ownership, provider, this.environment); }
-  async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true, adminGrant?: string, onHistoryAccess?: HistoryAccessListener): Promise<unknown> {
+  async request(path: string, signal: AbortSignal, user?: Identity, method = 'GET', body?: unknown, expectedStatus?: number, refreshInvalidToken = true, adminGrant?: string, onHistoryAccess?: HistoryAccessListener, contactRevision?: string): Promise<unknown> {
     this.ownership?.assert();
     if (this.ownership) signal = AbortSignal.any([signal, this.ownership.signal]);
     const route = path.split('?', 1)[0];
     const history = method === 'GET' && /^\/chats\/[^/]+\/messages$/.test(route ?? '');
+    const sharedContacts = route === '/me/shared-contacts' || route?.startsWith('/me/shared-contacts/');
     const administrative = route === '/admin' || route === '/admin-auth' || path.startsWith('/admin/') || path.startsWith('/admin-auth/');
     const privateRead = method === 'GET' && (history ||
       /^\/connections\/[^/]+\/scheduling-snapshot$/.test(path) ||
@@ -49,6 +50,9 @@ export class ApiClient {
     for (let attempt = 0; attempt < 2; attempt++) {
       signal.throwIfAborted();
       const headers: Record<string, string> = {};
+      if (contactRevision !== undefined && method === 'PUT' && (path === '/me/shared-contacts/consent' || path === '/me/shared-contacts/selection')) {
+        headers['X-Contact-Revision'] = contactRevision;
+      }
       if (user) {
         const token = await abortable(user.getIdToken(attempt === 1), signal);
         if (!token.trim()) throw new ApiError('authorization', 401, 'INVALID_TOKEN');
@@ -70,7 +74,7 @@ export class ApiClient {
           ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }),
           // Private responses can carry account data and signed media URLs.
           ...(user || administrative || privateRead ? { cache: 'no-store' } : {}),
-          ...(administrative ? { redirect: 'error' } : {}),
+          ...(administrative || sharedContacts ? { redirect: 'error' } : {}),
         });
       }
       catch { signal.throwIfAborted(); throw new ApiError('network'); }

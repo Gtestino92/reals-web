@@ -121,3 +121,12 @@ discarded, and a closed PWA cannot run this coordinator. Favicon updates use the
 existing 32px PNG and Canvas. Image decoding or deployment CSP can prevent
 the dynamic icon while the title still updates. The installed PWA icon uses
 the existing manifest. See the [Android comparison and test limits](android-parity-matrix.md#web-activity-notifications).
+
+
+## Shared contacts
+
+Ordinary Account navigation owns Contactos. Only an active profile gets the entry. The optional Home invitation mounts after the ordinary summary is ready, with no active interaction, and only reads owner status when a provider is configured and usable. An account-scoped dismissal suppresses the invitation. Contact participation has no effect on onboarding or queue admission.
+
+The management screen is lazy-loaded with the telephone metadata. Both adapters yield temporary name/number rows. A row represents a telephone, so one person can have several checkboxes. The native picker preserves its initial selections. Google starts with an empty selection. Both allow select-all and individual deselection, including an explicitly confirmed empty replacement. Local validation uses the full libphonenumber-js metadata plus the Backend dial-string and length restrictions. The user chooses one ISO dialing region for national numbers and omits ambiguous entries from other countries. Google canonical international values take precedence. The server's libphonenumber version owns the final normalization and distinct count.
+
+Owner requests use SessionController, App Check and the existing private transport. Only the two contact PUT routes can receive the typed revision argument. The import body contains selected number strings and a region when needed. Contact identities, tokens and numbers live only in the active operation. Review [ownership](runtime-refinements.md#contact-operation-ownership), [release configuration](deployment.md#shared-contact-providers) and the [owner contract](../../reals-backend/docs/commons/api.md).

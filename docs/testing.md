@@ -151,3 +151,19 @@ An isolated headless Chrome check of the bracket implementation passed 26 assert
 ## Architecture regression check
 
 Run `npm run check:architecture` to reject production runtime import cycles, including lazy imports, while excluding erased TypeScript imports. See [frontend architecture](frontend-architecture.md) for scope, composition invariants and resolver limitations. Focused guard tests: `npm run test:focused -- tools/check-cycles.test.mjs`. CI runs the check before typecheck and keeps the complete regression suite with `--maxWorkers=2`.
+
+
+## Synthetic shared-contact validation
+
+Run the focused suites in src/contacts plus src/chat/sharedContacts.test.tsx, the existing FirstChat/ChatSession and Account/Home navigation tests. The provider suite mocks GIS, People pagination and navigator.contacts. All names, phone numbers and OAuth responses are synthetic. The local fixture never contacts a real provider or Backend.
+
+Run `npm run dev -- --port 5177 --strictPort` and then `node tools/shared-contacts-smoke.mjs`. The smoke uses an external Playwright installation, local Chrome and Playwright WebKit. For a temporary installation, run `npm install --prefix <temp-directory> --no-save playwright`, install WebKit with that installation's Playwright CLI, and set CONTACT_PLAYWRIGHT_ANCHOR to the absolute path of <temp-directory>/package.json. The script exercises Account navigation, native-style selection with region, select-all, deselection, replacement, stale revision, withdrawal, unavailable providers, and First Chat collapse/dismiss/reload. Screenshots are written to artifacts/shared-contacts.
+
+| Synthetic Chromium screenshots | Mobile / light | Desktop / dark |
+|---|---|---|
+| Selection | [Mobile selection](shared-contacts/chromium-mobile-light-selection.png) | [Desktop selection](shared-contacts/chromium-desktop-dark-selection.png) |
+| First Chat | [Mobile chat](shared-contacts/chromium-mobile-light-chat.png) | [Desktop chat](shared-contacts/chromium-desktop-dark-chat.png) |
+
+For independent Backend coverage, run `./mvnw -Dtest=SharedContactsPostgresIT test` in a disposable checkout of Backend a1538817afe61be6805c719bb6917f3a8334ef8a with JDK 21 and Docker. It creates disposable PostgreSQL, exercises two owners with five fictional numbers in common, reads the new chat bucket via MockMvc, then verifies invalidation, quota and concurrency. On Docker Desktop 29 the local test needed JAVA_TOOL_OPTIONS=-Dapi.version=1.44 for Testcontainers. For a browser connected to local Backend with fictional entries see [local configuration](deployment.md#local-synthetic-backend).
+
+Physical verification remains open. After provider/legal approval, test Chrome Android native selection, multi-number contacts, cancel/deny and refocus, Safari iPhone with the unsupported-picker state and Google popup, and installed-PWA popup return, pagehide/BFCache, tab lease loss and sign-out during pagination. Exercise the soft keyboard, screen reader focus and chat controls on a small screen. WebKit on Windows and viewport emulation exercise engine/layout behavior only.

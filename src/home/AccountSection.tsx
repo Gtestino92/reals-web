@@ -15,7 +15,7 @@ const activityLabels: Record<ActivityType, readonly [title: string, description:
   SECOND_CHAT_SCHEDULED: ['Horario del segundo chat confirmado', 'Cuando se confirma el día y la hora del segundo chat.'],
   SECOND_CHAT_AVAILABLE: ['Entrada al segundo chat disponible', 'Cuando se abre la ventana para entrar al segundo chat.'],
 };
-export function AccountSection({ controller, disabled, legalOnly = false, deletionDisabled = false, hideDeletion = false, setup = false, onBack, notificationsOpen = false, onNotificationsOpen, onNavigationBlockedChange }: { controller: SessionController; disabled: boolean; legalOnly?: boolean; deletionDisabled?: boolean; hideDeletion?: boolean; setup?: boolean; onBack?: () => void; notificationsOpen?: boolean; onNotificationsOpen?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
+export function AccountSection({ controller, disabled, legalOnly = false, deletionDisabled = false, hideDeletion = false, setup = false, onBack, notificationsOpen = false, onNotificationsOpen, onContactsOpen, onNavigationBlockedChange }: { controller: SessionController; disabled: boolean; legalOnly?: boolean; deletionDisabled?: boolean; hideDeletion?: boolean; setup?: boolean; onBack?: () => void; notificationsOpen?: boolean; onNotificationsOpen?: () => void; onContactsOpen?: () => void; onNavigationBlockedChange?: (blocked: boolean) => void }) {
   const web = useActivityNotificationContext();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const dismissDelete = useCallback(() => setDeleteOpen(false), []);
@@ -74,6 +74,7 @@ export function AccountSection({ controller, disabled, legalOnly = false, deleti
     {legalOnly ? null : setup ? <header className="home-heading"><h3>Cuenta</h3><button type="button" className="login-button login-outlined" aria-label="Cuenta" aria-expanded={expanded} aria-controls="account-options" disabled={blocked} onClick={() => setExpanded(v => !v)}>{expanded ? 'Ocultar' : 'Abrir'}</button></header> : <header className="home-heading"><h2>Cuenta</h2><button className="login-button login-outlined" disabled={busy || view === 'password'} onClick={onBack}>Volver a Inicio</button></header>}
     {(!setup || expanded) && <div id={legalOnly ? undefined : "account-options"} className={legalOnly ? 'legal-account-actions' : setup ? undefined : 'home-card'}>
       {!legalOnly && <button className="login-button login-outlined" disabled={blocked} onClick={() => controller.legalEvents.dispatchEvent(new Event('inspect'))}>Documentos vigentes</button>}
+      {!legalOnly && !setup && onContactsOpen && controller.snapshot.profile?.status === 'ACTIVE' && <button data-contacts-entry className="login-button login-outlined" disabled={blocked} onClick={onContactsOpen}>Contactos</button>}
       {!legalOnly && !setup && <button ref={notificationsButton} className="login-button login-outlined" disabled={blocked} onClick={onNotificationsOpen}>Notificaciones</button>}
 
       {!legalOnly && !setup && controller.hasPasswordProvider === true && <button className="login-button login-outlined" disabled={blocked} onClick={() => { setError(''); setView('password'); }}>Cambiar contraseña de Reals</button>}

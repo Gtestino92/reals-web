@@ -15,7 +15,9 @@ import { useAffinityQuestionnaire, type AffinityModel } from '../profile/affinit
 import { AffinityQuestionnaire } from '../profile/affinities/AffinityQuestionnaire';
 import { presentation as affinityPresentation } from '../profile/affinities/presentation';
 import { SignOutButton } from '../auth/SignOutButton';
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { ContactInvitation } from '../contacts/ContactInvitation';
+import '../contacts/contacts.css';
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionController } from '../auth/session';
 import type { Activity } from './contracts';
 import { Onboarding } from '../onboarding/Onboarding';
@@ -74,7 +76,8 @@ function ActivityCard({ item, accountId, onOpen, disabled: unsafe = false, retur
     {typeof when === 'string' && <p>{item.type === 'SCHEDULING' ? 'Hasta: ' : 'Fecha: '}<time dateTime={when}>{new Date(when).toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' })}</time></p>}
   </article>;
 }
-type ManagementSurface = 'profile' | 'preferences' | 'affinities' | 'account';
+const Contacts = lazy(() => import('../contacts/Contacts'));
+type ManagementSurface = 'contacts' | 'profile' | 'preferences' | 'affinities' | 'account';
 export function AdminEntry({ onClick, pending, disabled }: { onClick: () => void; pending: boolean; disabled: boolean }) {
   return <button className="login-button login-outlined home-admin-entry" aria-busy={pending} disabled={disabled || pending} onClick={onClick}>
     <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6Z" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="m8 12 3 3 5-6" fill="none" stroke="currentColor" strokeWidth="1.8"/></svg>Admin
@@ -180,6 +183,10 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
   const previousFocusSurface = useRef(focusSurface);
   useLayoutEffect(() => {
     const returningToAccount = previousFocusSurface.current === 'notifications' && focusSurface === 'account';
+    if (previousFocusSurface.current === 'contacts' && focusSurface === 'account') {
+      root.current?.querySelector<HTMLButtonElement>('[data-contacts-entry]')?.focus();
+      previousFocusSurface.current = focusSurface; return;
+    }
     previousFocusSurface.current = focusSurface;
     if (!active || !focusSurface || returningToAccount) return; // AccountSection restores the Notifications entry's focus.
     const heading = Array.from(root.current?.querySelectorAll('h2') ?? []).find(node => !node.closest('[hidden]'));
@@ -191,7 +198,8 @@ export function Home({ active = true, controller, onCompleteProfile, onChatActiv
     {surface==='visual-review'&&visualReturn&&<section className="home-card" aria-busy={visualReturn.phase==='loading'}><h2 tabIndex={-1} ref={node=>node?.focus({preventScroll:true})}>Actualizando tus actividades</h2>{visualReturn.phase==='loading'?<p role="status">Consultando el estado de Inicio…</p>:<><p role="alert">No pudimos actualizar tus actividades. Podés reintentar o ir a Inicio para consultar el estado.</p><button className="login-button login-outlined" onClick={()=>void finishVisual(visualReturn.matchId,visualReturn.reason)}>Reintentar actualización</button><button className="login-button login-outlined" onClick={safeVisualHome}>Ir a Inicio</button></>}</section>}
     {surface === 'visual-review' && !visualReturn && navigation.matchId && !actedVisuals.current.has(navigation.matchId) && active && <VisualReview key={navigation.matchId} controller={controller} matchId={navigation.matchId} navigation={navigation} onBlocked={reportVisualLock} onFinished={reason=>void finishVisual(navigation.matchId!,reason)} onBack={() => navigation.backTo(navigation.trailIncludesActivity ? 'activity' : 'home')} />}
 
-    <div hidden={surface !== 'account' && surface !== 'notifications'}><AccountSection controller={controller} disabled={false} onBack={() => navigation.backTo(surface === 'notifications' ? 'account' : 'home')} notificationsOpen={surface === 'notifications'} onNotificationsOpen={() => navigation.open('notifications')} onNavigationBlockedChange={value => { accountLocked.current = value; reportNavigationLock(); }} /></div>
+    {surface === 'contacts' && active && controller.snapshot.profile?.status === 'ACTIVE' && <Suspense fallback={<p>Cargando contactos…</p>}><Contacts key={controller.snapshot.account?.id} controller={controller} onBack={() => navigation.backTo('account')}/></Suspense>}
+    <div hidden={surface !== 'account' && surface !== 'notifications'}><AccountSection controller={controller} disabled={false} onBack={() => navigation.backTo(surface === 'notifications' ? 'account' : 'home')} notificationsOpen={surface === 'notifications'} onNotificationsOpen={() => navigation.open('notifications')} onContactsOpen={() => navigation.open('contacts')} onNavigationBlockedChange={value => { accountLocked.current = value; reportNavigationLock(); }} /></div>
     {retainedManagement.current && <div hidden={!managementActive}><Onboarding Home={Home} active={active && managementActive} onAdminNavigationBlockedChange={onAdminNavigationBlockedChange} controller={controller} management={retainedManagement.current} navigation={navigation} onBack={returnHome} onPreferencesSaved={preferencesSaved} onHomeInvalidated={() => { homeInvalidated.current = true; }} onNavigationBlockedChange={value => { locked.current = value; reportNavigationLock(); }} /></div>}
 
     <AffinityQuestionnaire model={affinities} navigation={navigation}/>
@@ -298,6 +306,7 @@ function HomeOverview({ onAdminHomeState, retainOnReturn, invalidated, offerInst
       </section>
       {presentation?.hasActivity && <button className="home-card home-activity-entry" onClick={onActivity} aria-label="Ver Actividad" aria-describedby={unread ? unreadDescription : undefined}><span className="home-entry-title">Actividad{unread > 0 && <span className="activity-unread" id={unreadDescription}>{unread} {unread === 1 ? 'novedad' : 'novedades'}</span>}</span><span>{presentation?.required ? `${presentation.required} requieren tu acción` : 'Tus conversaciones y próximos pasos'}</span><span aria-hidden="true">Ver actividad →</span></button>}
       {offerInstallation && showsSummary && <InstallGuidance onDismiss={() => root.current?.querySelector('h2')?.focus({ preventScroll: true })} />}
+      {showsSummary && !busy && !blocked && !adminPending && !chatOpen && !presentation?.hasActivity && <ContactInvitation key={controller.snapshot.account?.id} controller={controller} open={() => onManage('contacts')}/>}
       {home.profileStatus === 'ACTIVE' && <nav aria-label="Administrar tu perfil y cuenta" className="home-grid home-management">
         {managementEntries.map(([target, title, description]) => <button type="button" className={`home-card home-activity-entry ${target === 'affinities' ? 'affinity-home-card' : ''}`} key={target} aria-label={title} disabled={busy || blocked} onClick={() => onManage(target)}><span className="home-entry-title">{target === 'affinities' ? affinity?.complete ? 'Tus afinidades' : affinity?.answered ? 'Seguí construyendo tus afinidades' : 'Descubrí tus afinidades' : title}</span><span>{target === 'affinities' ? 'Tus respuestas son opcionales y privadas. Ayudan a Reals a encontrar afinidades compartidas y contexto para conversar sin mostrar tus respuestas exactas.' : description}</span>{target === 'affinities' && affinity && <span>{affinity.answered} de {affinity.total} respondidas</span>}{target === 'affinities' && affinities.busy && !affinities.catalog && <span>Cargando afinidades…</span>}<span aria-hidden="true">{target === 'affinities' ? affinity?.action ?? 'Empezar' : 'Abrir'} →</span></button>)}
       </nav>}

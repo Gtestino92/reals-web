@@ -115,3 +115,57 @@ The reader fetches UTF-8 HTML under `/legal/` on the origin selected at build ti
 On `*.pages.dev`, the reader requests the extensionless `/document` route for catalog files ending in `/document.html`. Other hosts must serve the exact catalog URL directly. Requests omit credentials, reject redirects and enforce a 512 KiB decoded-body limit. The secondary browser link retains the catalog URL and appears only when it passes the same publication destination check. Verify its final destination stays on the approved publisher during release. When switching publishers, review CORS and CSP and rebuild the Web bundle with the new origin.
 
 The public catalog omits the canonical SHA-256. The reader can check the destination, response and supported formatting. It cannot compare the downloaded bytes to the backend's canonical digest. Use the publication verifier for that comparison during release.
+
+
+## Shared-contact providers
+
+| Source | Public Web setting | Additional requirement |
+|---|---|---|
+| Synthetic local | `VITE_CONTACTS_SYNTHETIC=true` | Loopback Vite DEV with local environment. Supplies two fictional numbers, taking precedence over real providers. Normal authentication, owner consent and Backend import controls still apply. |
+| Device picker | `VITE_CONTACT_PICKER_ENABLED=true` | Secure top-level window, telephone support and direct user activation. Optional name property. |
+| Google Contacts | `VITE_GOOGLE_CONTACTS_ENABLED=true` and `VITE_GOOGLE_CONTACTS_CLIENT_ID` | Separate public Web OAuth client, People API and explicit grant in the selected Google account. Works independently of the Reals login method. |
+
+All flags default off. Leave dev/prod values off until [release review](security-technical-debt.md#release-gate-for-address-book-processing) and device validation. Prepare a dedicated Google Cloud project to isolate grants and permission removal from Firebase authentication and unrelated Google services. Enable People API, configure OAuth branding, audience, support contact, verified domains, privacy policy and test users. Register exact JavaScript origins (scheme, host and port for localhost testing, HTTPS for a hosted origin). Configure only `https://www.googleapis.com/auth/contacts.readonly`. Treat it as sensitive and verify the project's current classification on Google Auth Platform → Data Access. Record the indicated review/verification requirements and production approval. [OAuth setup](https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid) · [Google scope directory](https://developers.google.com/identity/protocols/oauth2/scopes)
+
+After Reals consent, one click loads GIS and a second click opens account selection with a short-lived in-memory token. Only saved contacts are requested. The People API request selects names and telephone numbers, filters to contact sources, limits responses to necessary fields and follows up to 20 pages of 200 entries. It refuses oversized results and discards all pages after a failure. The selector accepts at most 4000 candidate telephone rows and 2000 estimated distinct numbers. Server limits remain authoritative. To remove Google permission, open Google Account → Security → Your connections to third-party apps and services, choose the contact app and remove access. This prevents further provider retrieval. To erase an existing Reals selection or withdraw participation, use Contactos. Reals withdrawal does not revoke a Google or Firebase grant. [GIS token model](https://developers.google.com/identity/oauth2/web/guides/use-token-model) · [People connections](https://developers.google.com/people/api/rest/v1/people.connections/list) · [Google connections](https://myaccount.google.com/connections)
+
+The current Pages CSP is Report-Only and has no GIS or People allowance. Before any approved trial, review `script-src https://accounts.google.com/gsi/client`, `connect-src https://accounts.google.com/gsi/ https://people.googleapis.com` and, if observed, `frame-src https://accounts.google.com/gsi/` and `style-src https://accounts.google.com/gsi/style`. Test the Google authorization popup and opener callback independently of Firebase login, including a blocked popup. Pages currently sends no explicit COOP header and uses strict-origin-when-cross-origin. Verify actual headers and popup behavior on the approved origin, including whether same-origin-allow-popups is needed if COOP is enabled. Keep changes path/origin scoped and retain existing Admin, App Check and Firebase protections. [GIS CSP and COOP guidance](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid)
+
+### Local synthetic Backend
+
+Use a synthetic-only local database and the existing V51/V52 Backend image from PR #235 or later. From the Backend checkout, place this override **outside the repository** (for example `$env:TEMP/reals-contacts-local.yaml`). It references a shell secret and contains no key material.
+
+```yaml
+services:
+  backend:
+    environment:
+      SHARED_CONTACTS_ENABLED: "true"
+      SHARED_CONTACTS_IMPORT_ENABLED: "true"
+      SHARED_CONTACTS_DISCLOSURE_ENABLED: "true"
+      SHARED_CONTACTS_SECRET: ${SHARED_CONTACTS_SECRET:?local synthetic key required}
+      SHARED_CONTACTS_KEY_VERSION: ${SHARED_CONTACTS_KEY_VERSION:?choose an unused local version}
+      MATCHMAKING_RANKING_SOCIAL_MODE: SHADOW
+```
+
+Generate an independent key for each fresh synthetic experiment. Choose an unused positive local key version for this database. Keep the same key/version pair throughout the experiment. Run in PowerShell with Docker Desktop running and the existing local dependencies healthy.
+
+```powershell
+$contactBytes = New-Object byte[] 32
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($contactBytes)
+$rng.Dispose()
+$env:SHARED_CONTACTS_SECRET = [Convert]::ToBase64String($contactBytes)
+[Array]::Clear($contactBytes, 0, $contactBytes.Length)
+$env:SHARED_CONTACTS_KEY_VERSION = Read-Host 'Unused local synthetic key version'
+$contactOverride = Join-Path $env:TEMP 'reals-contacts-local.yaml'
+docker compose -f docker-compose.yml -f $contactOverride up -d --build --no-deps --force-recreate backend
+```
+
+Avoid printing expanded Compose configuration, container environments or request payloads. SHADOW measures ranking without changing admission weights. Use ACTIVE only in an isolated controlled ranking experiment. In Web's ignored .env.local set VITE_REALS_ENVIRONMENT=local and VITE_CONTACTS_SYNTHETIC=true, leaving both real-provider flags false. Restart Vite on loopback. In separate browser profiles, sign in as two disposable active accounts, accept current legal requirements and contact consent, and confirm at least one common fictional number. Start a **new** match between them after both imports. Expect the 1–5 bucket. Withdraw one selection and revalidate the other user's chat. Clean up each participant through Contactos. Restore the ordinary local service without removing PostgreSQL volumes.
+
+```powershell
+Remove-Item Env:SHARED_CONTACTS_SECRET, Env:SHARED_CONTACTS_KEY_VERSION
+docker compose -f docker-compose.yml up -d --no-deps --force-recreate backend
+```
+
+Return the Web synthetic flag to false and restart Vite. The [Backend settings](../../reals-backend/docs/configuration.md) describe rotation and disclosure at match capture.
