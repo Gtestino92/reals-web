@@ -78,6 +78,10 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
     const request = new AbortController();
     read.current = request;
     const signal = AbortSignal.any([request.signal, lifetime.current]);
+    if (!installedRevision.current) {
+      setStale(false);
+      if (message === '') setNotice('');
+    }
     const timeout = !installedRevision.current ? window.setTimeout(() => {
       if (!signal.aborted) {
         request.abort(); setStale(true); setNotice('La consulta está demorando. Reintentá la consulta.');
@@ -226,12 +230,11 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
   const canImport = !stale && available && (!!picker || !!sources.google);
   const busy = phase !== 'idle';
   const discovering = available && probing && !sources.google;
-  const initialLoading = (!status && !notice) || (discovering && status?.acceptedConsentVersion === null);
+  const initialLoading = (!status && !stale) || (discovering && status?.acceptedConsentVersion === null);
   return <section ref={root} className="home-account contacts"><ContactHeader onBack={() => { if (phase === 'native') release(); onBack(); }}/>
     {initialLoading && <ContactSkeleton/>}
     {notice && <p role="status">{notice}</p>}
-    {status && stale && <button onClick={() => void refresh('')}>Consultar estado</button>}
-    {!status && notice && <button onClick={() => void refresh('')}>Consultar estado</button>}
+    {stale && <button onClick={() => void refresh('')}>Reintentar</button>}
     {status && !initialLoading && <>{!intent?.native && <section className="home-card">
       <h3>{status.acceptedConsentVersion === null ? 'Compartí tus contactos' : status.state === 'SYNCED' ? 'Contactos sincronizados' :
         status.state === 'RESYNC_REQUIRED' ? 'Necesitás volver a sincronizar' : 'Todavía no importaste contactos'}</h3>
@@ -240,7 +243,7 @@ export default function Contacts({ controller, onBack, registerContactDialog, so
       {status.syncedAt && <p>Última sincronización: <time dateTime={status.syncedAt}>{new Date(status.syncedAt).toLocaleString('es-AR')}</time></p>}
       {!stale && !canImport && !discovering && <p>{!available ? 'Las importaciones están pausadas por el momento.' : !sources.picker && !sources.google ? 'Por ahora no hay fuentes de contactos habilitadas.' :
         probeFailed ? 'No pudimos comprobar el selector. Volvé a entrar en Contactos para reintentar.' : 'Este navegador no ofrece el selector de contactos del dispositivo.'}</p>}
-      {discovering && <ContactSkeleton/>}
+      {discovering && <ContactSkeleton actionsOnly/>}
       {!canImport && !discovering && status.state === 'SYNCED' && <p>Tus contactos compartidos siguen sincronizados con tu cuenta. Podés borrarlos desde este dispositivo.</p>}
       {!consent && <><p>Participar es opcional. Los teléfonos que elijas ayudan a priorizar personas compatibles. Durante el primer chat ambas personas pueden ver un rango de contactos en común. Nadie ve los nombres ni los números de la otra agenda.</p>
       <p>Los nombres se usan solo en tu dispositivo. Los números seleccionados se envían a Reals y se transforman en identificadores protegidos. Reals no conserva los números originales. Podés agregar contactos, reemplazar o borrar la selección y retirar tu consentimiento. Una coincidencia no verifica identidad ni garantiza seguridad.</p>

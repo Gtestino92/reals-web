@@ -198,7 +198,7 @@ it('preserves review on compatible resume and discards it on an external revisio
   expect(screen.getByRole('button', { name: 'Importar contactos' })).toBeDisabled();
   expect(screen.getAllByRole('checkbox')[0]).toBe(box);
   request.mockResolvedValue({ ...accepted, mutationRevision: crypto.randomUUID() });
-  await click('Consultar estado');
+  await click('Reintentar');
   await screen.findByText(/El estado de tus contactos cambió/);
   expect(screen.queryByRole('checkbox')).toBeNull();
   expect(request.mock.calls.every(call => call[2] === undefined)).toBe(true);
@@ -254,7 +254,7 @@ it('recovers an initial status failure and keeps a synced set through empty and 
   const request = vi.spyOn(controller, 'request').mockRejectedValueOnce(new Error()).mockResolvedValue(synced);
   const source = vi.fn().mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError')).mockResolvedValueOnce([]);
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => source }}/>);
-  await click('Consultar estado'); await click('Agregar contactos');
+  await click('Reintentar'); await click('Agregar contactos');
   await screen.findByText(/no permitió/); await click('Agregar contactos');
   await waitFor(() => expect(screen.getByRole('button', { name: 'Agregar contactos' })).toBeEnabled());
   expect(screen.queryByText(/No se eligieron teléfonos/)).toBeNull();
@@ -279,6 +279,20 @@ it('keeps privacy controls available during slow capability discovery and shows 
   await act(async () => finish(undefined));
   expect(request.mock.calls[1]?.slice(2)).toEqual(['DELETE', undefined, undefined, undefined]);
 });
+it('shows the Contacts skeleton without a retry action during post-delete reconciliation', async () => {
+  const controller = controllerFixture();
+  let finish!: (value: unknown) => void;
+  vi.spyOn(controller, 'request').mockResolvedValueOnce(synced).mockResolvedValueOnce(undefined)
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{}}/>);
+  await click('Borrar contactos compartidos');
+  await click('Borrar contactos');
+  expect(await screen.findByRole('status', { name: 'Cargando contactos' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: /Consultar estado|Reintentar/ })).toBeNull();
+  await act(async () => finish(accepted));
+  expect(screen.getByRole('heading', { name: 'Todavía no importaste contactos' })).toBeVisible();
+});
+
 it('keeps the confirmation button and its label while the selection write settles', async () => {
   const controller = controllerFixture();
   let finish!: (value: unknown) => void;

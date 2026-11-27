@@ -27,7 +27,6 @@ html {
 /* Touch scrolling and the artwork share the document canvas, including at its edges. */
 @media (hover: none), (pointer: coarse) {
   html {
-    overscroll-behavior-y: none;
     background-image: var(--editorial-art);
     background-position: center top;
     background-size: 100% auto;
