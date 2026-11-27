@@ -28,10 +28,29 @@ export class ChatSession {
   private lastTextRefresh = 0;
   poll = () => {
     if (this.checkAbsoluteDeadline()) return;
-    if (this.state.outgoing?.phase === 'pending' && this.writing && Date.now() - this.decisionStarted >= 5000)
-      return this.verifyExitDuringSend(this.state.outgoing);
-    if (this.rules.expired && (this.writing || this.read)) return this.verifyInactivity();
-    if (Date.now() - this.lastTextRefresh >= 500) return this.refresh(false,true);
+
+    if (
+      this.state.outgoing?.phase === 'pending' &&
+      this.writing &&
+      Date.now() - this.decisionStarted >= 5000
+    ) {
+      const exitCheck = this.verifyExitDuringSend(this.state.outgoing);
+
+      if (this.rules.expired) {
+        return Promise.all([
+          exitCheck,
+          this.verifyInactivity(),
+        ]).then(() => undefined);
+      }
+
+      return exitCheck;
+    }
+
+    if (this.rules.expired && (this.writing || this.read))
+      return this.verifyInactivity();
+
+    if (Date.now() - this.lastTextRefresh >= 500)
+      return this.refresh(false, true);
   };
   private writing = false;
   private decisionStarted = 0;
@@ -68,7 +87,6 @@ export class ChatSession {
           if (finishedMatchStates.includes(str(match.state))) this.finish('La conversación se cerró.');
           else if (match.state !== 'CHAT_ACTIVE') throw new ApiError('invalid');
         }).catch(failed),
-        this.rules.expired && this.verifyInactivity(),
       ]);
     } finally { if (this.sendCheck === check) this.sendCheck = null; }
   }
@@ -85,7 +103,7 @@ export class ChatSession {
   getSnapshot = () => this.state;
   private install(patch: Partial<State>) { if (!this.lifetime.signal.aborted) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); } }
   start() { if (this.lifetime.signal.aborted) { this.lifetime = new AbortController(); this.read = null; this.writing = false; this.serial++; } }
-  dispose() { this.postWriteRead?.abort(); this.postWriteRead = null; this.interruptedCursor = null; this.lastTextRefresh = 0; this.hideContactRange(); this.history.clear(); this.install({ textReady: false, foregroundVerified: false, pendingReaction: null, messages: [], blocked: true }); this.lifetime.abort(); this.read?.abort(); }
+  dispose() { this.sendCheck?.abort(); this.sendCheck = null;this.postWriteRead?.abort(); this.postWriteRead = null; this.interruptedCursor = null; this.lastTextRefresh = 0; this.hideContactRange(); this.history.clear(); this.install({ textReady: false, foregroundVerified: false, pendingReaction: null, messages: [], blocked: true }); this.lifetime.abort(); this.read?.abort(); }
   private hideContactRange(background = false) {
     const chat = this.state.chat;
     if (chat?.sharedContactRange) {

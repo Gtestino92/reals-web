@@ -507,3 +507,65 @@ it.each([
   if (closed) expect(session.getSnapshot()).toBe(snapshot);
   expect(writes()).toHaveLength(1);
 });
+
+it('verifies inactivity while an earlier stalled-send check is still pending', async () => {
+  let now = Date.now();
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+
+  chat.inactivityExpiresAt = new Date(now + 10_000).toISOString();
+  await session.refresh();
+
+  const base = request.getMockImplementation()!;
+
+  let releaseSend!: () => void;
+  let releaseReads!: () => void;
+
+  const sendGate = new Promise<void>(resolve => {
+    releaseSend = resolve;
+  });
+
+  const readGate = new Promise<void>(resolve => {
+    releaseReads = resolve;
+  });
+
+  request.mockImplementation(async (...args) => {
+    const [path, , method] = args;
+
+    if (method === 'POST') await sendGate;
+
+    if (
+      path === '/matches/m' ||
+      path.endsWith('/exit-requests')
+    ) {
+      await readGate;
+    }
+
+    return base(...args);
+  });
+
+  const sending = session.send('Mensaje pendiente', null);
+
+  now += 6000;
+  const checking = session.poll();
+
+  try {
+    now += 5000;
+    chat.status = 'ABANDONED';
+
+    await session.poll();
+
+    expect(home).toHaveBeenCalledWith(
+      'El chat se cerró por inactividad.',
+      true,
+    );
+
+    expect(session.getSnapshot().confirmed).toBeNull();
+  } finally {
+    releaseReads();
+    releaseSend();
+    await Promise.all([checking, sending]);
+  }
+
+  expect(home).toHaveBeenCalledTimes(1);
+  expect(writes()).toHaveLength(1);
+});
