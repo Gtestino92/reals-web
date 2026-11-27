@@ -49,7 +49,7 @@ const api = new ApiClient(async (url, init) => {
   if (path === '/reference/affinity-questions') return json({ catalogVersion: 'synthetic', categories: [], questions: [] });
   if (path === '/me/profile/affinity-answers') return json({ answers: [] });
   if (path === '/matches/m') return json({ id: 'm', userAId: 'me', userBId: 'them', state: 'CHAT_ACTIVE' });
-  if (path === '/matches/m/chat') return json({ id: 'c', matchId: 'm', chatType: 'FIRST_CHAT', status: 'ACTIVE', partner: { userId: 'them', displayName: 'Alicia Ejemplo' },
+  if (path === '/matches/m/chat') return json({ id: 'c', matchId: 'm', chatType: 'FIRST_CHAT', status: 'ACTIVE', partner: { userId: 'them', displayName: options.has('long') ? 'Alicia del Valle Ejemplo Ficticio' : 'Alicia Ejemplo' },
     myDecision: 'PENDING', partnerDecision: 'PENDING', timeoutAt: new Date(Date.now()+600000), serverTime: new Date(), sharedContactRange: range,
     guidance: { question: { id: 'q', instanceId: 'q1', text: '¿Qué te gusta hacer en tu tiempo libre?' }, questionOrdinal: 1, maxQuestions: 3,
       requiredParticipationScore: 100, directQuestionReplyMultiplier: 2, progressionAction: 'NEXT_QUESTION', canRequestNext: false, myNextRequested: false, completed: false } });

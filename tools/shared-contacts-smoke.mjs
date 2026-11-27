@@ -28,9 +28,16 @@ for (const [name, engine, options] of [
       assert.equal(await button('Descartar invitación').count(), 0);
       await press('Cuenta'); await press('Contactos');
       await press('Acepto participar'); await press('Elegir del dispositivo');
-      await button('País de los números locales: Argentina').waitFor();
-      assert.equal(await page.getByRole('checkbox').count(), 3);
-      await press('Seleccionar todos');
+      const region = page.getByRole('button', { name: /País de los números locales Argentina/ });
+      await region.click();
+      if (mobile) assert.deepEqual(await page.getByRole('dialog').boundingBox(), { x: 0, y: 0, width: 390, height: 844 });
+      await shot('country');
+      await page.getByRole('searchbox').fill('Brasil');
+      await page.keyboard.press('Escape');
+      await page.getByRole('dialog').waitFor({ state: 'detached' });
+      assert.equal(await region.evaluate(b => b === document.activeElement), true);
+      await region.click(); await page.goBack(); await page.getByRole('dialog').waitFor({ state: 'detached' });
+      assert.equal(await page.getByRole('checkbox').count(), 4);
       await page.getByRole('checkbox').nth(1).uncheck();
       await shot('selection'); await press('Importar contactos');
       await page.getByText('Sincronizaste 2 teléfonos.').waitFor();
@@ -45,7 +52,7 @@ for (const [name, engine, options] of [
       await page.goto(url + '?google'); await press('Cuenta'); await press('Contactos'); await press('Acepto participar');
       await press('Preparar Google Contacts'); await press('Elegir cuenta de Google');
       assert.equal(await page.getByRole('checkbox').first().isChecked(), true);
-      await press('Deseleccionar todos'); await press('Seleccionar todos'); await press('Importar contactos');
+      await page.getByRole('checkbox').first().click(); await page.getByRole('checkbox').first().click(); await press('Importar contactos');
       await page.getByText('Sincronizaste 3 teléfonos.').waitFor();
       await page.goto(url + '?recovery'); await press('Cuenta'); await press('Contactos');
       await page.getByRole('status', { name: 'Cargando contactos' }).waitFor();
@@ -55,23 +62,36 @@ for (const [name, engine, options] of [
         await press('Elegir del dispositivo'); await page.getByText(/Chrome → Permisos → Contactos/).waitFor();
         await press('Volver a Cuenta'); await press('Contactos');
       }
-      await press('Elegir del dispositivo'); await page.getByRole('checkbox').waitFor();
+      await press('Elegir del dispositivo'); await page.getByRole('checkbox').first().waitFor();
       await page.goto(url + '?unsupported'); await press('Cuenta'); await press('Contactos');
       await page.getByText(/no hay fuentes de contactos habilitadas/).waitFor(); assert.equal(await button('Acepto participar').count(), 0);
-      await page.goto(url + '?chat'); const indicator = page.getByRole('button', { name: /Entre 1 y 5/ });
-      await indicator.click(); await shot('chat'); await indicator.click();
+      await page.goto(url + (mobile ? '?chat&long' : '?chat')); const indicator = page.getByRole('button', { name: /Entre 1 y 5/ });
+      await shot('chat');
+      if (mobile) {
+        await page.setViewportSize({ width: 320, height: 700 }); await page.emulateMedia({ colorScheme: 'dark' });
+        await page.getByRole('heading', { name: /Alicia/ }).evaluate(h => { h.style.fontSize = '200%'; });
+        await shot('narrow-dark-chat');
+      }
       const composer = page.getByRole('textbox');
       await composer.fill('Borrador sintético');
       const element = await composer.elementHandle();
+      const timeline = page.locator('.chat-timeline');
+      const position = () => timeline.evaluate(el => [el.getBoundingClientRect().top, el.scrollTop]);
+      const before = await position();
+      await indicator.click(); await shot('explanation');
+      assert.deepEqual(await position(), before);
+      await page.keyboard.press('Escape'); assert.deepEqual(await position(), before);
+      await indicator.click();
       await page.evaluate(() => window.contactsFixture.setRange(null));
       await indicator.waitFor({ state: 'detached' });
+      assert.equal(await page.getByText(/Ambas personas eligieron/).count(), 0);
       assert.equal(await composer.inputValue(), 'Borrador sintético');
       assert.equal(await element.evaluate(node => node.isConnected), true);
       await page.evaluate(() => window.contactsFixture.setRange('ONE_TO_FIVE'));
       await indicator.waitFor();
       await composer.fill('');
       await press('Descartar indicador de contactos en común'); await page.reload();
-      await page.getByRole('heading', { name: 'Alicia Ejemplo' }).waitFor(); assert.equal(await indicator.count(), 0);
+      await page.getByRole('heading', { name: /Alicia/ }).waitFor(); assert.equal(await indicator.count(), 0);
       assert.deepEqual(errors, []); await page.close();
       console.log(name, variant, 'passed');
     }

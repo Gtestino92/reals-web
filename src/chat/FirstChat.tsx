@@ -77,7 +77,8 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
   return <section ref={root} className="first-chat" aria-label="Primer chat">
     <div className="chat-chrome">
     <header className="chat-heading chat-heading-actions">
-    <div className="chat-identity"><p className="chat-phase">PRIMER CHAT</p><h2 ref={heading} tabIndex={-1}>{chat?.partner.displayName ?? 'Cargando conversación…'}</h2></div>
+    <div className="chat-identity"><p className="chat-phase">PRIMER CHAT</p><h2 ref={heading} tabIndex={-1}>{chat?.partner.displayName ?? 'Cargando conversación…'}</h2>
+    {chat?.sharedContactRange && !state.blocked && state.audioAccess !== 'RESTRICTED' && !p.decisionOnly && remaining > 0 && <SharedContactIndicator key={JSON.stringify([me, chatId])} owner={me} chat={chatId} range={chat.sharedContactRange}/>}</div>
     {!p.decisionOnly && <button className={`chat-approve ${p.decide && !state.blocked && !audioDirty ? "chat-stable-control" : ""}`} aria-busy={!!state.decisionPending} disabled={decisionDisabled} onClick={() => { if(!decisionDisabled)void session.action('approve'); }}><span aria-live="polite">{state.decisionPending ? state.decisionPending==='approve'?'Aprobando…':'Rechazando…' : 'Aprobar chat'}</span></button>}
     <ChatMenu decisionOnly={p.decisionOnly} actions={[
       ...(!decisionPanel ? [{ label: 'Rechazar chat', disabled: decisionDisabled, run: () => { if(!decisionDisabled)void session.action('reject'); } }] : []),
@@ -88,7 +89,6 @@ export function FirstChat({ controller, matchId, chatId, onHome }: { controller:
       { label: 'Reportar por seguridad', disabled: disabled || !p.safety, run: () => setDialog('safety') },
       { label: 'Bloquear', disabled: disabled || !p.safety, run: () => setDialog('block') },
     ]}/></header>
-    {chat?.sharedContactRange && !state.blocked && state.audioAccess !== 'RESTRICTED' && !p.decisionOnly && remaining > 0 && <SharedContactIndicator owner={me} chat={chatId} range={chat.sharedContactRange}/>}
     {terminalNotice && <p role="status">{terminalNotice} <button onClick={home}>Volver a Inicio</button></p>}{state.busy && dialog === null && state.reactionFeedback === null && !state.messagePending && !state.guidancePending && !state.decisionPending && <p className="chat-status" role="status">Actualizando…</p>}{state.error && !state.messageError && !dialog && <p className={state.reactionFeedback === 'error' ? 'chat-reaction-error' : undefined} role="alert">{state.error} <button disabled={state.busy} onClick={() => void session.refresh()}>Reintentar conexión</button></p>}
     {chat && remaining <= 60 && <p role="status">{remaining ? `El plazo del chat termina en ${remaining} s.` : 'El plazo local terminó. Consultando el estado del servidor…'}</p>}
     {decisionPanel && <aside className="chat-panel chat-decision-card" aria-labelledby="chat-decision-title">

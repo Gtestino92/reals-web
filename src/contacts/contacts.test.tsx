@@ -39,8 +39,8 @@ it('requires separate consent and selection, advances the revision and submits o
   await click('Acepto participar');
   expect(request.mock.calls[1]?.slice(2)).toEqual(['PUT', { version: 3 }, undefined, initial.mutationRevision]);
   expect(pick).not.toHaveBeenCalled();
-  await click('Elegir del dispositivo'); await click('Seleccionar todos');
-  fireEvent.click(screen.getAllByRole('checkbox')[1]!);
+  await click('Elegir del dispositivo');
+  fireEvent.click((await screen.findAllByRole('checkbox'))[2]!);
   await click('Importar contactos');
   expect(await screen.findByText('Sincronizaste 1 teléfono.')).toBeVisible();
   expect(request.mock.calls[2]?.slice(2)).toEqual(['PUT', { numbers: [rows[0]!.number] }, undefined, accepted.mutationRevision]);
@@ -136,7 +136,7 @@ it('preselects Google numbers and prevents an empty update', async () => {
   render(<Contacts controller={controller} onBack={vi.fn()} sources={{ google: async () => async () => rows }}/>);
   await click('Preparar Google Contacts'); await click('Elegir cuenta de Google');
   expect((await screen.findAllByRole('checkbox'))[0]).toBeChecked();
-  await click('Deseleccionar todos');
+  fireEvent.click(screen.getByRole('checkbox', { name: /Deseleccionar todos/ }));
   expect(screen.getByRole('button', { name: 'Actualizar contactos' })).toBeDisabled();
   expect(request).toHaveBeenCalledTimes(1);
 });

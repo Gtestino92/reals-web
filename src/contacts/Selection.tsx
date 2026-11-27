@@ -1,10 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getCountries, parsePhoneNumberFromString } from 'libphonenumber-js/max';
 import type { CountryCode } from 'libphonenumber-js';
 import type { ContactRow } from './providers';
 
 const countries = getCountries();
 const names = new Intl.DisplayNames(['es'], { type: 'region' });
+const countryList = countries.map(code => ({ code, name: names.of(code) ?? code }))
+  .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+const normalize = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
 interface Group { number: string; name: string; indices: number[] }
 
 function review(rows: ContactRow[], country: CountryCode | undefined) {
@@ -28,7 +31,39 @@ export function Selection({ rows, countryCode, updating, disabled, pending = fal
   confirm: (numbers: string[]) => void; cancel: () => void;
 }) {
   const [region, setRegion] = useState(() => countries.find(code => code === countryCode) ?? '');
-  const [adjusting, setAdjusting] = useState(!region);
+  const [adjusting, setAdjusting] = useState(false);
+  const [query, setQuery] = useState('');
+  const closing = useRef(false);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!adjusting) return;
+    const node = dialog.current;
+    node?.showModal();
+    const viewport = window.visualViewport;
+    const resize = () => node?.style.setProperty('--country-viewport', viewport?.height + 'px');
+    if (viewport) resize();
+    viewport?.addEventListener('resize', resize);
+    const back = (event: PopStateEvent) => {
+      // Home owns navigation to other screens. A same-screen Back only closes this dialog.
+      if (event.state?.trail?.at(-1) === 'contacts') event.stopImmediatePropagation();
+      node?.close();
+      setAdjusting(false);
+    };
+    window.addEventListener('popstate', back, true);
+    return () => {
+      viewport?.removeEventListener('resize', resize);
+      window.removeEventListener('popstate', back, true);
+      node?.close();
+      trigger.current?.focus({ preventScroll: true });
+    };
+  }, [adjusting]);
+  function closeSelector() {
+    if (closing.current) return;
+    closing.current = true;
+    if (history.state?.contactRegion) history.back();
+    else setAdjusting(false);
+  }
   const [excluded, setExcluded] = useState({ rows: new Set<number>(), numbers: new Set<string>() });
   const country = countries.find(code => code === region);
   const { groups, invalid } = useMemo(() => review(rows, country), [rows, country]);
@@ -42,17 +77,33 @@ export function Selection({ rows, countryCode, updating, disabled, pending = fal
     }
     setExcluded(next);
   }
+  const search = normalize(query);
+  const matches = countryList.filter(item => normalize(item.name).includes(search) || item.code.toLowerCase() === search);
   return <fieldset disabled={pending} className="home-card"><h3>Revisá tus contactos</h3>
     <p>Cada teléfono cuenta una vez, aunque esté guardado con varios nombres.</p>
     {rows.some(row => !row.number.startsWith('+')) && <div>
-      <button className="contact-region" aria-expanded={adjusting} onClick={() => setAdjusting(!adjusting)}>{country ? 'País de los números locales: ' + names.of(country) : 'Elegir país para números locales'}</button>
-      {adjusting && <label>País de los números sin prefijo internacional
-        <select value={region} onChange={e => setRegion(e.target.value)}><option value="">Elegí un país</option>{countries.map(code =>
-          <option key={code} value={code}>{names.of(code)} ({code})</option>)}</select>
-        Si tenés números locales de varios países, desmarcá los que no correspondan al país elegido.</label>}
+      <button ref={trigger} className="contact-region" aria-haspopup="dialog" onClick={() => {
+        closing.current = false;
+        history.pushState({ ...history.state, contactRegion: true }, '');
+        setQuery('');
+        setAdjusting(true);
+      }}><span><small>País de los números locales</small><strong>{country ? names.of(country) : 'Elegí un país'}</strong></span><span aria-hidden="true">›</span></button>
+      <p className="contact-hint">Solo se aplica a números sin prefijo internacional.</p>
+      {adjusting && <dialog ref={dialog} className="country-dialog" aria-label="Elegí un país" onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSelector(); } }} onCancel={e => { e.preventDefault(); closeSelector(); }}>
+        <header><h3>Elegí un país</h3><button aria-label="Cerrar" onClick={closeSelector}>×</button></header>
+        <input autoFocus type="search" aria-label="Buscar país" placeholder="Buscar país" value={query} onChange={e => setQuery(e.target.value)}/>
+        <div className="country-list">{matches.map(item =>
+          <button key={item.code} aria-pressed={item.code === country} onClick={() => { setRegion(item.code); closeSelector(); }}>
+            {item.name}{item.code === country && <span aria-hidden="true">✓</span>}</button>)}
+          {!matches.length && <p role="status">Sin resultados</p>}
+        </div>
+      </dialog>}
     </div>}
-    <div className="contact-bulk"><button onClick={() => toggle(groups, true)}>Seleccionar todos</button>
-      <button onClick={() => setExcluded({ rows: new Set(rows.map((_, i) => i)), numbers: new Set([...excluded.numbers, ...groups.map(g => g.number)]) })}>Deseleccionar todos</button></div>
+    <label className="contact-bulk"><input type="checkbox" disabled={!groups.length} checked={!!groups.length && numbers.size === groups.length}
+      ref={input => { if (input) input.indeterminate = numbers.size > 0 && numbers.size < groups.length; }}
+      onChange={e => { if (e.target.checked) toggle(groups, true);
+        else setExcluded({ rows: new Set(rows.map((_, i) => i)), numbers: new Set([...excluded.numbers, ...groups.map(g => g.number)]) }); }}/>
+      {groups.length && numbers.size === groups.length ? 'Deseleccionar todos' : 'Seleccionar todos'} <small>{numbers.size}/{groups.length}</small></label>
     <div className="contact-rows">{groups.map(group => <label key={group.number}><input type="checkbox" checked={numbers.has(group.number)}
       onChange={e => toggle([group], e.target.checked)}/><span>{group.name || 'Sin nombre'} · {group.number}</span></label>)}</div>
     {!!invalid.length && <details><summary>Teléfonos sin incluir ({invalid.length})</summary><p>Revisá el país o el formato en tu agenda.</p>

@@ -12,7 +12,18 @@ it.each([undefined, null, {}, 2, 'UNKNOWN'])('ignores an unusable optional range
 it.each(Object.entries(rangeLabels))('parses and presents %s', (range, label) => {
   const chat = parseChat({ ...chatFixture(), sharedContactRange: range }, 'm', 'c', 'them');
   const view = render(<SharedContactIndicator owner="a" chat="c" range={chat.sharedContactRange!}/>);
-  fireEvent.click(screen.getByRole('button', { name: new RegExp(label) }));
+  const trigger = screen.getByRole('button', { name: new RegExp(label) });
+  const compactLabels: Record<string, string> = { ONE_TO_FIVE: '1–5 en común', SIX_TO_TEN: '6–10 en común', MORE_THAN_TEN: 'Más de 10 en común' };
+  expect(trigger).toHaveTextContent(compactLabels[range]!);
+  fireEvent.click(trigger);
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(trigger).toHaveFocus();
+  expect(screen.queryByText(/Ambas personas/)).toBeNull();
+  fireEvent.click(trigger);
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByText(/Ambas personas/)).toBeNull();
+  expect(localStorage.length).toBe(0);
+  fireEvent.click(trigger);
   expect(screen.getByText(/Ambas personas/)).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: /Descartar/ }));
   expect(JSON.stringify(localStorage)).not.toContain(range);
