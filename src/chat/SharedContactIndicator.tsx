@@ -43,7 +43,13 @@ export function SharedContactIndicator({ owner, chat, range }: { owner: string; 
   return <aside ref={root} className="contact-indicator" aria-label="Contactos en común">
     <button ref={trigger} aria-label={rangeLabels[range]} aria-expanded={open} aria-controls={open ? id : undefined} aria-describedby={open ? id : undefined} onClick={() => setOpen(!open)}>
       <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm7-1a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM1 20v-2c0-4 4-6 8-6s8 2 8 6v2zm17-8c3 0 5 2 5 5v2h-4v-1c0-2-.7-4-2-6z"/></svg>
-      {compact[range]} <span aria-hidden="true">ⓘ</span></button>
+      {compact[range]}
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14">
+        <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.25"/>
+        <circle cx="8" cy="5" r=".85" fill="currentColor"/>
+        <path d="M8 7.5v3.25" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+      </svg>
+    </button>
     <button className="contact-indicator-dismiss" aria-label="Descartar indicador de contactos en común" onClick={() => {
       root.current?.closest('header')?.querySelector('h2')?.focus({ preventScroll: true });
       setOpen(false); setDismissed(true);
