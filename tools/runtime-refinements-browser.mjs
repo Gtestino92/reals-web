@@ -8,6 +8,7 @@ import { measureStartupHome } from './startup-home-browser-cases.mjs';
 // Local synthetic backend: real HTTP, controlled latency, no real account data.
 let inQueue = false, delay = 0;
 let displayName = 'Fixture', version = 1;
+const cancellation = process.argv.includes('--cancellation');
 const adminRace = process.argv.includes('--admin-race');
 let grantIssued = false, homeStatusDelay = 0;
 const fixtureGrant = 'A'.repeat(43);
@@ -16,6 +17,14 @@ const server = createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Reals-Admin-Grant');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  if (cancellation) {
+    res.setHeader('Access-Control-Max-Age', '3600');
+    res.setHeader('Timing-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') {
+      requests.push({ path: req.url, method: req.method, receivedAt: Date.now() });
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
   requests.push({ path: req.url, method: req.method, receivedAt: Date.now() });
   await new Promise(r => setTimeout(r, delay + (req.url === '/me/home/status' ? homeStatusDelay : 0)));
@@ -44,7 +53,10 @@ const server = createServer(async (req, res) => {
   if (req.url === '/me/profile/affinity-answers') value = { answers: [] };
   if (req.url === '/matchmaking/queue') {
     if (req.method === 'POST') inQueue = true;
-    if (req.method === 'DELETE') inQueue = false;
+    if (req.method === 'DELETE') {
+      if (cancellation && inQueue) version++;
+      inQueue = false;
+    }
     value = { userId: 'me', inQueue };
   }
   if (req.url === '/me/home') value = { profileStatus: 'ACTIVE', matchmaking: { inQueue, canSearch: !inQueue, blockedReason: null }, activeInteractionsSummary: { activeInitialCount: 0, activeConnectionCount: 0, actionableConnectionCount: 0, hasPendingSchedulingConnection: false }, pendingActions: [], nextSteps: [], passiveNotices: [] };
@@ -52,7 +64,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const origin = `http://127.0.0.1:${server.address().port}`;
-const generated = process.argv.includes('--startup-home') || adminRace ? [] : ['tools/latency-before-location.ts', 'tools/latency-before-home.ts'];
+const generated = process.argv.includes('--startup-home') || adminRace || cancellation ? [] : ['tools/latency-before-location.ts', 'tools/latency-before-home.ts'];
 if (generated.length) {
   await writeFile(generated[0], execFileSync('git', ['show', 'a6864fe:src/home/location.ts'], { encoding: 'utf8' }), 'utf8');
   await writeFile(generated[1], execFileSync('git', ['show', 'a6864fe:src/home/useHome.ts'], { encoding: 'utf8' }).replaceAll('../auth/', '../src/auth/').replaceAll("'./contracts'", "'../src/home/contracts'").replaceAll("'./location'", "'./latency-before-location'"), 'utf8');
@@ -79,7 +91,38 @@ try {
   const wait = async (p, expression) => { for (let i = 0; i < 150; i++) { if (await p.evaluate(expression)) return; await new Promise(r => setTimeout(r, 100)); } throw Error('Timeout ' + expression + ' ' + await p.evaluate('document.body.innerText')); };
   const click = async (p, text) => p.evaluate(`Array.from(document.querySelectorAll('button')).find(b=>(b.getAttribute('aria-label')===${JSON.stringify(text)}||b.textContent===${JSON.stringify(text)})&&!b.closest('[hidden]'))?.click()`);
   const results = [];
-  if (adminRace) {
+  if (cancellation) {
+    delay = 260;
+    for (const cacheDisabled of [false, true]) {
+      for (let trial = 0; trial < 3; trial++) {
+        inQueue = true;
+        const p = await page('tab-ownership-fixture.html?kind=home&ownership=auto', async call => {
+          await call('Network.enable');
+          await call('Network.setCacheDisabled', { cacheDisabled });
+        });
+        await wait(p, "!!document.querySelector('.search-screen button:not(:disabled)')");
+        const from = requests.length;
+        const timing = await p.evaluate(`new Promise(resolve => {
+          performance.clearResourceTimings();
+          const start = performance.now();
+          const observer = new MutationObserver(() => {
+            if (!document.querySelector('.home-search button:not(:disabled)')) return;
+            observer.disconnect();
+            const end = performance.now();
+            const response = path => performance.getEntriesByType('resource').find(e => e.name.endsWith(path)).responseEnd;
+            resolve({ deleteMs: Math.round(response('/matchmaking/queue') - start),
+              afterDeleteMs: Math.round(end - response('/matchmaking/queue')), visibleMs: Math.round(end - start),
+              homeResponseMs: Math.round(response('/me/home') - start) });
+          });
+          observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+          document.querySelector('.search-screen button').click();
+        })`);
+        await new Promise(resolve => setTimeout(resolve, 5100));
+        results.push({ cacheDisabled, ...timing, calls: requests.slice(from).map(r => r.method + ' ' + r.path) });
+        await p.call('Page.close');
+      }
+    }
+  } else if (adminRace) {
     delay = 75;
     const p = await page('tab-ownership-fixture.html?startup-home=1');
     const privateRequests = start => requests.slice(start).filter(r => r.path.startsWith('/admin/'));

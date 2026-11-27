@@ -7,22 +7,26 @@ import { emptyHome } from './fixtures';
 
 const available = Date.parse('2026-11-16T12:00:10Z');
 const iso = (time: number) => new Date(time).toISOString();
-function fixture(initialMarker: string | null = iso(available), withConnection = true) {
+function fixture(initialMarker: string | null = iso(available), withConnection = true, queued = false) {
   const controller = controllerFixture();
   let serverTime = available - 10000, version = 1, dirty = false;
   let marker = initialMarker, fail = '', hold = '';
   let displayName = 'Synthetic', profileStatus: 'ACTIVE' | 'DRAFT' = 'ACTIVE';
   const releases: (() => void)[] = [];
-  const request = vi.spyOn(controller, 'request').mockImplementation(async path => {
+  const request = vi.spyOn(controller, 'request').mockImplementation(async (path, _signal, method) => {
     // Capture at request time; delayed replies deliberately ignore abort.
     let value: unknown;
     if (path === '/me/home/status') value = { version, dirty, nextRefreshAt: marker, serverTime: iso(serverTime) };
     else if (path === '/me/profile') value = { id: 'p', userId: 'me', status: profileStatus, displayName };
-    else if (path === '/me/home') {
+    else if (path === '/matchmaking/queue') {
+      if (method === 'DELETE') queued = false;
+      value = { userId: 'me', inQueue: queued };
+    } else if (path === '/me/home') {
       const home = emptyHome();
       // A real, unrelated connection keeps Activity reachable before the review
       // appears. Initial-action counts must still equal advertised actions.
       home.profileStatus = profileStatus;
+      home.matchmaking.inQueue = queued;
       if (withConnection) {
         home.nextSteps = [{ type: 'SCHEDULING', connectionId: 'existing', matchId: 'existing', requiresAction: false }];
         home.activeInteractionsSummary.activeConnectionCount = 1;
@@ -197,4 +201,47 @@ it('discards an obsolete return read after leaving again and fails closed on a f
   f.fail(); act(() => { result.current.refresh(); }); await settle();
   expect(result.current.model?.name).toBe('Vigente');
   expect(result.current.blocked).toBe(false);
+});
+
+it.each(['version', 'boundary'])('retains the cancellation baseline across a concurrent %s change', async change => {
+  const f = fixture(iso(available), false, true);
+  const { result } = renderHook(() => useHome(f.controller)); await settle();
+  f.hold('/me/home');
+  act(() => result.current.cancel()); await settle();
+  expect(result.current.busy).toBe(true);
+  if (change === 'version') f.invalidate();
+  else { f.time(available); f.marker(null); }
+  f.hold(); f.releases.shift()!(); await settle();
+  expect(result.current.blocked).toBe(false);
+  await tick(); expect(f.count('/me/home')).toBe(3);
+  await tick(); expect(f.count('/me/home')).toBe(3);
+});
+
+it.each(['/me/home/status', '/me/profile', '/me/home'])('blocks on failed cancellation read %s until explicit recovery', async path => {
+  const f = fixture(null, false, true);
+  const { result } = renderHook(() => useHome(f.controller)); await settle();
+  f.fail(path); act(() => result.current.cancel()); await settle();
+  expect(result.current.blocked).toBe(true);
+  f.fail(); await tick(); expect(result.current.blocked).toBe(true);
+  act(() => result.current.refresh()); await settle();
+  expect(result.current.blocked).toBe(false);
+  expect(f.request.mock.calls.filter(call => call[2] === 'DELETE')).toHaveLength(1);
+});
+it.each(['hidden', 'replacement', 'profile change'])('guards a delayed cancellation projection across %s', async transition => {
+  const f = fixture(null, false, true), replacement = fixture(null, false);
+  const { result, rerender } = renderHook(({ controller }) => useHome(controller), { initialProps: { controller: f.controller } });
+  await settle();
+  f.hold('/me/home/status');
+  act(() => result.current.cancel()); await settle();
+  if (transition === 'replacement') rerender({ controller: replacement.controller });
+  if (transition === 'hidden') visibility('hidden');
+  if (transition === 'profile change') f.moveToDraft();
+  f.hold(); f.releases.shift()!(); await settle();
+  if (transition === 'replacement') {
+    expect(f.count('/me/home')).toBe(1);
+    expect(replacement.count('/me/home')).toBe(1);
+  } else if (transition === 'hidden') {
+    expect(result.current.canAutoOpen()).toBe(false);
+    visibility('visible'); await settle(); expect(result.current.canAutoOpen()).toBe(true);
+  } else expect(result.current.model?.home.profileStatus).toBe('DRAFT');
 });

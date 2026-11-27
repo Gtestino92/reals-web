@@ -10,6 +10,7 @@ import type { LocationFailureKind } from './location';
 interface Model { home: HomeData; name: string }
 interface ProfileSample { status: HomeData['profileStatus']; name: string }
 export type SearchPhase = 'idle' | 'locating' | 'admitting' | 'queued' | 'canceling' | 'reconciling' | 'failed';
+type QueueCheck = boolean | 'confirmed-leave';
 type ReturnRead = false | 'ordinary' | 'mandatory';
 interface State { model: Model | null; busy: boolean; blocked: boolean; error: string; returning: ReturnRead; adminRevision: number; searchPhase: SearchPhase; locationFailure: LocationFailureKind | null }
 interface Owner { lifetime: AbortController; read: AbortController | null; location: AbortController | null; serial: number; mutation: boolean; cancelRequested: boolean; version: number | null; uncertain: boolean; reconcile: boolean; foregroundVerified: boolean; refreshBoundaries: Set<number>; consumedBoundaries: Set<number> }
@@ -44,12 +45,12 @@ export function useHome(controller: SessionController, active = true, observer?:
     if (profile.id !== profileId || !object(raw) || typeof raw.displayName !== 'string' || !raw.displayName.trim()) throw new ApiError('invalid');
     return { status: profile.status, name: raw.displayName };
   };
-  const load = async (r: Owner, serial: number, signal: AbortSignal, queue = false, sample?: StatusSample, profileRead?: Promise<ProfileSample>) => {
+  const load = async (r: Owner, serial: number, signal: AbortSignal, queue: QueueCheck = false, sample?: StatusSample, profileRead?: Promise<ProfileSample>) => {
     const finish = notificationObserver.current?.beginHomeRead(signal);
     try { return await loadSnapshot(r, serial, signal, queue, sample, profileRead); }
     finally { finish?.(); }
   };
-  const loadSnapshot = async (r: Owner, serial: number, signal: AbortSignal, queue: boolean, sample?: StatusSample, profileRead?: Promise<ProfileSample>) => {
+  const loadSnapshot = async (r: Owner, serial: number, signal: AbortSignal, queue: QueueCheck, sample?: StatusSample, profileRead?: Promise<ProfileSample>) => {
     const account = controller.snapshot.account;
     if (!account) throw new ApiError('invalid');
     // Capture baseline before projection: a concurrent invalidation stays observable.
@@ -57,12 +58,16 @@ export function useHome(controller: SessionController, active = true, observer?:
     signal.throwIfAborted();
     const [profile, rawQueue, rawHome] = await Promise.all([
       profileRead ?? readProfile(signal),
-      queue ? controller.request('/matchmaking/queue', signal) : Promise.resolve(null),
+      queue === true ? controller.request('/matchmaking/queue', signal) : Promise.resolve(null),
       controller.request('/me/home', signal),
     ]);
     signal.throwIfAborted();
-    const queued = queue ? parseQueue(rawQueue, account.id) : null;
     const home = parseHome(rawHome);
+    // Re-entry can win after DELETE. Verify membership before exposing that surface.
+    const queued = queue === true ? parseQueue(rawQueue, account.id)
+      : queue === 'confirmed-leave' && home.matchmaking.inQueue
+        ? parseQueue(await controller.request('/matchmaking/queue', signal), account.id) : null;
+    signal.throwIfAborted();
     if (queued !== null && queued !== home.matchmaking.inQueue) throw new ApiError('invalid');
     if (profile.status !== home.profileStatus) throw new ApiError('invalid');
     if (valid(r, serial)) {
@@ -215,23 +220,33 @@ export function useHome(controller: SessionController, active = true, observer?:
       } finally { if (r.location === locationOwner) r.location = null; }
     }
     if (!valid(r, serial)) return;
+    const expectedAccount = controller.snapshot.account?.id;
     let cancellationHandled = false;
     const leaveQueue = async () => {
       cancellationHandled = true;
       setState(s => ({ ...s, searchPhase: 'canceling' }));
       try {
         const result = await controller.request('/matchmaking/queue', signal, 'DELETE');
-        parseQueue(result, controller.snapshot.account?.id ?? '');
+        if (!expectedAccount || parseQueue(result, expectedAccount)) throw new ApiError('invalid');
       } catch {
         if (!valid(r, serial)) return;
         r.uncertain = true; failure = 'No pudimos confirmar la cancelación. La búsqueda podría seguir activa. Actualizá el estado.';
       }
     };
-    if (r.cancelRequested && (attempted || cancel)) await leaveQueue();
+    let baseline: PromiseSettledResult<StatusSample> | undefined;
+    if (cancel) {
+      // Settle both lanes even if status fails. No read failure may release the write owner.
+      [, baseline] = await Promise.allSettled([leaveQueue(), readStatus(r, serial, signal)]);
+    } else if (r.cancelRequested && attempted) await leaveQueue();
     if (!valid(r, serial)) return;
     const reconcile = async () => {
       setState(s => ({ ...s, searchPhase: r.cancelRequested ? 'canceling' : 'reconciling' }));
-      try { await load(r, serial, signal, true); }
+      try {
+        if (cancel && !r.uncertain && baseline) {
+          if (baseline.status === 'rejected') throw baseline.reason;
+          await load(r, serial, signal, 'confirmed-leave', baseline.value);
+        } else await load(r, serial, signal, true);
+      }
       catch { if (valid(r, serial)) { r.uncertain = true; failure = 'No pudimos confirmar el estado de la búsqueda. Consultá el estado antes de volver a intentar.'; } }
     };
     try {

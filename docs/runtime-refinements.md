@@ -104,3 +104,20 @@ A device picker invocation owns the document's native picker slot until its prom
 | First Chat decision or terminal read | The existing Home callback still receives the closed flag. A reconciled decision returns silently. Safety, abandonment and expiry retain their existing feedback. |
 | Manual authentication and identity replacement | A monotonically increasing attempt number scopes completion to its startup boundary. Firebase, bootstrap, legal and destination gates retain their request ownership. After 30 seconds the exit is available during authenticated bootstrap or destination loading. An unresolved Firebase credential request has no cancellation handle. |
 | Queue discovery, initial chat read, visibility and retry | Home retains Searching after authoritative queue exit, removes cancellation and suspends its ordinary polling. First Chat owns match, metadata, history and exit reads. Reveal requires a current foreground snapshot. A 30-second initial-read deadline retires the read generation and allows retry without ending the conversation. |
+
+## Confirmed queue cancellation
+
+At base `ee28ee5`, cancellation awaited DELETE, then status, then profile, queue and Home together. A confirmed queued entry now starts DELETE and status together, then reads Home and profile together. Both first-stage operations settle before proceeding. Sampling profile with Home limits profile skew and uses the same two stages as starting it alongside DELETE. Profile identity, name and status still pass the shared installation checks.
+
+| Condition | Mutation owner and installation |
+|---|---|
+| Expected account and explicit false | Install compatible fresh Home and profile. If Home reports re-entry, independently read queue and require agreement. |
+| Uncertain DELETE, malformed acknowledgement, wrong user or true | Read a new status, profile, queue and Home. Keep uncertainty gated for explicit recovery. |
+| Cancellation requested during location, POST or admission reconciliation | The existing admission lane owns intent and any necessary ordered DELETE and full read. |
+| Failed mandatory read, hidden page or account replacement | Failure blocks actions. Visibility at installation gates automatic chat entry. Owner lifetime and serial reject obsolete reads. |
+
+The client records the actual pre-projection status version. The backend captures its own version before aggregation and conditionally reconciles its marker if that version still matches. A mutation before the sample can already be reflected in both reads. A change after sampling, including DELETE itself, can cause another full projection on the next poll. Changes during or after aggregation remain detectable by version, dirty state or due boundary. Only boundaries due at the sampled server time are consumed. Previously advertised future boundaries survive even if another client clears the shared marker. The notification installer receives the projection with the same sample and receipt time, preserving category-enable cutoffs and server-clock offset.
+
+The affinity owner retains previously loaded answers and catalog while the summary is hidden. Showing it again starts its normal parallel revalidation. These reads ran after the operational Home transition. The button and Home projection have no dependency on them.
+
+Local Chrome issued OPTIONS for each critical request with both browser cache settings despite a 3600-second max age. Authorization and deployed App Check headers require cross-origin permission, and DELETE independently requires preflight. Chromium keys permissions by origin, URL and network partition and considers method and headers. Its cache-bypass flags can also bypass preflight reuse, consistent with the private no-store requests in this fixture. The trace cannot isolate every hosted browser or network factor. [Chromium preflight controller](https://chromium.googlesource.com/chromium/src/+/main/services/network/cors/preflight_controller.cc)

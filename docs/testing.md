@@ -204,3 +204,16 @@ npm run test:focused -- src/App.test.tsx src/App.ownership.test.tsx src/onboardi
 ```
 
 `npm run typecheck`, `npm run check:architecture` (115 production modules, zero runtime cycles), the production `npm run build` and `git diff --check` passed. Build used the synthetic public settings in the CI “Build dev and prod” step with `VITE_REALS_ENVIRONMENT=prod`, `VITE_LOCAL_FIREBASE_EMAIL_AUTO_VERIFICATION=false` and `VITE_FIREBASE_APP_CHECK_DEBUG=false`. Vite reported the existing 500 kB chunk advisory.
+
+## Synthetic confirmed cancellation
+
+Start `npm run dev -- --host 127.0.0.1 --port 5174 --strictPort` with local ownership opt-in disabled, then run `node tools/runtime-refinements-browser.mjs --cancellation`. The runner exercises the full Home surface against a loopback cross-origin HTTP server. Each OPTIONS and application response has 260 ms simulated latency. Times below are milliseconds, median (min-max), three fresh pages per condition. Normal cache permits reuse after bootstrap. CDP cache-disabled approximates cold request conditions. Neither simulates cold TLS, Firebase credentials or radio startup.
+
+| Build and cache | Click to DELETE response | DELETE response to operational Home | Click to operational Home |
+|---|---:|---:|---:|
+| Base, normal | 549 (536-552) | 1121 (1111-1152) | 1669 (1663-1689) |
+| Optimized, normal | 545 (540-578) | 583 (576-596) | 1136 (1121-1161) |
+| Base, disabled | 543 (539-553) | 1136 (1130-1136) | 1674 (1672-1689) |
+| Optimized, disabled | 560 (547-563) | 587 (567-594) | 1141 (1130-1147) |
+
+Resource Timing measures DELETE and Home response completion. The first DOM commit exposing an enabled search button measures installed, operational Home. The internal assignment and display paint are not separately timestamped. Home response completed 1630-1650 ms after click before and 1088-1125 ms after. Critical application calls fell from five in three stages to four in two, plus five and four genuine Chrome preflights respectively. Two background affinity GETs followed every presentation. The next poll issued one status GET in all six baseline trials and five optimized trials. One optimized trial also fetched profile and Home after sampling the older version. All these follow-up GETs also preflighted. Hosted and physical-device timings remain unmeasured.

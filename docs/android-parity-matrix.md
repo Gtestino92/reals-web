@@ -2289,3 +2289,10 @@ Compared with Android `83e4ef7` and backend commons at `74fc488`. Status describ
 | `MatchmakingHomeScreen.kt`, `RealsRootViewModel.openFirstChat`, `FirstChatCoordinator.load` | Android installs a loading First Chat with a history owner. Web deliberately keeps Searching visible while its own validated chat snapshot loads. Cancellation remains tied to queue state. Browser Back keeps its existing navigation guard. |
 
 Physical keyboards on mobile, device screen readers and visual comparison on a physical Android device remain unverified. See [measurements and fixture instructions](testing.md#chat-transition-browser-evidence).
+
+### Confirmed queue leave latency
+
+| Reference and scope | Web behavior and evidence | Status |
+|---|---|---|
+| Android HomeCoordinator.cancelMatchmakingSearch / leaveMatchmakingQueue, MatchmakingRepository.leaveQueue | Confirmed leave waits for a fresh Home. Web useHome retains Searching, Back handling, and the accessible pending control. Home tests cover re-entry, admission cancellation and the matched First Chat preparation transition. | COMPLETE for exercised confirmed-leave behavior |
+| Browser network and physical presentation | Chrome loopback exercised the existing mobile viewport and operational Home. The request schedule is browser-specific. Physical-device timing and visual comparison remain open. [Measurements](testing.md#synthetic-confirmed-cancellation) | PLATFORM-LIMITED |
