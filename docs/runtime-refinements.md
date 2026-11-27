@@ -89,4 +89,6 @@ HEAD remains `a6864fe3188e5ca2e3700507bff74cac3ece1cae`; no commit/push/PR/merge
 | Leave, pagehide, session generation or tab lease loss | Abort owned work and release rows. An obsolete popup callback cannot install data. Visibility changes while choosing a Google account initiate ordinary revalidation and do not by themselves cancel the popup. JavaScript garbage collection controls eventual memory reclamation. |
 | First Chat metadata | Validate the active participant/match and current read serial. Remove changed social context before history and exits settle. Resume hides context while revalidating. An interrupted write's pre-resume metadata cannot reinstate the range. Block, expiry, terminal state and session disposal suppress disclosure. |
 
+All owner contact requests use Fetch's `redirect: error` at the configured API destination. The local Vite proxy passes upstream redirects back to Fetch. A redirect rejection during a write uses the same status reconciliation as a network failure.
+
 Only the invitation dismissal and per-account/per-chat presentation preference use durable storage. Browser history carries ordinary navigation entries. No periodic contact sync, OAuth refresh token, selection cache or new chat polling loop is involved.

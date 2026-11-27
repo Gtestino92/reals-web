@@ -42,6 +42,7 @@ export class ApiClient {
     if (this.ownership) signal = AbortSignal.any([signal, this.ownership.signal]);
     const route = path.split('?', 1)[0];
     const history = method === 'GET' && /^\/chats\/[^/]+\/messages$/.test(route ?? '');
+    const sharedContacts = route === '/me/shared-contacts' || route?.startsWith('/me/shared-contacts/');
     const administrative = route === '/admin' || route === '/admin-auth' || path.startsWith('/admin/') || path.startsWith('/admin-auth/');
     const privateRead = method === 'GET' && (history ||
       /^\/connections\/[^/]+\/scheduling-snapshot$/.test(path) ||
@@ -73,7 +74,7 @@ export class ApiClient {
           ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }),
           // Private responses can carry account data and signed media URLs.
           ...(user || administrative || privateRead ? { cache: 'no-store' } : {}),
-          ...(administrative ? { redirect: 'error' } : {}),
+          ...(administrative || sharedContacts ? { redirect: 'error' } : {}),
         });
       }
       catch { signal.throwIfAborted(); throw new ApiError('network'); }

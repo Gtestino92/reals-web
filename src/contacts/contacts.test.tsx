@@ -56,6 +56,23 @@ it.each(['CONTACT_MUTATION_STALE', 'CONTACT_REVISION_REQUIRED', 'CONTACT_REPLACE
   expect(screen.queryByRole('checkbox')).toBeNull();
   expect(request.mock.calls.map(c => c[2] ?? 'GET')).toEqual(['GET', 'PUT', 'GET']);
 });
+it('reconciles a selection rejected by Fetch redirect policy without replay', async () => {
+  const controller = controllerFixture();
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(accepted))
+    .mockRejectedValueOnce(new TypeError('Redirect rejected')).mockResolvedValue(Response.json(accepted));
+  const api = new ApiClient(fetcher);
+  vi.spyOn(controller, 'request').mockImplementation((path, signal, method, body, access, revision) =>
+    api.request(path, signal, undefined, method, body, undefined, true, undefined, access, revision));
+  render(<Contacts controller={controller} onBack={vi.fn()} sources={{ picker: async () => async () => rows }}/>);
+  await click('Elegir del dispositivo'); await click('Confirmar reemplazo');
+  await screen.findByText(/No pudimos confirmar el resultado/);
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method, init?.redirect])).toEqual([
+    ['/api' + ownerPath, 'GET', 'error'],
+    ['/api' + ownerPath + '/selection', 'PUT', 'error'],
+    ['/api' + ownerPath, 'GET', 'error'],
+  ]);
+});
 it('discards stale consent and requires a fresh decision', async () => {
   const controller = controllerFixture();
   const request = vi.spyOn(controller, 'request').mockResolvedValueOnce(initial).mockRejectedValueOnce(new ApiError('backend', 409, 'CONTACT_MUTATION_STALE')).mockResolvedValue(initial);
